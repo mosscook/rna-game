@@ -17,6 +17,8 @@
                 helpers  leaves the strand as two helpers that travel up it once, mending damage
               A new segment can reuse any of these. A new shape needs code in rna-strand.js.
      does, tag, sci   the recipe card: what it does, how real it is, the science behind it
+   Strength: a segment folded with one wrong letter has a strength q (rna-strand.js decides it; 1 when exact) and every
+   ability below scales with it. Above 1 (a lucky mistake) it also scores +1.
    What it does in the game (sim.js reads these; leave out the ones that do not apply):
      swim       {speed, turn, turnBot}: added per working copy. speed multiplies swim speed (0.3 = +30%),
                 turn adds to the turn rate (humans / bots)
@@ -120,19 +122,32 @@ const get = fn => (fn && BY[fn]) || null;
 const names = LIST.map(s => s.fn);
 const bodyOf = fn => { const s = get(fn); return s ? s.body : null; };
 
-/* swim bonus from a strand's working functions */
+/* strength of a folded segment: 1 when spelled exactly; less, or more, with one wrong letter (rna-strand.js) */
+const strength = f => (f && f.q != null ? f.q : 1);
+/* swim bonus from a strand's working functions, each counted at its strength */
 function swimOf(fns){
   const out = {speed:0, turn:0, turnBot:0};
   for (const s of LIST){
     if (!s.swim) continue;
-    let n = 0; for (const f of fns) if (f.fn === s.fn) n++;
+    let n = 0; for (const f of fns) if (f.fn === s.fn) n += strength(f);
     out.speed += s.swim.speed * n; out.turn += s.swim.turn * n; out.turnBot += s.swim.turnBot * n;
   }
   return out;
 }
 /* seconds of warning before hazards, from a strand's working functions */
-function warnEarly(fns){ let e = 1.8; for (const f of fns){ const s = get(f.fn); if (s && s.warnEarly > e) e = s.warnEarly; } return e; }
+function warnEarly(fns){ let e = 1.8; for (const f of fns){ const s = get(f.fn); if (!s || !s.warnEarly) continue; const q = strength(f), w = q === 1 ? s.warnEarly : 1.8 + (s.warnEarly - 1.8) * q; if (w > e) e = w; } return e; }
 const any = (fns, key) => fns.some(f => { const s = get(f.fn); return !!(s && s[key]); });
 
-return {LIST, names, get, bodyOf, swimOf, warnEarly, any};
+/* a short description of a segment's strength, for messages and the strand panel */
+function strengthNote(f){
+  const q = strength(f), m = f && f.miss;
+  if (q === 1) return '';
+  const pct = Math.round(q * 100) + '%';
+  if (q > 1) return `a lucky mistake: ${pct} strength, +1`;
+  if (m && m.kind === 'wobble') return `a G·U wobble pair in its stem: ${pct} strength`;
+  if (m && m.kind === 'stem') return `a mismatched pair in its stem: ${pct} strength`;
+  return q >= 0.8 ? `a mild mistake: ${pct} strength` : `a harmful mistake: ${pct} strength`;
+}
+
+return {LIST, names, get, bodyOf, swimOf, warnEarly, any, strength, strengthNote};
 })();

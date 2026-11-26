@@ -292,12 +292,40 @@ function recipeMatch(s, k, fn){
   for (let j = 0; j < core.length; j++) if (s[k + 2 + j] !== core[j]) return false;
   return COMP[s[k + 1]] === s[k + L - 2] && COMP[s[k]] === s[k + L - 1];
 }
-/* read a run of letters from its newest end: recipes where they match, junk in between */
-function parseRecipes(s){
+/* ---------- mistakes: a recipe with one wrong letter still folds ----------
+   In the stem, a G·U "wobble" pair holds nearly as well as a real pair (90% strength); any other mismatch weakens the
+   stem (70%). In the core, each wrong letter at each position has its own fixed effect, as real mutations do: about half
+   are harmful (50%), a third mild (85%), and about one in six an improvement (125%). The effect depends only on the
+   segment, the position and the letter, so it is the same in every game: a class can discover the good ones. */
+const WOBBLE = {GU:true, UG:true};
+const MUT_BETTER = 1.25, MUT_MILD = 0.85, MUT_HARM = 0.5, STEM_WOBBLE = 0.9, STEM_MISS = 0.7;
+function mutationEffect(fn, pos, letter){
+  let h = 2166136261; for (const ch of `${fn}:${pos}:${letter}`){ h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  const r = ((h >>> 0) % 10000) / 10000;
+  return r < 0.17 ? MUT_BETTER : r < 0.5 ? MUT_MILD : MUT_HARM;
+}
+/* does the run at k spell fn with at most one wrong letter? null, or {q, miss}: q = strength (1 exact),
+   miss = {kind:'wobble'|'stem'|'core', at (index within the recipe), letter (what is there), want (what the recipe has)} */
+function recipeMatchLoose(s, k, fn){
+  const core = RECIPES[fn], L = core.length + 4;
+  if (k < 0 || k + L > s.length) return null;
+  let miss = null;
+  for (let j = 0; j < core.length; j++) if (s[k + 2 + j] !== core[j]){ if (miss) return null; miss = {kind:'core', at:2 + j, letter:s[k + 2 + j], want:core[j]}; }
+  for (let i = 0; i < 2; i++){
+    const a = s[k + i], b = s[k + L - 1 - i];
+    if (COMP[a] !== b){ if (miss) return null; miss = {kind:WOBBLE[a + b] ? 'wobble' : 'stem', at:L - 1 - i, letter:b, want:COMP[a]}; }
+  }
+  if (!miss) return {q:1, miss:null};
+  return {q:miss.kind === 'core' ? mutationEffect(fn, miss.at - 2, miss.letter) : miss.kind === 'wobble' ? STEM_WOBBLE : STEM_MISS, miss};
+}
+/* read a run of letters from its newest end: recipes where they match, junk in between.
+   Exact matches win; unless exact is asked for, a recipe one letter off folds too, with its strength (q) and the mistake (miss). */
+function parseRecipes(s, exact){
   const hits = []; let i = s.length;
   while (i > 0){
     let hit = null;
-    for (const [fn] of RECIPE_LIST){ const L = recipeLen(fn); if (i - L >= 0 && recipeMatch(s, i - L, fn)){ hit = {fn, start:i - L, end:i - 1}; break; } }
+    for (const [fn] of RECIPE_LIST){ const L = recipeLen(fn); if (i - L >= 0 && recipeMatch(s, i - L, fn)){ hit = {fn, start:i - L, end:i - 1, q:1, miss:null}; break; } }
+    if (!hit && !exact) for (const [fn] of RECIPE_LIST){ const L = recipeLen(fn), m = i - L >= 0 ? recipeMatchLoose(s, i - L, fn) : null; if (m){ hit = {fn, start:i - L, end:i - 1, q:m.q, miss:m.miss}; break; } }
     if (hit){ hits.unshift(hit); i = hit.start; } else i--;
   }
   const out = []; let pos = 0;
@@ -321,6 +349,17 @@ function recipeProgress(tail, fn){
     if (ok) return {k, t};
   }
   return {k:0, t:''};
+}
+/* like recipeProgress, but one wrong letter is allowed: {k, t, miss} where miss is the index of the wrong letter or -1.
+   The card uses it to show how far a tail is through a recipe even with a mistake in it. */
+function recipeProgressLoose(tail, fn){
+  const L = recipeLen(fn);
+  for (let k = Math.min(L, tail.length); k >= 1; k--){
+    const t = tail.slice(tail.length - k); let miss = -1, ok = true;
+    for (let i = 0; i < k && ok; i++){ const need = recipeNeed(t, fn, i); if (need && t[i] !== need){ if (miss >= 0) ok = false; else miss = i; } }
+    if (ok) return {k, t, miss};
+  }
+  return {k:0, t:'', miss:-1};
 }
 function recipeSeq(fn){ const a = pick(Math.random() < 0.7 ? ['G', 'C'] : ['A', 'U']), b = pick(Math.random() < 0.7 ? ['G', 'C'] : ['A', 'U']); return a + b + RECIPES[fn] + COMP[b] + COMP[a]; }
 /* a sparse hairpin: k letters spread evenly up one side, round the loop and back, at a fixed size */
@@ -894,7 +933,7 @@ function makeStrand(stage, opts){
       next.set(i + '-' + j, Object.assign({}, p, {i, j}));
     }
     pairs = next; N.splice(a, len); seq.splice(a, len); dmg.splice(a, len);
-    segs = segs.filter(g => g.end < a || g.start > b).map(g => g.start > b ? {fn:g.fn, start:g.start - len, end:g.end - len} : g);
+    segs = segs.filter(g => g.end < a || g.start > b).map(g => g.start > b ? Object.assign({}, g, {start:g.start - len, end:g.end - len}) : g);
     for (const h of helpers){ if (h.pos > b) h.pos -= len; else if (h.pos >= a) h.pos = Math.max(0, a - 0.01); }
     if (repEv){ if (repEv.start > b) repEv.start -= len; else if (repEv.end >= a) repEv = null; }
     setSeq(seq.slice());
@@ -1007,6 +1046,14 @@ function makeStrand(stage, opts){
       for (let k = st.start; k <= st.end; k++) dmg[k] = false;
       styleDirty = true; repFlash.push({i:Math.round((st.start + st.end) / 2), t:0});
       hint('mended', `A Repairer helper mended the ${st.fn || 'arm'}.`, {fn:st.fn || 'arm'});
+      return true;
+    }
+    /* a harmful mistake in a working segment: put the right letter back (improvements are left alone) */
+    const g = st && isFn(st) ? segs.find(x => x.start === st.start) : null;
+    if (g && g.q < 1 && g.miss){
+      const at = g.start + g.miss.at; seq[at] = g.miss.want; g.q = 1; g.miss = null;
+      setSeq(seq.slice()); styleDirty = true; repFlash.push({i:at, t:0});
+      hint('corrected', `A Repairer helper corrected a wrong letter in the ${st.fn}. It works at full strength again.`, {fn:st.fn});
       return true;
     }
     if (st && !isFn(st)){ if (!safeRemove(st.start, st.end)) return false; hint('cleared', 'A Repairer helper cleared away a junk segment.'); return true; }
@@ -1395,7 +1442,9 @@ function makeStrand(stage, opts){
   /* ---------- start ---------- */
   head = {x:opts.x || 0, y:opts.y || 0}; heading = opts.heading || 0;
   target = {x:head.x + Math.cos(heading) * 60, y:head.y + Math.sin(heading) * 60};
-  if (Array.isArray(opts.segments)) segs = opts.segments.map(g => ({fn:g.fn || null, start:g.start, end:g.end}));
+  /* a folded segment: {fn, start, end, q (strength, 1 = exact), miss (its one wrong letter, or null)} */
+  const segOf = g => ({fn:g.fn || null, start:g.start, end:g.end, q:g.q == null ? 1 : g.q, miss:g.miss || null});
+  if (Array.isArray(opts.segments)) segs = opts.segments.map(segOf);
   setSeq(clean(opts.seq).split(''));
   seedTrailFromNodes();
 
@@ -1405,19 +1454,20 @@ function makeStrand(stage, opts){
     follow:(dt, x, y, h, o) => step(dt, {pos:{x, y, h}, moving:o && o.moving, limp:o && o.limp}),
     render:() => { if (visible) renderStrand(); },
     /* replace the letters; pass folded segments [{fn, start, end}] to keep structures, otherwise everything is loose */
-    setSeq:(s, sg) => { segs = Array.isArray(sg) ? sg.map(g => ({fn:g.fn || null, start:g.start, end:g.end})) : []; setSeq(clean(s).split('')); },
+    setSeq:(s, sg) => { segs = Array.isArray(sg) ? sg.map(segOf) : []; setSeq(clean(s).split('')); },
     /* add letters and their folded segments (indexes from 0 within the added letters) */
-    appendFolded(s, sg){ const at = seq.length, add = clean(s); segs = segs.concat((sg || []).map(g => ({fn:g.fn || null, start:g.start + at, end:g.end + at}))); setSeq(seq.concat(add.split(''))); },
+    appendFolded(s, sg){ const at = seq.length, add = clean(s); segs = segs.concat((sg || []).map(g => segOf(Object.assign({}, g, {start:g.start + at, end:g.end + at})))); setSeq(seq.concat(add.split(''))); },
     /* fold the loose tail: recipes where they match, junk for the rest. Returns what folded */
-    foldTail(){
+    /* exact: only recipes spelled exactly fold (bots); otherwise one wrong letter is allowed */
+    foldTail(exact){
       const from = segs.length ? segs[segs.length - 1].end + 1 : 0;
       if (from >= seq.length) return [];
-      const made = parseRecipes(seq.slice(from).join('')).map(g => ({fn:g.fn, start:g.start + from, end:g.end + from}));
+      const made = parseRecipes(seq.slice(from).join(''), exact).map(g => segOf(Object.assign({}, g, {start:g.start + from, end:g.end + from})));
       segs = segs.concat(made); setSeq(seq.slice());
       emit('folded', {made:made.map(g => ({fn:g.fn, letters:seq.slice(g.start, g.end + 1).join('')}))});
       return made;
     },
-    get segments(){ return segs.map(g => ({fn:g.fn, start:g.start, end:g.end})); },
+    get segments(){ return segs.map(g => ({fn:g.fn, start:g.start, end:g.end, q:g.q, miss:g.miss})); },
     get tail(){ const from = segs.length ? segs[segs.length - 1].end + 1 : 0; return seq.slice(from).join(''); },
     /* take the last letter off if it is loose; returns it */
     dropLast(){ const from = segs.length ? segs[segs.length - 1].end + 1 : 0; if (seq.length <= from) return null; const b = seq[seq.length - 1]; removeRange(seq.length - 1, seq.length - 1); return b; },
@@ -1474,7 +1524,7 @@ function makeStrand(stage, opts){
     get length(){ return seq.length; },
     get head(){ return head; }, get heading(){ return heading; }, get moving(){ return moving; }, get limp(){ return limp; },
     get nodes(){ return N; }, get fold(){ return fold; }, get pairs(){ return pairs; },
-    get functions(){ return (fold.units || []).map(u => ({fn:u.fn, start:u.start, end:u.end, damaged:rangeDamaged(u), bonus:u.bonus || 0, jstate:u.jstate || null})); },
+    get functions(){ return (fold.units || []).map(u => { const g = segs.find(x => x.start === u.start); return {fn:u.fn, start:u.start, end:u.end, damaged:rangeDamaged(u), bonus:u.bonus || 0, jstate:u.jstate || null, q:g ? g.q : 1, miss:g ? g.miss : null}; }); },
     get helpers(){ return helpers; }, get repEv(){ return repEv; }, get cutter(){ return cut; },
     get damaged(){ return dmg; }
   };
@@ -1483,7 +1533,7 @@ function makeStrand(stage, opts){
 }
 
 return {S, DEFAULTS, COLOR_KEYS, BASES, COMP, HB, PURINE, COLOR, SLOTS, MAXLEN, UNIT_TEXT,
-  RECIPES, recipeLen, recipeMatch, parseRecipes, recipeNeed, recipeProgress, recipeSeq,
+  RECIPES, recipeLen, recipeMatch, recipeMatchLoose, mutationEffect, parseRecipes, recipeNeed, recipeProgress, recipeProgressLoose, recipeSeq,
   createStage, restyle, applyColors, partsFold, buildFn, buildPartsSeven, joinFragment, unitSeq, glyphHref,
   get geo(){ return {GEO, R, LB, D, W}; }};
 })();

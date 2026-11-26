@@ -173,6 +173,11 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .sl.next{background:color-mix(in srgb,var(--c) 22%,transparent);box-shadow:0 0 0 2px var(--ink);transform:scale(1.14);animation:nx 1.1s ease-in-out infinite}
 @keyframes nx{50%{box-shadow:0 0 0 2px var(--ink),0 0 10px 3px color-mix(in srgb,var(--c) 70%,transparent)}}
 .sl.any{border-style:dashed;font-weight:400;font-size:11px}
+/* a wrong letter: still collected, crossed by a red mark */
+.sl.done.miss{background:color-mix(in srgb,var(--c) 45%,var(--surface));color:var(--ink);outline:2px solid var(--warn);outline-offset:1px}
+.trk .off{font:700 11px/1 var(--font-body);color:var(--warn)}
+.seg.weak{border-style:dotted}
+.seg.lucky{border-color:var(--sun);box-shadow:0 0 6px color-mix(in srgb,var(--sun) 60%,transparent)}
 .sl.any.next{--c:var(--ink)}
 /* letter colours, after the slot and chip defaults so they win */
 .sl.bA,.chip.bA,.nx.bA{--c:var(--base-a)} .sl.bU,.chip.bU,.nx.bU{--c:var(--base-u)} .sl.bG,.chip.bG,.nx.bG{--c:var(--base-g)} .sl.bC,.chip.bC,.nx.bC{--c:var(--base-c)}
@@ -383,6 +388,7 @@ function devSetup(){
       + `<button class="btn" type="button" data-do="uv">UV flash</button><button class="btn" type="button" data-do="damage">Damage me</button></div>`
       + `<h3>Round</h3><div class="row"><button class="btn" type="button" id="dFast" aria-pressed="false">Speed ×4</button><button class="btn" type="button" data-do="minute">−1 min</button>`
       + `<button class="btn" type="button" data-do="end">End round</button><button class="btn" type="button" id="dBots" aria-pressed="false">No bots</button></div>` : '')
+    + `<h3>Lucky mistakes (answer key)</h3><pre>${SEG.LIST.map(s => { const out = []; for (let i = 0; i < s.core.length; i++) for (const b of 'AUGC') if (b !== s.core[i] && RS.mutationEffect(s.fn, i, b) > 1) out.push(`${s.core[i]}${i + 3}${b}`); return `${s.fn}: ${out.join(' ') || 'none'}`; }).join('\n')}</pre>`
     + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`;
   $('dev').hidden = false;
   $('dBio').addEventListener('click', toggleBiomes);
@@ -602,6 +608,19 @@ function draw(t){
     label(tx, p.name, h.x, h.y - 18, T[p.col]);
     if (p.isBot && showThoughts && p.ai.label && seen(h.x, h.y, 100)) label(tx, p.ai.label, h.x, h.y - 32, T.muted, 10);
   }
+  /* segments folded with a mistake: a small sparkle on a lucky one, a faint dotted ring on a weak one */
+  for (const p of L.players){
+    if (!p.alive || !seen(p.s.head.x, p.s.head.y, 400)) continue;
+    for (const f of p.s.functions){
+      const q = SEG.strength(f); if (q === 1 || f.damaged) continue;
+      const n = p.s.nodes[Math.round((f.start + f.end) / 2)]; if (!n) continue;
+      if (q > 1){
+        const r = 6 + 2 * Math.sin(t * 4 + f.start); tx.fillStyle = T.sun; tx.globalAlpha = 0.9; tx.beginPath();
+        for (let k = 0; k < 8; k++){ const a = k * Math.PI / 4 + t * 0.8, rr = k % 2 ? r * 0.35 : r; tx.lineTo(n.x + Math.cos(a) * rr, n.y + Math.sin(a) * rr); }
+        tx.closePath(); tx.fill(); tx.globalAlpha = 1;
+      } else { tx.setLineDash([2, 4]); tx.lineWidth = 1.5; tx.strokeStyle = T.warn; tx.globalAlpha = 0.6; tx.beginPath(); tx.arc(n.x, n.y, 14, 0, TAU); tx.stroke(); tx.setLineDash([]); tx.globalAlpha = 1; }
+    }
+  }
   /* warnings sit above the strands: UV flashes and meteorites, earlier with a Detector */
   MAP.drawWarnings(tx, camX, camY, vw, vh, t, SEG.warnEarly(working(fp)), (text, x, y) => label(tx, text, x, y, T.ink, 13));
   for (const f of L.frags){
@@ -637,11 +656,21 @@ function draw(t){
 /* ---------- interface ---------- */
 let pinned = null;
 /* the recipe the tail is closest to finishing, or the one you tapped */
+/* progress allows one wrong letter (it would fold into a weaker, or luckier, segment); a mistake counts against a recipe
+   when choosing which one you are following */
 function track(tail){
-  if (pinned) return {fn:pinned, p:RS.recipeProgress(tail, pinned)};
-  let top = null;
-  for (const f of FNS){ const pr = RS.recipeProgress(tail, f.fn); if (!top || pr.k > top.p.k) top = {fn:f.fn, p:pr}; }
-  return top && top.p.k >= 3 ? top : null;
+  if (pinned) return {fn:pinned, p:RS.recipeProgressLoose(tail, pinned)};
+  let top = null, best = -1;
+  for (const f of FNS){ const pr = RS.recipeProgressLoose(tail, f.fn), sc = pr.k - (pr.miss >= 0 ? 2 : 0); if (sc > best){ best = sc; top = {fn:f.fn, p:pr}; } }
+  return top && best >= 3 ? top : null;
+}
+/* what a mistake will do, said before folding: stem mistakes follow pairing rules; a core mutation is unknown until folded */
+function missNote(fn, pr){
+  if (!pr || pr.miss < 0) return '';
+  const L = recipeLen(fn), core = RECIPES[fn].length, i = pr.miss;
+  if (i >= 2 && i < 2 + core) return 'mutation: ?';
+  const partner = pr.t[L - 1 - i], letter = pr.t[i];
+  return (partner + letter === 'GU' || partner + letter === 'UG') ? 'wobble: 90%' : 'mismatch: 70%';
 }
 function wantedLetters(){
   const out = {}; if (!me || !me.alive || watchId != null) return out;
@@ -653,7 +682,7 @@ function slotsHtml(fn, pr){
   const L = recipeLen(fn), core = RECIPES[fn].length; let h = '';
   for (let i = 0; i < L; i++){
     const gap = i === 2 || i === 2 + core ? ' gap' : '';
-    if (i < pr.k){ h += `<span class="sl done b${pr.t[i]}${gap}">${pr.t[i]}</span>`; continue; }
+    if (i < pr.k){ h += `<span class="sl done b${pr.t[i]}${gap}${i === pr.miss ? ' miss' : ''}"${i === pr.miss ? ` title="Should be ${RS.recipeNeed(pr.t, fn, i)}"` : ''}>${pr.t[i]}</span>`; continue; }
     const need = RS.recipeNeed(pr.t, fn, i), nx = i === pr.k ? ' next' : '';
     h += need ? `<span class="sl b${need}${nx}${gap}">${need}</span>` : `<span class="sl any${nx}${gap}">${i === 0 ? '1' : i === 1 ? '2' : i === L - 2 ? '2′' : '1′'}</span>`;
   }
@@ -680,7 +709,7 @@ function openPanel(on){
 function renderUI(){
   if (!me){ $('trk').hidden = true; $('bRec').hidden = true; return; }
   const tail = me.s.tail, parts = tail ? RS.parseRecipes(tail) : [], ready = parts.filter(g => g.fn).map(g => g.fn);
-  const tr = ready.length ? {fn:ready[ready.length - 1], p:RS.recipeProgress(tail, ready[ready.length - 1])} : track(tail);
+  const tr = ready.length ? {fn:ready[ready.length - 1], p:RS.recipeProgressLoose(tail, ready[ready.length - 1])} : track(tail);
   /* compact card: the recipe you follow, letters that do not fit it shown dashed in front */
   const card = $('trk'), show = !panelOpen && me.alive && !!tr && watchId == null;
   card.hidden = !show; $('bRec').hidden = panelOpen || show || watchId != null;
@@ -689,7 +718,9 @@ function renderUI(){
     const extra = tail.length - tr.p.k, shown = Math.min(extra, 3);
     const strays = extra > 0 ? (extra > shown ? `<span class="meta">+${extra - shown}</span>` : '') + tail.slice(extra - shown, extra).split('').map(b => `<span class="chip b${b}">${b}</span>`).join('') : '';
     const nxt = ready.length ? null : RS.recipeNeed(tr.p.t, tr.fn, tr.p.k);
-    const badge = ready.length ? '<span class="go">Fold</span>' : nxt ? `<span class="nx b${nxt}">next <b>${nxt}</b></span>` : '<span class="nx">next <b>?</b></span>';
+    const off = missNote(tr.fn, tr.p);
+    const badge = (ready.length ? '<span class="go">Fold</span>' : nxt ? `<span class="nx b${nxt}">next <b>${nxt}</b></span>` : '<span class="nx">next <b>?</b></span>')
+      + (off ? `<span class="off">1 off · ${off}</span>` : '');
     card.innerHTML = `<span class="hd"><span>${tr.fn}</span>${badge}${ready.length ? '' : `<span class="meta">${tr.p.k}/${recipeLen(tr.fn)}</span>`}</span>`
       + `<span class="row">${strays}<span class="slots">${slotsHtml(tr.fn, tr.p)}</span></span>`;
     card.setAttribute('aria-label', `${tr.fn}, ${tr.p.k} of ${recipeLen(tr.fn)} letters${ready.length ? ', ready to fold' : ''}. Open recipes.`);
@@ -697,13 +728,13 @@ function renderUI(){
   $('bFold').classList.toggle('go', ready.length > 0); $('bFold').classList.toggle('pulse', ready.length > 0);
   if (panelOpen){
     FNS.forEach(f => {
-      const pr = RS.recipeProgress(tail, f.fn), btn = document.querySelector(`.rec[data-f="${f.fn}"]`);
+      const pr = RS.recipeProgressLoose(tail, f.fn), btn = document.querySelector(`.rec[data-f="${f.fn}"]`);
       $('sl-' + f.fn.replace(/\W/g, '')).innerHTML = slotsHtml(f.fn, pr);
       btn.classList.toggle('ready', ready.includes(f.fn));
       btn.setAttribute('aria-pressed', pinned === f.fn);
     });
     const fl = me.s.functions;
-    $('mine').innerHTML = '<span class="seg core">Core</span>' + fl.map(f => `<span class="seg ${f.damaged ? 'dmg' : ''}">${f.fn}${f.bonus ? ' +' + f.bonus : ''}${f.jstate ? `<span class="st">${f.jstate === 'armed' ? 'armed' : 'fused'}</span>` : ''}</span>`).join('');
+    $('mine').innerHTML = '<span class="seg core">Core</span>' + fl.map(f => `<span class="seg ${f.damaged ? 'dmg' : ''}${f.q > 1 ? ' lucky' : f.q < 1 ? ' weak' : ''}"${f.q !== 1 ? ` title="${SEG.strengthNote(f)}"` : ''}>${f.fn}${f.q !== 1 ? `<span class="st">${Math.round(f.q * 100)}%</span>` : ''}${f.bonus ? ' +' + f.bonus : ''}${f.jstate ? `<span class="st">${f.jstate === 'armed' ? 'armed' : 'fused'}</span>` : ''}</span>`).join('');
     $('mineN').textContent = `${me.s.length}/${RS.MAXLEN}`;
   }
 }

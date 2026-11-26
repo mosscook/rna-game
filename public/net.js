@@ -61,7 +61,7 @@ function create(o){
     const key = m.seq + '|' + m.sg.join(';');
     if (t.qk !== key){
       t.qk = key;
-      s.setSeq(m.seq, m.sg.map(([fi, a, b]) => ({fn:fi >= 0 ? FN[fi] : null, start:a, end:b})));
+      s.setSeq(m.seq, m.sg.map(([fi, a, b, q]) => ({fn:fi >= 0 ? FN[fi] : null, start:a, end:b, q:q == null ? 1 : q})));
     }
     /* damage: match the server's list exactly */
     const dm = new Set(m.dm);
@@ -237,7 +237,7 @@ function create(o){
   const working = p => p && p.s ? p.s.functions.filter(f => !f.damaged) : [];
   function complexity(p){
     if (scores.has(p.id)) return scores.get(p.id);
-    const seen = {}; let sc = 0; for (const f of working(p)){ sc += seen[f.fn] ? 1 : 3; seen[f.fn] = true; sc += f.bonus || 0; } return sc;
+    const seen = {}; let sc = 0; for (const f of working(p)){ sc += seen[f.fn] ? 1 : 3; seen[f.fn] = true; sc += f.bonus || 0; if (SEG.strength(f) > 1) sc += 1; } return sc;
   }
   const send = obj => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); };
 

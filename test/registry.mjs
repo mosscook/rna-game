@@ -24,7 +24,7 @@ for (const s of SEG.LIST){
   if (s.swim && !['speed', 'turn', 'turnBot'].every(k => typeof s.swim[k] === 'number')) bad(`${at}: swim needs speed, turn and turnBot numbers`);
   if (s.saltBreaks != null && !(s.saltBreaks > 0 && s.saltBreaks <= 1)) bad(`${at}: saltBreaks is a chance between 0 and 1`);
   /* every recipe must fold into its own segment, wherever it sits on a strand */
-  const seq = RS.recipeSeq(s.fn), parsed = RS.parseRecipes('A' + seq);
+  const seq = RS.recipeSeq(s.fn), parsed = RS.parseRecipes('A' + seq, true);
   if (!parsed.some(g => g.fn === s.fn && g.end === seq.length)) bad(`${at}: its recipe ${seq} does not read back as ${s.fn}`);
 }
 

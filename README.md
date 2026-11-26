@@ -38,6 +38,18 @@ Press **Watch** (or V) to follow other strands: ◀ ▶ (or the arrow keys) move
 
 You can change the room settings in the constants at the top of `src/room.js`.
 
+## Mistakes in recipes
+
+A recipe with one wrong letter still folds, at a different strength:
+
+- **In the stem** (the two pairs at either end), a G·U "wobble" pair holds nearly as well as a real pair (90%). Any other mismatch weakens the stem (70%).
+- **In the core**, each wrong letter at each position has its own fixed effect: about half are harmful (50%), a third mild (85%), and about one in six lucky (125% strength, +1 score). The effects are the same in every game, so a class can discover the lucky ones. `?dev` lists them as an answer key, written as letter, position in the recipe, new letter (`U3A` = the U at position 3 changed to A).
+- **Strength scales the ability**: Mover speed and turning, Cleaver reach, how reliably a Membrane takes a hit and how well it resists magnesium, Detector warning time, Joiner reach.
+- **The recipe card** marks the wrong letter. It predicts a stem mistake (pairing rules decide it) and shows a core mutation as "?" until it is folded.
+- **On the strand**, a lucky segment sparkles and a weak one has a faint dotted ring. The panel lists each segment's strength.
+- **A Repairer's helpers** correct harmful mistakes as they pass and leave lucky ones alone.
+- **Bots fold only exact recipes.** `npm test` checks the mistake rules (`test/mutations.mjs`).
+
 ## Adding a segment type
 
 Add one entry to the list in `public/segments.js`. The comment at the top of that file explains every field. In short:

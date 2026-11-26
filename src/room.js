@@ -209,7 +209,8 @@ export class GameRoom extends DurableObject {
   strandParts(s){
     const sg = s.segments;
     const dm = []; for (const g of sg){ const st = s.structureAt(g.start); if (st && st.damaged) dm.push(g.start); }
-    return {seq:s.seq, sg:sg.map(g => [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end]), dm};
+    /* a segment's strength rides along only when it isn't exact (a recipe folded with one wrong letter) */
+    return {seq:s.seq, sg:sg.map(g => g.q != null && g.q !== 1 ? [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end, g.q] : [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end]), dm};
   }
   strandMsg(s, id, frag){ const q = this.strandParts(s); return frag ? {t:'q', id, f:1, ...q} : {t:'q', id, ...q}; }
   qKey(q){ return q.seq + '|' + q.sg.join(';') + '|' + q.dm.join(','); }

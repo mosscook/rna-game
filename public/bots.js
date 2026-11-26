@@ -499,7 +499,7 @@ function think(p, dt){
   if (ai.rateT > 5){ const got = (ai.rateGot || 0); ai.rate = (ai.rate || 0.3) * 0.7 + (got / ai.rateT) * 0.3; ai.rateT = 0; ai.rateGot = 0; }
 
   /* fold the moment a recipe is complete */
-  if (tail.length >= 7 && RS.parseRecipes(tail).some(g => g.fn)){ G.doFold(p); ai.planT = 0; ai.goal = null; return steer(p); }
+  if (tail.length >= 7 && RS.parseRecipes(tail, true).some(g => g.fn)){ G.doFold(p); ai.planT = 0; ai.goal = null; return steer(p); }
   if (!ai.goal || ai.planT <= 0){ const i = ai.info || perceive(p); planRecipe(p, i); }
   /* letters that do not fit the plan come off, one at a time */
   if (tail.length && RS.recipeProgress(tail, ai.goal).k < tail.length && ai.drop <= 0){ G.doDrop(p); ai.drop = 0.35 + 0.3 * (1 - m.skill); }

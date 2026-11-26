@@ -99,11 +99,12 @@ function create(opts){
   /* fold the loose tail: recipes where they match, junk for the rest */
   function fold(p){
     if (!p.alive || !p.s.tail) return false;
-    const made = p.s.foldTail();
+    /* players may fold a recipe with one wrong letter; bots fold only exact ones */
+    const made = p.s.foldTail(p.isBot);
     const t = p.s.nodes[p.s.nodes.length - 1]; if (t) puff(t.x, t.y, p.col, 30);
     if (!p.isBot){
       dirty(p);
-      const fns = made.filter(g => g.fn).map(g => g.fn), junk = made.filter(g => !g.fn).reduce((n, g) => n + g.end - g.start + 1, 0);
+      const fns = made.filter(g => g.fn).map(g => { const n = SEG.strengthNote(g); return n ? `${g.fn} (${n})` : g.fn; }), junk = made.filter(g => !g.fn).reduce((n, g) => n + g.end - g.start + 1, 0);
       tell(p, fns.length ? `Folded: ${fns.join(', ')}.` + (junk ? ` ${plural(junk, 'letter')} matched no recipe and folded into junk.` : '') : `Folded junk: no recipe in that tail.`);
     }
     return true;
@@ -217,6 +218,8 @@ function create(opts){
   }
   /* a working shield (a Membrane) next to the struck function takes the hit instead */
   const isShield = fn => { const s = SEG.get(fn); return !!(s && s.shield); };
+  /* a weak shield sometimes lets a hit through (only weak ones draw a random number) */
+  const shieldHolds = sh => !sh || SEG.strength(sh) >= 1 || Math.random() < SEG.strength(sh);
   function shieldFor(p, st){
     if (!st || isShield(st.fn)) return null;
     const fl = p.s.functions, k = fl.findIndex(f => f.start === st.start);
@@ -233,7 +236,8 @@ function create(opts){
       dirty(b); tell(b, `${by.name}'s Cleaver knocked loose letters off your tail.`);
       return true;
     }
-    const sh = shieldFor(b, st), tgt = sh ? {fn:sh.fn, start:sh.start, damaged:false} : st;
+    let sh = shieldFor(b, st); if (!shieldHolds(sh)) sh = null;
+    const tgt = sh ? {fn:sh.fn, start:sh.start, damaged:false} : st;
     const name = tgt.fn || 'junk arm';
     const n = b.s.nodes[j];
     if (tgt.damaged || (oneHit && !sh)){
@@ -308,6 +312,7 @@ function create(opts){
       if (!a.alive) continue;
       for (const f of working(a)){
         const seg = SEG.get(f.fn); if (!seg || !seg.tips) continue;
+        const R = HIT_R * SEG.strength(f);   /* a stronger Cleaver reaches further, a weak one has to touch closer */
         for (const tip of seg.tips(f)){
           const na = a.s.nodes[tip]; if (!na) continue;
           const oneHit = MAP.saltAt(na.x, na.y);
@@ -315,8 +320,8 @@ function create(opts){
             if (b === a || !b.alive || b.inv > 0) continue;
             const nb = b.s.nodes;
             for (let j = 0; j < nb.length; j++){
-              if (Math.abs(nb[j].x - na.x) > HIT_R || Math.abs(nb[j].y - na.y) > HIT_R) continue;
-              if (dist(na.x, na.y, nb[j].x, nb[j].y) > HIT_R) continue;
+              if (Math.abs(nb[j].x - na.x) > R || Math.abs(nb[j].y - na.y) > R) continue;
+              if (dist(na.x, na.y, nb[j].x, nb[j].y) > R) continue;
               if (strike(b, j, a, oneHit)) break;
             }
           }
@@ -328,7 +333,7 @@ function create(opts){
       if (!p.alive || p.jcd > 0 || !frags.length) continue;
       const jaws = working(p).find(f => f.jstate === 'armed'); if (!jaws) continue;
       const t = p.s.nodes[p.s.nodes.length - 1]; if (!t) continue;
-      const f = frags.find(fr => fr.s.nodes.some(n => dist(t.x, t.y, n.x, n.y) < 30));
+      const reach = 30 * SEG.strength(jaws), f = frags.find(fr => fr.s.nodes.some(n => dist(t.x, t.y, n.x, n.y) < reach));
       if (!f) continue;
       /* loose letters at the front of the fragment fall away so the Joiner can close right around its first structure */
       const sg = f.s.segments.filter(g => g.fn), k0 = sg.length ? sg[0].start : f.s.length;
@@ -361,7 +366,7 @@ function create(opts){
         for (const f of working(p)){
           const seg = SEG.get(f.fn), sb = seg && seg.saltBreaks; if (!sb) continue;
           const n = nn[Math.round((f.start + f.end) / 2)];
-          if (!n || !MAP.saltAt(n.x, n.y) || Math.random() > sb) continue;
+          if (!n || !MAP.saltAt(n.x, n.y) || Math.random() > sb / SEG.strength(f)) continue;
           p.s.damageAt(f.start); puff(n.x, n.y, 'mg', 24);
           dirty(p); tell(p, `The magnesium in this drying pool dissolved your ${f.fn}. A Repairer, or time in the ice veins, can mend it.`);
         }
@@ -408,7 +413,7 @@ function create(opts){
       for (const f of p.s.functions){
         const n = p.s.nodes[Math.round((f.start + f.end) / 2)];
         if (!n || f.damaged || dist(n.x, n.y, r.x, r.y) > r.r || MAP.shelterAt(n.x, n.y) || Math.random() > 0.55) continue;
-        if (shieldFor(p, f)) continue;
+        { const sh = shieldFor(p, f); if (sh && shieldHolds(sh)) continue; }
         p.s.damageAt(f.start); hit.push(f.fn);
       }
       const from = p.s.length - p.s.tail.length;
@@ -455,7 +460,7 @@ function create(opts){
 
   function complexity(p){
     const seen = {}; let score = 0;
-    for (const f of working(p)){ score += seen[f.fn] ? 1 : 3; seen[f.fn] = true; score += f.bonus || 0; }
+    for (const f of working(p)){ score += seen[f.fn] ? 1 : 3; seen[f.fn] = true; score += f.bonus || 0; if (SEG.strength(f) > 1) score += 1; }
     return score;
   }
   function standings(){ return players.map(p => ({p, score:complexity(p)})).sort((a, b) => b.score - a.score); }
