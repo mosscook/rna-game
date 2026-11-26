@@ -68,7 +68,7 @@ function makeMind(i, taken){
   return {name, lead, traits, skill, taste, home,
           react:0.55 - 0.32 * skill,           /* seconds between decisions */
           aim:(1 - skill) * 70,                /* how sloppy its steering is, in px */
-          sight:1300 + 500 * skill,            /* how far it notices letters and rivals */
+          sight:800 + 300 * skill,             /* how far it notices letters and rivals: about a player's screen, so memory and exploring matter */
           anger:0, fear:0, boredom:0, grudges:{}, lastGain:0};
 }
 function describe(p){
@@ -235,9 +235,39 @@ function bestLetter(p, info, need){
   return best;
 }
 
+/* ---------- memory: rich places this bot has found. Each visit to a place with plenty of letters records or refreshes it;
+   memories fade over a couple of minutes unless visited again. So a bot's map of good places grows through the round. ---------- */
+const SPOT_R = 350, SPOT_MIN = 6, SPOT_FADE = 120, SPOTS_MAX = 10;
+function remember(p, h){
+  const m = p.mind, spots = m.spots || (m.spots = []);
+  for (const s of spots){ const k = Math.exp(-(T - s.t) / SPOT_FADE); s.v *= k; for (const b in s.c) s.c[b] *= k; s.t = T; }
+  const near = {A:0, U:0, G:0, C:0}; let n = 0;
+  for (const q of G.nucs) if (Math.abs(q.x - h.x) < SPOT_R && Math.abs(q.y - h.y) < SPOT_R){ near[q.b]++; n++; }
+  if (n >= SPOT_MIN && !MAP.smokerAt(h.x, h.y, 300)){
+    let s = spots.find(s => dist(s.x, s.y, h.x, h.y) < 500);
+    if (!s){ s = {x:h.x, y:h.y, v:0, c:{A:0, U:0, G:0, C:0}, t:T}; spots.push(s); }
+    s.x += (h.x - s.x) * 0.3; s.y += (h.y - s.y) * 0.3; s.v = Math.max(s.v, n);
+    for (const b in near) s.c[b] = Math.max(s.c[b], near[b]);
+  }
+  m.spots = spots.filter(s => s.v > 1.5).sort((a, b) => b.v - a.v).slice(0, SPOTS_MAX);
+}
+/* the best remembered place for a letter (or for letters in general), allowing for how far away it is */
+function bestMemory(p, need){
+  const m = p.mind, h = p.s.head; let best = null, bu = 1.5;
+  for (const s of m.spots || []){
+    const d = dist(h.x, h.y, s.x, s.y); if (d < 300) continue;
+    const u = (need ? s.c[need] * 2 + s.v * 0.3 : s.v) / (1 + d / 1500);
+    if (u > bu){ bu = u; best = s; }
+  }
+  return best;
+}
+
 /* where to go when nothing I need is in sight */
 function travelSpot(p, need){
   const m = p.mind, h = p.s.head;
+  /* somewhere I remember being rich, unless curiosity sends me somewhere new */
+  const memo = bestMemory(p, need);
+  if (memo && Math.random() > 0.25 + 0.5 * m.traits.curiosity) return {x:memo.x, y:memo.y, why:'memory'};
   const types = need ? LETTER_HOMES[need] : REGIONS[m.home];
   /* fresh craters are full of A and G */
   if (need === 'A' || need === 'G'){ const c = MAP.craters.find(c => c.age < 40 && dist(h.x, h.y, c.x, c.y) < 3500); if (c) return {x:c.x, y:c.y, why:'crater'}; }
@@ -259,11 +289,12 @@ function preyValue(p, info, o, d){
   if (dmg.length){ const f = dmg[dmg.length - 1]; v = 2.2 + (o.s.length - f.start) * 0.04; node = Math.round((f.start + f.end) / 2); }
   /* a long loose tail: knock the letters off and eat them */
   if (tailN >= 4 && tailN * 0.3 * (0.5 + tr.opportunism + tr.greed * 0.5) > v){ v = tailN * 0.3 * (0.5 + tr.opportunism + tr.greed * 0.5); node = from + Math.floor(tailN / 2); }
-  /* otherwise a working function with no Membrane beside it */
+  /* otherwise a working function with no Membrane beside it, on a strand with something worth taking:
+     a strand with only one working segment (often just the Mover every strand starts with) is not worth a chase */
   if (node == null){
     const open = fl.filter(f => !f.damaged && f.fn && !(SEG.get(f.fn) || {}).shield && !G.shieldFor(o, f));
-    if (!open.length) return null;
-    const f = open[open.length - 1]; v = 1 + 0.15 * open.length; node = Math.round((f.start + f.end) / 2);
+    if (!open.length || G.working(o).length < 2) return null;
+    const f = open[open.length - 1]; v = 0.6 + 0.35 * open.length; node = Math.round((f.start + f.end) / 2);
   }
   if (MAP.saltAt(o.s.head.x, o.s.head.y)) v += 1.2;       /* one-hit cuts in a drying salt pool */
   v += (m.grudges[o.id] || 0) * (0.5 + 1.5 * tr.grudge);
@@ -448,7 +479,7 @@ const MODES = {
       }
       const t = ai.travelTo;
       if (nn.drop) ai.label = 'dropping letters';
-      else ai.label = t.why === 'crater' ? `off to a crater for ${nn.need}` : t.why === 'need' ? `searching for ${nn.need}` : 'heading home';
+      else ai.label = t.why === 'crater' ? `off to a crater for ${nn.need}` : t.why === 'need' ? `searching for ${nn.need}` : t.why === 'memory' ? (nn.need ? `back to a good spot for ${nn.need}` : 'back to a good spot') : 'heading home';
       return t;
     }
   }
@@ -462,6 +493,7 @@ function think(p, dt){
   ai.huntCd = (ai.huntCd || 0) - dt; ai.lurkCd = (ai.lurkCd || 0) - dt; ai.planT = (ai.planT || 0) - dt;
   m.boredom += dt;
   /* letters collected per second, smoothed: how fast I usually build */
+  if (p.alive && T - (m.memT || 0) > 1){ m.memT = T; remember(p, p.s.head); }
   const n = p.s.length; if (ai.lastLen != null && n > ai.lastLen){ m.boredom = 0; ai.gotT = T; ai.rateGot = (ai.rateGot || 0) + Math.min(3, n - ai.lastLen); }
   ai.lastLen = n; ai.rateT = (ai.rateT || 0) + dt;
   if (ai.rateT > 5){ const got = (ai.rateGot || 0); ai.rate = (ai.rate || 0.3) * 0.7 + (got / ai.rateT) * 0.3; ai.rateT = 0; ai.rateGot = 0; }

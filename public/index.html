@@ -74,12 +74,15 @@ button{font-family:inherit;color:inherit}
 #zone:empty,#rank:empty{display:none}
 
 /* top right: the recipe you are following, compact; tap it to open the full list */
-.trk{position:absolute;right:10px;top:10px;display:grid;gap:5px;padding:7px 9px;border-radius:10px;cursor:pointer;text-align:left;max-width:calc(100% - 20px)}
-.trk .hd{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;font-weight:700}
+.trk{position:absolute;right:10px;top:10px;display:grid;justify-items:center;gap:7px;padding:8px 11px;border-radius:10px;cursor:pointer;text-align:center;max-width:calc(100% - 20px)}
+.trk .hd{display:flex;justify-content:center;align-items:baseline;gap:10px;font-size:13px;font-weight:700}
+/* the next letter to collect, as a coloured badge */
+.trk .nx{--c:var(--muted);display:inline-flex;align-items:center;gap:4px;font:700 11px/1 var(--font-body);color:var(--muted)}
+.trk .nx b{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--c);color:var(--pond);font:800 12px/1 var(--font-mono)}
 .trk .hd .meta{font-weight:400}
 .trk.ready{border-color:var(--stain);box-shadow:0 0 0 2px var(--stain),0 2px 10px rgb(0 0 0 / .18)}
 .trk.ready .go{color:var(--stain)}
-.trk .row{display:flex;gap:6px;align-items:center}
+.trk .row{display:flex;gap:6px;align-items:center;justify-content:center}
 .fab{position:absolute;right:10px;top:10px;height:34px;padding:0 12px;border-radius:99px;cursor:pointer;font-size:13px;font-weight:700}
 .fab:hover,.trk:hover{border-color:var(--ink)}
 
@@ -162,11 +165,17 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .rec .nm{font-weight:700;font-size:13.5px}
 .rec .does{font-size:11.5px;color:var(--muted);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .slots{display:flex;gap:2px}
-.sl{--c:var(--muted);width:19px;height:22px;border-radius:4px;border:1px solid var(--line);font:700 12px/20px var(--font-mono);text-align:center;color:var(--c)}
+/* recipe slots: collected letters are solid in their colour, letters still to come are outlined in it,
+   the next one is larger and pulses; slots for any letter (the stem's first two) are dashed */
+.sl{--c:var(--muted);width:19px;height:22px;border-radius:4px;border:1.5px solid color-mix(in srgb,var(--c) 70%,transparent);font:700 12px/19px var(--font-mono);text-align:center;color:var(--c)}
 .sl.gap{margin-left:4px}
-.sl.done{border-color:var(--c);background:color-mix(in srgb,var(--c) 18%,var(--surface))}
-.sl.next{border:2px solid var(--ink);line-height:18px}
-.sl.any{font-weight:400;font-size:11px}
+.sl.done{border-color:var(--c);background:var(--c);color:var(--pond)}
+.sl.next{background:color-mix(in srgb,var(--c) 22%,transparent);box-shadow:0 0 0 2px var(--ink);transform:scale(1.14);animation:nx 1.1s ease-in-out infinite}
+@keyframes nx{50%{box-shadow:0 0 0 2px var(--ink),0 0 10px 3px color-mix(in srgb,var(--c) 70%,transparent)}}
+.sl.any{border-style:dashed;font-weight:400;font-size:11px}
+.sl.any.next{--c:var(--ink)}
+/* letter colours, after the slot and chip defaults so they win */
+.sl.bA,.chip.bA,.nx.bA{--c:var(--base-a)} .sl.bU,.chip.bU,.nx.bU{--c:var(--base-u)} .sl.bG,.chip.bG,.nx.bG{--c:var(--base-g)} .sl.bC,.chip.bC,.nx.bC{--c:var(--base-c)}
 /* ?dev: numbers and test buttons for building and balancing the game */
 .dev{position:absolute;left:10px;top:52px;width:300px;max-height:calc(100% - 120px);overflow-y:auto;padding:8px 10px;border-radius:10px;display:grid;gap:6px;z-index:3;
   background:var(--glass);border:1px solid var(--edge);font:400 11px/1.45 var(--font-mono);color:var(--muted)}
@@ -184,7 +193,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
   kbd{display:none}
   .sl,.chip{width:16px;height:20px;font-size:11px;line-height:18px}
 }
-@media (prefers-reduced-motion:reduce){ .toast{transition:none} .btn.go.pulse{animation:none} }
+@media (prefers-reduced-motion:reduce){ .toast{transition:none} .btn.go.pulse{animation:none} .sl.next{animation:none} }
 </style>
 </head>
 <body>
@@ -269,7 +278,7 @@ const sim = window.SoupSim.create({MAP, BOTS, stage, minStrands:10, hooks:{
   end:rows => showEnd(rows),
   tint:(col, bot) => bot ? {spine:T[col], goo:T[col]} : null}});
 /* multiplayer: a page at rna.game/<room> joins that room on the server; the home page is single-player against bots */
-const ROOM = (n => n && !['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots', 'version', 'lab'].includes(n) ? n : null)(
+const ROOM = (n => n && !['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots', 'version', 'lab', 'names'].includes(n) ? n : null)(
   ((location.pathname.match(/^\/(?:r\/)?([a-z0-9][a-z0-9-]{0,31})\/?$/i) || [])[1] || '').toLowerCase());
 /* after a deploy, offer a refresh. The page asks /version which deploy it was loaded from, then checks again
    every few minutes and whenever the tab comes back into view; in a room the server also says on (re)joining. */
@@ -472,12 +481,26 @@ function begin(){ if (net) return joinRoom(); if (sim.state !== 'ready') return;
 /* joining a room: pick a three-letter codon name (no accounts; it is remembered on this device only) */
 let codon = 'AUG';
 try { const c = localStorage.getItem('soup.codon'); if (/^[AUGC]{3}$/.test(c || '')) codon = c; } catch(e){}
+/* names already in this room: the join screen starts on a free codon and the dice only rolls free ones */
+let taken = new Set(), namesAsked = false;
+const ALL_CODONS = [...'AUGC'].flatMap(a => [...'AUGC'].flatMap(b => [...'AUGC'].map(c => a + b + c)));
+const freeCodon = () => { const free = ALL_CODONS.filter(c => !taken.has(c)); return free.length ? free[Math.floor(Math.random() * free.length)] : codon; };
+async function askNames(){
+  namesAsked = true;
+  try {
+    const r = await fetch(`/names/${ROOM}`, {cache:'no-store'}); if (!r.ok) return;
+    taken = new Set((await r.json()).taken || []);
+    if (taken.has(codon)){ codon = freeCodon(); if (!$('overlay').hidden && $('justWatch')) showJoin(); }
+  } catch(e){}
+}
 function showJoin(){
+  if (!namesAsked) askNames();
   $('overlay').hidden = false;
   $('sheet').innerHTML = `<h2>Room ${ROOM}</h2>
     <p>Pick your name: a three-letter codon.</p>
     <div class="codon" role="group" aria-label="Codon name">${[0, 1, 2].map(i => `<button type="button" class="cd b${codon[i]}" data-i="${i}" aria-label="Letter ${i + 1}: ${codon[i]}">${codon[i]}</button>`).join('')}
       <button type="button" class="cd dice" id="dice" aria-label="Random codon">&#8635;</button></div>
+    <p class="fine" id="nameNote">${taken.has(codon) ? `Someone in this room is already ${codon}. Pick another so people can tell you apart.` : taken.size ? `${taken.size} ${taken.size === 1 ? 'name is' : 'names are'} taken here; ${codon} is free.` : ''}</p>
     <button class="btn go" type="button" id="begin">Join</button>
     <button class="alt" type="button" id="justWatch">Just watch (for a projector: no strand, not counted as a player)</button>
     <p class="fine" id="netStatus"></p>`;
@@ -485,7 +508,7 @@ function showJoin(){
     const i = +b.dataset.i, nx = 'AUGC'['AUGC'.indexOf(codon[i]) + 1] || 'A';
     codon = codon.slice(0, i) + nx + codon.slice(i + 1); showJoin();
   }));
-  $('dice').addEventListener('click', () => { codon = [0, 0, 0].map(() => 'AUGC'[Math.floor(Math.random() * 4)]).join(''); showJoin(); });
+  $('dice').addEventListener('click', () => { codon = freeCodon(); showJoin(); });
   $('begin').addEventListener('click', begin); $('begin').focus();
   $('justWatch').addEventListener('click', () => {
     watchOnly = true; setTour(true);
@@ -665,7 +688,9 @@ function renderUI(){
   if (show){
     const extra = tail.length - tr.p.k, shown = Math.min(extra, 3);
     const strays = extra > 0 ? (extra > shown ? `<span class="meta">+${extra - shown}</span>` : '') + tail.slice(extra - shown, extra).split('').map(b => `<span class="chip b${b}">${b}</span>`).join('') : '';
-    card.innerHTML = `<span class="hd"><span>${tr.fn}</span>${ready.length ? '<span class="go">Fold</span>' : `<span class="meta">${tr.p.k}/${recipeLen(tr.fn)}</span>`}</span>`
+    const nxt = ready.length ? null : RS.recipeNeed(tr.p.t, tr.fn, tr.p.k);
+    const badge = ready.length ? '<span class="go">Fold</span>' : nxt ? `<span class="nx b${nxt}">next <b>${nxt}</b></span>` : '<span class="nx">next <b>?</b></span>';
+    card.innerHTML = `<span class="hd"><span>${tr.fn}</span>${badge}${ready.length ? '' : `<span class="meta">${tr.p.k}/${recipeLen(tr.fn)}</span>`}</span>`
       + `<span class="row">${strays}<span class="slots">${slotsHtml(tr.fn, tr.p)}</span></span>`;
     card.setAttribute('aria-label', `${tr.fn}, ${tr.p.k} of ${recipeLen(tr.fn)} letters${ready.length ? ', ready to fold' : ''}. Open recipes.`);
   }

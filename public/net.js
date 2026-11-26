@@ -160,19 +160,25 @@ function create(o){
     let ref = null; for (let i = hist.length - 1; i >= 0; i--){ if (hist[i].t <= then){ ref = hist[i]; break; } }
     if (!ref) ref = {x:h.x, y:h.y};
     const ex = sx - ref.x, ey = sy - ref.y, e = Math.hypot(ex, ey);
-    if (e > 140){ s.place(sx, sy, sh); hist.length = 0; return; }      /* thrown by a geyser, respawned, pushed: jump */
-    if (e > 2) s.setHead(h.x + ex * 0.25, h.y + ey * 0.25);
+    if (e > 140){ s.place(sx, sy, sh); hist.length = 0; me.cx = me.cy = 0; return; }      /* thrown by a geyser, respawned, pushed: jump */
+    /* small errors are eased out over the next few frames rather than in one jump (a jump makes the arms shake) */
+    if (e > 2){ me.cx = ex * 0.25; me.cy = ey * 0.25; }
   }
 
   /* ---------- the frame ---------- */
+  /* between two snapshots the head runs along a smooth curve (Catmull-Rom through the snapshots around it), heading too.
+     Straight lines between snapshots put a small corner in the path 15 times a second, and long arms (a Mover's blades,
+     a Cleaver's spikes) swing at every corner: the shake. */
   function sample(buf, rt){
     if (!buf.length) return null;
     if (rt <= buf[0].t) return buf[0];
     for (let i = buf.length - 1; i > 0; i--){
       const a = buf[i - 1], b = buf[i];
       if (rt >= a.t && rt <= b.t){
-        const f = (rt - a.t) / ((b.t - a.t) || 1);
-        return {x:a.x + (b.x - a.x) * f, y:a.y + (b.y - a.y) * f, h:a.h + wrapA(b.h - a.h) * f, mv:b.mv, lp:b.lp};
+        const p0 = buf[i - 2] || a, p3 = buf[i + 1] || b, f = (rt - a.t) / ((b.t - a.t) || 1), f2 = f * f, f3 = f2 * f;
+        const cr = (q0, q1, q2, q3) => 0.5 * (2 * q1 + (q2 - q0) * f + (2 * q0 - 5 * q1 + 4 * q2 - q3) * f2 + (3 * q1 - q0 - 3 * q2 + q3) * f3);
+        const ha = a.h, h0 = ha - wrapA(a.h - p0.h), hb = ha + wrapA(b.h - a.h), h3 = hb + wrapA(p3.h - b.h);
+        return {x:cr(p0.x, a.x, b.x, p3.x), y:cr(p0.y, a.y, b.y, p3.y), h:wrapA(cr(h0, ha, hb, h3)), mv:b.mv, lp:b.lp};
       }
     }
     /* ran past the newest snapshot: keep going a little in the same direction, then hold */
@@ -193,7 +199,10 @@ function create(o){
     const rt = t + offset - DELAY;
     for (const mm of P.values()){
       if (mm.id === meId){
-        if (mm.alive && mm.shown && state === 'play') predict(mm, dt, aim);
+        if (mm.alive && mm.shown && state === 'play'){
+          if (mm.cx || mm.cy){ const k = Math.min(1, dt * 12), dx = mm.cx * k, dy = mm.cy * k, h = mm.s.head; mm.s.setHead(h.x + dx, h.y + dy); mm.cx -= dx; mm.cy -= dy; if (Math.abs(mm.cx) + Math.abs(mm.cy) < 0.05) mm.cx = mm.cy = 0; }
+          predict(mm, dt, aim);
+        }
         else if (mm.buf.length){ const b = mm.buf[mm.buf.length - 1]; if (!mm.shown && mm.alive){ mm.s.place(b.x, b.y, b.h); mm.shown = true; } mm.s.follow(dt, b.x, b.y, b.h, {moving:b.mv, limp:b.lp}); }
         continue;
       }

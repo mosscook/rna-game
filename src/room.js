@@ -25,7 +25,7 @@ const HUMAN_COLS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', 'h10',
 const ST = {play:'p', over:'o', ready:'r', idle:'i'};
 const MAX_MSG = 300, MSG_PER_SEC = 60;
 
-const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
+const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1000) / 1000;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const randomCodon = () => [0, 0, 0].map(() => 'AUGC'[Math.floor(Math.random() * 4)]).join('');
 
@@ -42,6 +42,11 @@ export class GameRoom extends DurableObject {
   }
 
   async fetch(req){
+    /* the names in use, for the join screen; asking does not wake a sleeping room */
+    if (new URL(req.url).pathname === '/names'){
+      const taken = this.sim ? this.sim.players.filter(p => !p.isBot).map(p => p.name) : [];
+      return Response.json({taken}, {headers:{'Cache-Control':'no-store'}});
+    }
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', {status:426});
     const pair = new WebSocketPair(), [client, server] = Object.values(pair);
     server.accept();
@@ -232,10 +237,11 @@ export class GameRoom extends DurableObject {
     const sim = this.sim, st = ST[sim.state] || 'i', tl = r1(sim.timeLeft);
     const P = sim.players.map(p => {
       const s = p.s, h = s.head;
-      return {p, x:h.x, y:h.y, e:[p.id, Math.round(h.x), Math.round(h.y), r2(s.heading), Math.round(s.moving * 100), Math.round(s.limp * 100),
+      /* positions to a tenth of a pixel and heading to a thousandth: whole pixels made long arms wobble on other screens */
+      return {p, x:h.x, y:h.y, e:[p.id, r1(h.x), r1(h.y), r3(s.heading), Math.round(s.moving * 100), Math.round(s.limp * 100),
         p.alive ? 1 : 0, r1(Math.max(0, p.inv || 0)), (p.ai && p.ai.label) || '']};
     });
-    const F = sim.frags.map(f => ({x:f.s.head.x, y:f.s.head.y, e:[f.id, Math.round(f.s.head.x), Math.round(f.s.head.y), r2(f.s.heading)]}));
+    const F = sim.frags.map(f => ({x:f.s.head.x, y:f.s.head.y, e:[f.id, r1(f.s.head.x), r1(f.s.head.y), r3(f.s.heading)]}));
     const X = this.fxQ.splice(0).map(e => ({x:e.x, y:e.y, e:[Math.round(e.x), Math.round(e.y), e.col, Math.round(e.r || 26), e.dur || 0.5, e.flash ? 1 : 0]}));
     const near = (c, x, y, mx = 0) => Math.abs(x - c.cx) < VIEW_X + mx && Math.abs(y - c.cy) < VIEW_Y + mx;
     const every = n => this.k % n === 0;

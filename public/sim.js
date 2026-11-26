@@ -32,7 +32,8 @@ function create(opts){
   const MAP = opts.MAP, BOTS = opts.BOTS, stage = opts.stage, W = MAP.W, H = MAP.H, MK = MAP.K;
   const hooks = Object.assign({say(){}, fx(){}, dirty(){}, end(){}, tint(){ return null; }}, opts.hooks || {});
   const ROUND = opts.round || 300, NUC_TARGET = opts.nucTarget || 350, MAXLOOSE = 16;
-  const EAT_R = 16, HIT_R = 13, FRAG_MAX = 7, FRAG_EVERY = 25, FRAG_LIFE = 70;
+  /* fragments drift until a Joiner takes them or a black smoker breaks them up; at most FRAG_MAX + 2 at once */
+  const EAT_R = 16, HIT_R = 13, FRAG_MAX = 7, FRAG_EVERY = 25, FRAG_LIFE = Infinity;
   const OPEN_TYPES = MAP.CELLS.map((c, i) => i).filter(i => !MAP.CELLS[i].solid);
   let minStrands = opts.minStrands != null ? opts.minStrands : 10;
 
@@ -123,7 +124,9 @@ function create(opts){
   function soupLetter(){ const r = Math.random(); return r < 0.34 ? 'A' : r < 0.5 ? 'U' : r < 0.75 ? 'G' : 'C'; }
   let fragId = 1;
   function mkFrag(seq, segments, x, y, heading, owner){
-    if (!seq || frags.length >= FRAG_MAX + 2) return null;
+    if (!seq) return null;
+    /* full: the oldest fragment breaks up into letters to make room */
+    if (frags.length >= FRAG_MAX + 2){ const old = frags.reduce((a, b) => a.age > b.age ? a : b); burstFrag(old); }
     const s = stage.addStrand({seq, segments, x, y, heading, tint:hooks.tint('muted', true)});
     s.setOpacity(0.7);
     const f = {id:fragId++, s, age:0, life:FRAG_LIFE, turn:rnd(-0.4, 0.4), owner, prev:{x, y}};
@@ -333,6 +336,8 @@ function create(opts){
       for (let k = 0; k < k0 && k < f.s.length; k++){ const n = f.s.nodes[k]; if (n && Math.random() < 0.6) spawnNuc(n.x, n.y, f.s.seq[k]); }
       removeFrag(f);
       if (!add) continue;
+      /* loose letters behind the Joiner fall away, so what it grabs attaches right behind it */
+      const loose = p.s.tail.length; if (loose) p.s.shedFrom(p.s.length - loose);
       p.s.appendFolded(add, addSegs); p.jcd = 4;
       puff(t.x, t.y, p.col, 34);
       if (!p.isBot){
@@ -383,10 +388,12 @@ function create(opts){
     const fl = MAP.flowAt(h.x, h.y);
     if (fl.x || fl.y) f.s.move(fl.x * 0.7 * dt, fl.y * 0.7 * dt);
     if (collide(f.s, prev)) f.turn = rnd(-1.2, 1.2);
-    if (f.age > f.life || MAP.smokerAt(h.x, h.y)){
-      f.s.nodes.forEach((n, k) => { if (Math.random() < 0.5) spawnNuc(n.x + rnd(-10, 10), n.y + rnd(-10, 10), f.s.seq[k]); });
-      removeFrag(f);
-    }
+    if (f.age > f.life || MAP.smokerAt(h.x, h.y)) burstFrag(f);
+  }
+  /* a fragment breaks up: about half its letters land loose in the soup */
+  function burstFrag(f){
+    f.s.nodes.forEach((n, k) => { if (Math.random() < 0.5) spawnNuc(n.x + rnd(-10, 10), n.y + rnd(-10, 10), f.s.seq[k]); });
+    removeFrag(f);
   }
 
   /* ---------- map events ---------- */

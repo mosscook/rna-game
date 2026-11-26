@@ -494,10 +494,11 @@ function makeStrand(stage, opts){
       else if (body === 'circle'){ const h = arm(start, end, {detector:true}); const u = {kind:'detector', fn, start, end, n:len, a:h.a, b:h.b, stem:h.stem, loop:h.loop, hb:0, recipe:false}; units.push(u); mods.push(u); }
       else { const h = arm(start, end); mods.push(h); units.push({kind:'arm', fn, arms:[h], start, end}); }   /* no known body: a plain hairpin */
     }
-    /* a Joiner is armed while nothing follows it; once a structure is joined right behind it, it fuses around it for +1 */
+    /* a Joiner is armed while nothing folded follows it (loose letters picked up behind it don't count: they fall away
+       when it joins); once a structure is joined right behind it, it fuses around it for +1 */
     for (const u of units.filter(v => BODY(v.fn) === 'jaws')){
       const h = u.arms[0];
-      if (u.end === n - 1){ h.jstate = u.jstate = 'armed'; continue; }
+      if (!segs.some(g => g.start > u.end && g.end < n)){ h.jstate = u.jstate = 'armed'; continue; }
       const nx = units.find(v => v.start === u.end + 1);
       if (nx){ h.jstate = u.jstate = 'fused'; u.fused = true; u.target = nx; nx.bonus = (nx.bonus || 0) + 1; h.target = nx; }
       else { h.jstate = 'spent'; units.splice(units.indexOf(u), 1); }
