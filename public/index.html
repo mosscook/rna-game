@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RNA Strand Soup v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Layout: the soup fills the whole screen; everything else floats over it, small and out of the way.
+     Same slide-and-stain palette as RNA Fold Lab: brightfield in light, darkfield in dark. */
+  --field:#ECEEF4; --surface:#F9FAFC; --ink:#1D2136; --muted:#596079; --line:#D2D6E2;
+  --stain:#5A3EC8; --stain-soft:#E6E0FB; --warn:#B4501A;
+  --base-a:#17805A; --base-u:#C23548; --base-g:#946200; --base-c:#1C68BD;
+  --pond:#FCFCFE; --vent:#E0703C; --sun:#D9B21C; --flow:#7FA7D9;
+  --ice:#D6ECF7; --ice-edge:#4F90B8; --mg:#7FA36C;
+  --p1:#5B6B8C; --p2:#9A4577; --p3:#2C7F88; --p4:#7B5B45; --p5:#A8641F; --p6:#5B8A2A; --p7:#B8483A; --p8:#7D7740; --p9:#8E4E9E;
+  --h1:#0F8F8F; --h2:#C2410C; --h3:#2563EB; --h4:#B4237A; --h5:#4D7C0F; --h6:#9333EA; --h7:#B45309; --h8:#0E7490; --h9:#BE123C; --h10:#15803D; --h11:#7C3AED; --h12:#A16207;
+  --font-display:'Bricolage Grotesque','Trebuchet MS',sans-serif;
+  --font-body:'Atkinson Hyperlegible Next','Atkinson Hyperlegible',Verdana,sans-serif;
+  --font-mono:'Atkinson Hyperlegible Mono',ui-monospace,'Courier New',monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --field:#0D101C; --surface:#161A2C; --ink:#E7E9F3; --muted:#9BA2BD; --line:#2B3152;
+    --stain:#AC97FF; --stain-soft:#2A2550; --warn:#F09A62;
+    --base-a:#4FD39A; --base-u:#FF7F8E; --base-g:#F2C14E; --base-c:#74B6FF;
+    --pond:#080A14; --vent:#E0703C; --sun:#E3C54A; --flow:#3E5F8F;
+    --ice:#173247; --ice-edge:#86CBEC; --mg:#6F9A5C;
+    --p1:#9FB0D4; --p2:#E58DBB; --p3:#6CCAD3; --p4:#C9A98C; --p5:#E7A35E; --p6:#A9D36E; --p7:#F08A7C; --p8:#C9C38A; --p9:#D39BDE;
+    --h1:#5EEAD4; --h2:#FB923C; --h3:#60A5FA; --h4:#F472B6; --h5:#A3E635; --h6:#C084FC; --h7:#FBBF24; --h8:#22D3EE; --h9:#FB7185; --h10:#4ADE80; --h11:#A78BFA; --h12:#FDE047;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --field:#0D101C; --surface:#161A2C; --ink:#E7E9F3; --muted:#9BA2BD; --line:#2B3152;
+  --stain:#AC97FF; --stain-soft:#2A2550; --warn:#F09A62;
+  --base-a:#4FD39A; --base-u:#FF7F8E; --base-g:#F2C14E; --base-c:#74B6FF;
+  --pond:#080A14; --vent:#E0703C; --sun:#E3C54A; --flow:#3E5F8F;
+  --ice:#173247; --ice-edge:#86CBEC; --mg:#6F9A5C;
+  --p1:#9FB0D4; --p2:#E58DBB; --p3:#6CCAD3; --p4:#C9A98C; --p5:#E7A35E; --p6:#A9D36E; --p7:#F08A7C; --p8:#C9C38A; --p9:#D39BDE;
+    --h1:#5EEAD4; --h2:#FB923C; --h3:#60A5FA; --h4:#F472B6; --h5:#A3E635; --h6:#C084FC; --h7:#FBBF24; --h8:#22D3EE; --h9:#FB7185; --h10:#4ADE80; --h11:#A78BFA; --h12:#FDE047;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--field);color:var(--ink);font:16px/1.4 var(--font-body)}
+h1{font:800 26px/1 var(--font-display);letter-spacing:-.02em;margin:0;text-wrap:balance}
+h2{font:700 15px/1.2 var(--font-display);margin:0;text-wrap:balance}
+p{margin:0}
+ul,ol{margin:0;padding:0;list-style:none}
+button{font-family:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--stain);outline-offset:2px}
+/* floating surfaces: semi-opaque, no blur (blur over a moving canvas is costly on Chromebooks) */
+.pond{position:fixed;inset:0;overflow:hidden;background:var(--pond);
+  --glass:color-mix(in srgb,var(--surface) 86%,transparent);--edge:color-mix(in srgb,var(--line) 80%,transparent)}
+/* hybrid: environment canvas, strand SVG on top of it, then a canvas for names, effects and the minimap */
+#cv,#sv,#top{position:absolute;inset:0;width:100%;height:100%;display:block}
+#sv{pointer-events:none;overflow:hidden}
+#top{touch-action:none;cursor:crosshair}
+.hud,.trk,.fab,.panel,.acts .btn{background:var(--glass);border:1px solid var(--edge);box-shadow:0 2px 10px rgb(0 0 0 / .18)}
+
+/* top left: time, your complexity, your place, where you are */
+.hud{position:absolute;left:10px;top:10px;display:flex;gap:12px;align-items:center;padding:5px 12px;border-radius:99px;font-size:13px;color:var(--muted);pointer-events:none;max-width:calc(100% - 220px)}
+.hud b{color:var(--ink);font-variant-numeric:tabular-nums}
+.hud #time{font:800 18px/1 var(--font-display)}
+.hud .sc{display:flex;gap:4px;align-items:baseline}
+.hud .sc b{font:800 16px/1 var(--font-display)}
+.hud small{font-size:11px}
+#rank{font-weight:700;color:var(--ink)}
+#zone{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#zone:empty,#rank:empty{display:none}
+
+/* top right: the recipe you are following, compact; tap it to open the full list */
+.trk{position:absolute;right:10px;top:10px;display:grid;gap:5px;padding:7px 9px;border-radius:10px;cursor:pointer;text-align:left;max-width:calc(100% - 20px)}
+.trk .hd{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;font-weight:700}
+.trk .hd .meta{font-weight:400}
+.trk.ready{border-color:var(--stain);box-shadow:0 0 0 2px var(--stain),0 2px 10px rgb(0 0 0 / .18)}
+.trk.ready .go{color:var(--stain)}
+.trk .row{display:flex;gap:6px;align-items:center}
+.fab{position:absolute;right:10px;top:10px;height:34px;padding:0 12px;border-radius:99px;cursor:pointer;font-size:13px;font-weight:700}
+.fab:hover,.trk:hover{border-color:var(--ink)}
+
+/* the full list slides over the right edge */
+.panel{position:absolute;right:10px;top:10px;bottom:62px;width:min(330px,calc(100% - 20px));border-radius:12px;padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.ph{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:2px}
+.ph h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.x{width:28px;height:28px;border:0;border-radius:6px;background:transparent;font-size:20px;line-height:1;cursor:pointer;color:var(--muted)}
+.x:hover{color:var(--ink);background:var(--stain-soft)}
+
+/* bottom left: actions */
+.acts{position:absolute;left:10px;bottom:10px;display:flex;gap:6px}
+.btn{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:99px;background:var(--surface);cursor:pointer;font-size:13px;font-weight:700;white-space:nowrap}
+.btn.sm{width:36px;padding:0}
+.btn:hover{border-color:var(--ink)}
+.btn.go,.acts .btn.go{background:var(--stain);border-color:var(--stain);color:var(--surface)}
+.btn.go.pulse{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--stain) 35%,transparent)}}
+.btn[aria-pressed="true"]{background:var(--stain-soft);border-color:var(--stain)}
+kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius:4px;padding:2px 4px;margin-left:6px;opacity:.7}
+
+.toast{position:absolute;left:50%;bottom:58px;transform:translateX(-50%);max-width:min(88%,520px);padding:7px 12px;border-radius:8px;
+  background:var(--ink);color:var(--surface);font-size:13.5px;text-align:center;pointer-events:none;opacity:0;transition:opacity .2s}
+.toast.on{opacity:.92}
+
+/* start and end screens */
+.overlay{position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--pond) 55%,transparent);overflow:auto;z-index:5}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;max-width:440px;display:grid;gap:10px;box-shadow:0 8px 30px rgb(0 0 0 / .25)}
+.sheet h2{font-size:20px}
+.sheet .fine{font-size:12px;color:var(--muted)}
+.sheet ol.steps{display:grid;gap:6px;font-size:14.5px;counter-reset:s}
+.sheet ol.steps li{counter-increment:s;padding-left:26px;position:relative}
+.sheet ol.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:19px;height:19px;border-radius:50%;background:var(--stain-soft);
+  color:var(--ink);font:700 12px/19px var(--font-mono);text-align:center}
+.codon{display:flex;gap:8px;justify-content:center;align-items:center;padding:6px 0}
+.cd{--c:var(--muted);width:54px;height:62px;border-radius:10px;border:2px solid var(--c);background:color-mix(in srgb,var(--c) 14%,var(--surface));color:var(--c);font:800 28px/1 var(--font-mono);cursor:pointer}
+.cd:hover{filter:brightness(1.15)}
+.cd.dice{width:44px;height:44px;font-size:20px;border-style:dashed;margin-left:6px}
+.room{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin:14px 0 4px}
+.room label{font-weight:700}
+.room .host{font-family:var(--font-mono);color:var(--muted)}
+.room input{font:700 16px/1 var(--font-mono);height:36px;width:13ch;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--ink)}
+.rank{display:grid;gap:4px;font-size:15px}
+.rank li{display:grid;grid-template-columns:14px 1fr auto;gap:8px;align-items:center}
+.rank li.me{font-weight:700}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--c,var(--muted))}
+
+.meta{font:400 11.5px/1.3 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.bA{--c:var(--base-a)} .bU{--c:var(--base-u)} .bG{--c:var(--base-g)} .bC{--c:var(--base-c)}
+.chip{--c:var(--muted);width:19px;height:22px;border-radius:4px;border:1.5px dashed var(--c);color:var(--c);font:700 12px/19px var(--font-mono);text-align:center;opacity:.75}
+
+.board{display:grid;gap:3px;font-size:13px}
+.board li{display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center}
+.board li.me{font-weight:700}
+.board .n{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.rank small.style{display:block;font:400 11px var(--font-body);color:var(--muted)}
+.mine{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:12px}
+.seg{padding:2px 7px;border:1.5px solid var(--stain);border-radius:99px;font-weight:600;white-space:nowrap}
+.seg.core{background:var(--stain);color:var(--surface)}
+.seg.dmg{border-style:dashed;color:var(--muted);text-decoration:line-through}
+.seg .st{font:400 10.5px var(--font-mono);margin-left:4px;opacity:.85}
+.recipes{display:grid;gap:4px}
+.rec{width:100%;display:grid;gap:3px;text-align:left;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer}
+.rec:hover{border-color:var(--ink)}
+.rec[aria-pressed="true"]{border-color:var(--stain);background:color-mix(in srgb,var(--stain-soft) 60%,var(--surface))}
+.rec.ready{border-color:var(--stain);box-shadow:inset 3px 0 0 var(--stain)}
+.rec .hd{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.rec .nm{font-weight:700;font-size:13.5px}
+.rec .does{font-size:11.5px;color:var(--muted);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.slots{display:flex;gap:2px}
+.sl{--c:var(--muted);width:19px;height:22px;border-radius:4px;border:1px solid var(--line);font:700 12px/20px var(--font-mono);text-align:center;color:var(--c)}
+.sl.gap{margin-left:4px}
+.sl.done{border-color:var(--c);background:color-mix(in srgb,var(--c) 18%,var(--surface))}
+.sl.next{border:2px solid var(--ink);line-height:18px}
+.sl.any{font-weight:400;font-size:11px}
+@media (max-width:640px){
+  .hud{gap:8px;padding:4px 10px;max-width:calc(100% - 130px)}
+  #zone{display:none}
+  kbd{display:none}
+  .sl,.chip{width:16px;height:20px;font-size:11px;line-height:18px}
+}
+@media (prefers-reduced-motion:reduce){ .toast{transition:none} .btn.go.pulse{animation:none} }
+</style>
+</head>
+<body>
+<div class="pond" id="pond">
+  <canvas id="cv" aria-hidden="true"></canvas>
+  <svg id="sv" aria-hidden="true"></svg>
+  <canvas id="top" aria-label="The soup. Your strand swims toward the pointer and collects the letters its head touches."></canvas>
+
+  <div class="hud" aria-live="off"><b id="time">5:00</b><span class="sc"><b id="score">0</b><small>complexity</small></span><span id="rank"></span><span id="zone"></span></div>
+
+  <button class="trk" id="trk" type="button" aria-controls="panel" aria-expanded="false" hidden></button>
+  <button class="fab" id="bRec" type="button" aria-controls="panel" aria-expanded="false">Recipes<kbd>R</kbd></button>
+
+  <aside class="panel" id="panel" aria-label="Recipes, your strand and scores" hidden>
+    <div class="ph"><h2>Recipes</h2><button class="x" id="bClose" type="button" aria-label="Close">&times;</button></div>
+    <ul class="recipes" id="recipes"></ul>
+    <div class="ph"><h2>Your strand</h2><span class="meta" id="mineN"></span></div>
+    <div class="mine" id="mine"></div>
+    <div class="ph"><h2>Scores</h2></div>
+    <ol class="board" id="board"></ol>
+  </aside>
+
+  <div class="acts" role="toolbar" aria-label="Actions">
+    <button class="btn" type="button" id="bFold">Fold<kbd>Space</kbd></button>
+    <button class="btn" type="button" id="bDrop">Drop<kbd>X</kbd></button>
+    <button class="btn sm" type="button" id="bLow" aria-pressed="false" aria-label="Low detail" title="Low detail">Lo</button>
+    <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
+  </div>
+
+  <p class="toast" id="toast" aria-live="polite"></p>
+  <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+</div>
+
+<script src="rna-strand.js"></script>
+<script src="map.js"></script>
+<script src="bots.js"></script>
+<script src="sim.js"></script>
+<script src="net.js"></script>
+<script>
+(() => {
+'use strict';
+const RS = window.RNAStrand, $ = id => document.getElementById(id);
+const BASES = RS.BASES;
+const TAU = Math.PI * 2;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrapA = a => ((a + Math.PI * 3) % TAU) - Math.PI;
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+/* ---------- recipes: two stem letters, the core, then the stem's partners in reverse ---------- */
+const FNS = [
+  {fn:'Mover', does:'Swim faster and turn tighter. Its two blades spin like a turbine.',
+   tag:'Game only', sci:'No RNA can swim. Movement is the biggest thing this game invents.'},
+  {fn:'Cleaver', does:'Its two spikes damage what they touch on rival strands, then cut damaged structures off. Everything behind the cut floats free.',
+   tag:'Real science', sci:'Hammerhead ribozymes can be built to find a target RNA by base pairing, then cut it.'},
+  {fn:'Membrane', does:'Takes the hits meant for the functions on either side of it. Dissolves in magnesium.',
+   tag:'Real science', sci:'Bubbles of fatty acid can hold RNA, grow and divide. Magnesium breaks them apart.'},
+  {fn:'Detector', does:'Warns you of UV flashes and meteorites early and points to the nearest fragment.',
+   tag:'Real science', sci:'Riboswitches change shape when they catch a particular molecule, switching genes on or off.'},
+  {fn:'Joiner', does:'While it is the very end of your strand, back your tail into a fragment to join it. It fuses around what it grabbed: +1.',
+   tag:'Real science', sci:'The class I ligase, one of the first ribozymes evolved from random RNA, joins strands together.'},
+  {fn:'Self-cutter', does:'One use. Leaves as a ring, cuts off the structure ahead of it, and both burst into letters you can collect again.',
+   tag:'Real science', sci:'Most natural ribozymes, like the hammerhead, cut their own backbone at one exact spot.'},
+  {fn:'Repairer', does:'Leaves the strand as two helpers that travel up it once, mending damage and clearing junk.',
+   tag:'Game idea', sci:'Cells today repair RNA and DNA with protein enzymes. Whether early RNA could mend itself is an open question.'}
+];
+const RECIPES = RS.RECIPES;
+const recipeLen = fn => RECIPES[fn].length + 4;
+
+/* ---------- the game runs in sim.js; this file draws it and handles the page ---------- */
+const MAP = window.SoupMap, W = MAP.W, H = MAP.H, MK = MAP.K, BOTS = window.SoupBots;
+const zoneAt = (x, y) => MAP.zoneAt(x, y);
+const ZONE_TEXT = {
+  lagoon:'Tide-pool lagoon', flats:'Tidal flats: flooded', stranded:'Tidal flats: drained, you are stranded', salt:'Drying salt pool: magnesium. Cleavers cut in one hit, Membranes dissolve',
+  pores:'White chimney pores: warm and narrow', pocket:'Nursery pocket: safe from UV and meteorites, rich in letters', smoker:'Black smoker: scalding',
+  spring:'Hot spring terrace: rich in A and G', clay:'Clay flats: slow, but you grab letters from further away', uv:'UV shallows: rich in C and U, and UV flashes damage you',
+  ice:'Ice vein: slow and safe, damage slowly mends', raft:'Inside a pumice raft: sheltered', crater:'Fresh crater: rich in A and G', ocean:'Open ocean: almost no letters'
+};
+const stage = RS.createStage($('sv'));
+let me = null, fx = [], paused = false, clockT = 0;
+let uiDirty = true, pointer = null, showThoughts = true;
+const T = {};
+const sim = window.SoupSim.create({MAP, BOTS, stage, minStrands:10, hooks:{
+  say:(p, text) => { if (p === me) say(text); },
+  fx:e => fx.push(Object.assign({t:0}, e)),
+  dirty:p => { if (p === me) uiDirty = true; },
+  end:rows => showEnd(rows),
+  tint:(col, bot) => bot ? {spine:T[col], goo:T[col]} : null}});
+/* multiplayer: a page at rna.game/<room> joins that room on the server; the home page is single-player against bots */
+const ROOM = (n => n && !['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots'].includes(n) ? n : null)(
+  ((location.pathname.match(/^\/(?:r\/)?([a-z0-9][a-z0-9-]{0,31})\/?$/i) || [])[1] || '').toLowerCase());
+const net = ROOM && window.SoupNet ? window.SoupNet.create({RS, MAP, stage, hooks:{
+  say:text => say(text),
+  dirty:() => { uiDirty = true; },
+  fx:e => fx.push(Object.assign({t:0}, e)),
+  end:rows => showEnd(rows),
+  welcome:() => { me = net.me; uiDirty = true; camT = null; $('overlay').hidden = true; },
+  status:text => { const el = $('netStatus'); if (el) el.textContent = text; else if (text) say(text); },
+  tint:(col, bot) => col === 'stain' ? null : {spine:T[col], goo:T[col]}}}) : null;
+/* the page draws whichever world it has: the local sim, or the mirror of a server room */
+const world = net || sim;
+const working = p => world.working(p), has = (p, fn) => world.has(p, fn), complexity = p => world.complexity(p);
+const L = {get players(){ return world.players; }, get nucs(){ return world.nucs; }, get frags(){ return world.frags; }};
+
+function reset(){
+  if (net){ showJoin(); return; }
+  if (!me) me = sim.addHuman('You', 'stain');
+  sim.reset();
+  fx = []; camT = null; paused = false; pointer = null;
+  $('bPause').setAttribute('aria-pressed', 'false');
+  uiDirty = true;
+  showIntro(true);
+}
+function step(dt){
+  if (net){
+    let aim = null;
+    if (pointer && me) aim = {x:clamp(camX + pointer.x / scale, 5, W - 5), y:clamp(camY + pointer.y / scale, 5, H - 5)};
+    net.update(dt, aim);
+    if (net.me && me !== net.me){ me = net.me; uiDirty = true; }
+  } else {
+    if (sim.state === 'play') aimPlayer();
+    sim.step(dt);
+  }
+  for (let i = fx.length - 1; i >= 0; i--){ fx[i].t += dt; if (fx[i].t > fx[i].dur) fx.splice(i, 1); }
+}
+const doFold = p => world.fold(p), doDrop = p => world.drop(p);
+
+/* ---------- actions ---------- */
+function say(text){ const t = $('toast'); t.textContent = text; t.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => t.classList.remove('on'), 4600); }
+function showEnd(rows){
+  const place = rows.findIndex(r => r.p === me) + 1;
+  const kinds = new Set(working(me).map(f => f.fn)).size;
+  $('sheet').innerHTML = `<h2>${place === 1 ? 'Most complex strand in the soup' : 'Time. You placed ' + place + ' of ' + rows.length}</h2>`
+    + `<ol class="rank">${rows.map(r => `<li class="${r.p === me ? 'me' : ''}"><span class="dot" style="--c:var(--${r.p.col})"></span><span>${r.p.name}${r.p.isBot ? `<small class="style">${BOTS.describe(r.p)}</small>` : ''}</span><span>${r.score}</span></li>`).join('')}</ol>`
+    + `<p class="fine">You finished with ${plural(me.s.length, 'letter')} and ${plural(kinds, 'working kind')} of function. A new kind scores 3, a repeat 1, a fused Joiner adds 1.</p>`
+    + (net ? `<p class="fine">The next round starts in a few seconds, on a new map.</p>` : `<button class="btn go" type="button" id="again">Play again</button>`);
+  $('overlay').hidden = false;
+  if (!net){ $('again').addEventListener('click', () => reset()); $('again').focus(); }
+}
+function showIntro(show){
+  $('overlay').hidden = !show;
+  if (!show) return;
+  $('sheet').innerHTML = `<h2>Five minutes in the soup</h2>
+    <ol class="steps">
+      <li>Point, or touch and drag, to swim. Your head collects the letters it touches.</li>
+      <li>Open Recipes and pick one. Collect its letters in order, then Fold.</li>
+      <li>Wrong letter? Drop it before you fold.</li>
+      <li>Explore: the lagoon, the chimneys west, the ice north and the volcanic island east each have their own letters and dangers.</li>
+      <li>Nine bots share the soup, each with its own personality. Press T to hide what they are thinking.</li>
+    </ol>
+    <p class="fine">The RNA world is a leading hypothesis, not settled fact. Base pairing, ribozymes and magnesium are real; swimming and the exact shapes are invented for the game.</p>
+    <button class="btn go" type="button" id="begin">Start the round</button>
+    <form class="room" id="roomForm"><label for="roomName">Or play together:</label><span class="host">${location.host}/</span><input id="roomName" placeholder="period3" maxlength="32" autocomplete="off" spellcheck="false" aria-label="Room name"><button class="btn" type="submit">Join room</button></form>
+    <p class="fine">Everyone who opens the same room name plays in the same soup. Any name works.</p>`;
+  $('begin').addEventListener('click', begin);
+  $('roomForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const name = $('roomName').value.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+/, '').slice(0, 32);
+    if (name) location.href = '/' + name; else $('roomName').focus();
+  });
+}
+function begin(){ if (net) return joinRoom(); if (sim.state !== 'ready') return; sim.start(); $('overlay').hidden = true; }
+/* joining a room: pick a three-letter codon name (no accounts; it is remembered on this device only) */
+let codon = 'AUG';
+try { const c = localStorage.getItem('soup.codon'); if (/^[AUGC]{3}$/.test(c || '')) codon = c; } catch(e){}
+function showJoin(){
+  $('overlay').hidden = false;
+  $('sheet').innerHTML = `<h2>Room ${ROOM}</h2>
+    <p>Pick your name: a three-letter codon.</p>
+    <div class="codon" role="group" aria-label="Codon name">${[0, 1, 2].map(i => `<button type="button" class="cd b${codon[i]}" data-i="${i}" aria-label="Letter ${i + 1}: ${codon[i]}">${codon[i]}</button>`).join('')}
+      <button type="button" class="cd dice" id="dice" aria-label="Random codon">&#8635;</button></div>
+    <button class="btn go" type="button" id="begin">Join</button>
+    <p class="fine" id="netStatus"></p>`;
+  $('sheet').querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.i, nx = 'AUGC'['AUGC'.indexOf(codon[i]) + 1] || 'A';
+    codon = codon.slice(0, i) + nx + codon.slice(i + 1); showJoin();
+  }));
+  $('dice').addEventListener('click', () => { codon = [0, 0, 0].map(() => 'AUGC'[Math.floor(Math.random() * 4)]).join(''); showJoin(); });
+  $('begin').addEventListener('click', begin); $('begin').focus();
+}
+function joinRoom(){
+  try { localStorage.setItem('soup.codon', codon); } catch(e){}
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  net.connect(`${proto}//${location.host}/ws/${ROOM}`, codon);
+}
+
+/* ---------- drawing: the environment on the bottom canvas, names and effects on the top one ---------- */
+const cv = $('cv'), ctx = cv.getContext('2d'), tc = $('top'), tx = tc.getContext('2d');
+let cw = 300, ch = 300, dpr = 1, scale = 1, camX = 0, camY = 0, camT = null;
+const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function readTokens(){
+  const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
+  Object.assign(T, {pond:g('--pond'), field:g('--field'), surface:g('--surface'), ink:g('--ink'), muted:g('--muted'), line:g('--line'), stain:g('--stain'), warn:g('--warn'),
+    A:g('--base-a'), U:g('--base-u'), G:g('--base-g'), C:g('--base-c'), vent:g('--vent'), sun:g('--sun'), flow:g('--flow'),
+    ice:g('--ice'), iceEdge:g('--ice-edge'), mg:g('--mg'),
+    p1:g('--p1'), p2:g('--p2'), p3:g('--p3'), p4:g('--p4'), p5:g('--p5'), p6:g('--p6'), p7:g('--p7'), p8:g('--p8'), p9:g('--p9'),
+    ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => ['h' + i, g('--h' + i)])), font:g('--font-body'), mono:g('--font-mono')});
+  Object.assign(T, {A:RS.S.cA, U:RS.S.cU, G:RS.S.cG, C:RS.S.cC, spine:RS.S.cSpine});
+  for (const [k, v] of [['--base-a', RS.S.cA], ['--base-u', RS.S.cU], ['--base-g', RS.S.cG], ['--base-c', RS.S.cC]]) document.documentElement.style.setProperty(k, v);
+}
+function resize(){
+  const r = cv.getBoundingClientRect();
+  cw = Math.max(50, r.width); ch = Math.max(50, r.height);
+  /* fullscreen on a sharp screen is a lot of pixels: cap the canvases at about 1.3 million so Chromebooks keep their frame rate */
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (cw * ch * dpr * dpr > 1.3e6) dpr = Math.max(0.75, Math.sqrt(1.3e6 / (cw * ch)));
+  for (const c of [cv, tc]){ c.width = Math.round(cw * dpr); c.height = Math.round(ch * dpr); }
+}
+/* a free letter drawn like the strand's: a stem, then a two-ring (A, G) big dot or a one-ring (U, C) small dot */
+const PUR = {A:true, G:true, U:false, C:false};
+function nucGlyph(c, q, t, need){
+  if (q.ang == null){ q.ang = rnd(0, TAU); q.spin = rnd(-0.35, 0.35); }
+  const pur = PUR[q.b], r = pur ? 7 : 4.6, L = pur ? 12 : 8.5, a = q.ang + (still ? 0 : t * q.spin);
+  const bx = q.x - Math.cos(a) * L, by = q.y - Math.sin(a) * L;
+  c.strokeStyle = T[q.b]; c.lineWidth = 1.3; c.beginPath(); c.moveTo(bx, by); c.lineTo(q.x, q.y); c.stroke();
+  c.fillStyle = T[q.b]; c.beginPath(); c.arc(q.x, q.y, r, 0, TAU); c.fill();
+  c.font = pur ? `700 8.5px ${T.mono}` : `700 6.5px ${T.mono}`; c.fillStyle = T.pond; c.fillText(q.b, q.x, q.y + 0.5);
+  if (need){ c.beginPath(); c.arc(q.x, q.y, r + 3.5, 0, TAU); c.lineWidth = 1.4; c.strokeStyle = T.ink; c.globalAlpha = 0.6; c.stroke(); c.globalAlpha = 1; }
+}
+function label(c, text, x, y, col, size){
+  c.font = `700 ${size || 13}px ${T.font}`; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+  c.lineWidth = 4; c.strokeStyle = T.pond; c.strokeText(text, x, y); c.fillStyle = col; c.fillText(text, x, y);
+}
+function draw(t){
+  scale = clamp(Math.min(cw, ch) / 620, 0.75, 1.15);
+  const vw = cw / scale, vh = ch / scale, mh = me.s.head;
+  /* the camera glides after a point between the head and the middle of the body, like the specimen's */
+  const nn = me.s.nodes; let bx = mh.x, by = mh.y;
+  if (nn.length){ let sx = 0, sy = 0; for (const q of nn){ sx += q.x; sy += q.y; } bx = mh.x * 0.6 + sx / nn.length * 0.4; by = mh.y * 0.6 + sy / nn.length * 0.4; }
+  const gx = vw >= W ? (W - vw) / 2 : clamp(bx - vw / 2, 0, W - vw), gy = vh >= H ? (H - vh) / 2 : clamp(by - vh / 2, 0, H - vh);
+  const ce = camT == null ? 1 : Math.min(1, (t - camT) * 4); camT = t;
+  camX += (gx - camX) * ce; camY += (gy - camY) * ce;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#020306'; ctx.fillRect(0, 0, cw, ch);
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);
+  const seen = (x, y, pad) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
+  /* the ground: cached chunks in view only, then the tide, currents, smokers, geysers, craters and rafts */
+  MAP.drawBase(ctx, camX, camY, vw, vh, t);
+  MAP.drawOver(ctx, camX, camY, vw, vh, still ? 0 : t);
+  ctx.font = `700 9px ${T.mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const need = wantedLetters();
+  ctx.lineCap = 'round';
+  for (const q of L.nucs) if (seen(q.x, q.y, 20)) nucGlyph(ctx, q, t, need[q.b]);
+  ctx.lineWidth = 2; ctx.strokeStyle = T.line; ctx.strokeRect(0, 0, W, H);
+
+  /* the strand layer follows the same camera; strands far off screen keep swimming but are not drawn */
+  const pad = 700;
+  for (const p of L.players) p.s.setVisible(p.alive && strandSeen(p.s, pad));
+  for (const f of L.frags) f.s.setVisible(strandSeen(f.s, pad));
+  function strandSeen(sn, pd){ const h = sn.head, n = sn.nodes, e = n[n.length - 1] || h; return seen(h.x, h.y, pd) || seen(e.x, e.y, pd); }
+  stage.zoom = scale;
+  stage.world.setAttribute('transform', `scale(${scale.toFixed(4)}) translate(${(-camX).toFixed(1)} ${(-camY).toFixed(1)})`);
+  stage.render();
+
+  /* top canvas: names, effects, pointers, minimap */
+  tx.setTransform(dpr, 0, 0, dpr, 0, 0); tx.clearRect(0, 0, cw, ch);
+  tx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);
+  for (const p of L.players){
+    if (!p.alive) continue;
+    const h = p.s.head;
+    if (p.inv > 0 && Math.floor(t * 8) % 2){ tx.beginPath(); tx.arc(h.x, h.y, 9, 0, TAU); tx.lineWidth = 1.5; tx.strokeStyle = T[p.col]; tx.stroke(); }
+    label(tx, p.name, h.x, h.y - 18, T[p.col]);
+    if (p.isBot && showThoughts && p.ai.label && seen(h.x, h.y, 100)) label(tx, p.ai.label, h.x, h.y - 32, T.muted, 10);
+  }
+  /* warnings sit above the strands: UV flashes and meteorites, earlier with a Detector */
+  MAP.drawWarnings(tx, camX, camY, vw, vh, t, has(me, 'Detector') ? 4.5 : 1.8, (text, x, y) => label(tx, text, x, y, T.ink, 13));
+  for (const f of L.frags){
+    const h = f.s.head; if (!seen(h.x, h.y, 200)) continue;
+    label(tx, f.owner === 0 ? 'your lost piece' : 'fragment', h.x, h.y - 16, T.muted, 12);
+  }
+  for (const e of fx){
+    const k = e.t / e.dur;
+    tx.globalAlpha = (1 - k) * (e.flash ? 0.55 : 0.8);
+    tx.beginPath(); tx.arc(e.x, e.y, e.flash ? e.r : e.r * (0.3 + k), 0, TAU);
+    if (e.flash){ tx.fillStyle = T[e.col]; tx.fill(); } else { tx.lineWidth = 3; tx.strokeStyle = T[e.col] || T.stain; tx.stroke(); }
+    tx.globalAlpha = 1;
+  }
+  tx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (me.alive && has(me, 'Detector') && L.frags.length){
+    let best = null, bd = 1e9; for (const f of L.frags){ const d = dist(mh.x, mh.y, f.s.head.x, f.s.head.y); if (d < bd){ bd = d; best = f; } }
+    if (best && bd > 160){
+      const a = Math.atan2(best.s.head.y - mh.y, best.s.head.x - mh.x), hx = (mh.x - camX) * scale, hy = (mh.y - camY) * scale;
+      tx.save(); tx.translate(hx + Math.cos(a) * 46, hy + Math.sin(a) * 46); tx.rotate(a);
+      tx.beginPath(); tx.moveTo(12, 0); tx.lineTo(-4, -7); tx.lineTo(-4, 7); tx.closePath(); tx.fillStyle = T.stain; tx.fill(); tx.restore();
+    }
+  }
+  const mw = cw < 520 ? 110 : 170, mhh = mw * H / W, mx = cw - mw - 10, my = ch - mhh - 10, k = mw / W;
+  tx.globalAlpha = 0.95; MAP.drawMinimap(tx, mx, my, mw); tx.globalAlpha = 1;
+  tx.lineWidth = 1; tx.strokeStyle = T.line; tx.strokeRect(mx, my, mw, mhh);
+  for (const f of L.frags){ tx.fillStyle = T.muted; tx.fillRect(mx + f.s.head.x * k - 1.5, my + f.s.head.y * k - 1.5, 3, 3); }
+  for (const p of L.players){ const px = p === me || p.mx == null ? p.s.head.x : p.mx, py = p === me || p.my == null ? p.s.head.y : p.my; if (!p.alive && p.mx == null) continue; tx.fillStyle = T[p.col]; tx.beginPath(); tx.arc(mx + px * k, my + py * k, p === me ? 4 : 2.8, 0, TAU); tx.fill(); }
+  tx.strokeStyle = T.ink; tx.strokeRect(mx + camX * k, my + camY * k, Math.min(vw, W) * k, Math.min(vh, H) * k);
+}
+
+/* ---------- interface ---------- */
+let pinned = null;
+/* the recipe the tail is closest to finishing, or the one you tapped */
+function track(tail){
+  if (pinned) return {fn:pinned, p:RS.recipeProgress(tail, pinned)};
+  let top = null;
+  for (const f of FNS){ const pr = RS.recipeProgress(tail, f.fn); if (!top || pr.k > top.p.k) top = {fn:f.fn, p:pr}; }
+  return top && top.p.k >= 3 ? top : null;
+}
+function wantedLetters(){
+  const out = {}; if (!me || !me.alive) return out;
+  const tail = me.s.tail, tr = track(tail);
+  if (tr && tr.p.k < recipeLen(tr.fn)){ const need = RS.recipeNeed(tr.p.t, tr.fn, tr.p.k); if (need) out[need] = true; }
+  return out;
+}
+function slotsHtml(fn, pr){
+  const L = recipeLen(fn), core = RECIPES[fn].length; let h = '';
+  for (let i = 0; i < L; i++){
+    const gap = i === 2 || i === 2 + core ? ' gap' : '';
+    if (i < pr.k){ h += `<span class="sl done b${pr.t[i]}${gap}">${pr.t[i]}</span>`; continue; }
+    const need = RS.recipeNeed(pr.t, fn, i), nx = i === pr.k ? ' next' : '';
+    h += need ? `<span class="sl b${need}${nx}${gap}">${need}</span>` : `<span class="sl any${nx}${gap}">${i === 0 ? '1' : i === 1 ? '2' : i === L - 2 ? '2′' : '1′'}</span>`;
+  }
+  return h;
+}
+function buildList(){
+  $('recipes').innerHTML = FNS.map(f => `<li><button type="button" class="rec" data-f="${f.fn}" aria-pressed="false">`
+    + `<span class="hd"><span class="nm">${f.fn} <span class="key">${recipeLen(f.fn)}</span></span><span class="slots" id="sl-${f.fn.replace(/\W/g, '')}"></span></span>`
+    + `<span class="does">${f.does}</span></button></li>`).join('');
+  $('recipes').addEventListener('click', e => {
+    const b = e.target.closest('[data-f]'); if (!b) return;
+    pinned = pinned === b.dataset.f ? null : b.dataset.f; uiDirty = true;
+    if (pinned) openPanel(false);
+  });
+}
+/* the side panel floats over the soup; picking a recipe closes it and leaves a compact card at the top right */
+let panelOpen = false;
+function openPanel(on){
+  panelOpen = on == null ? !panelOpen : on;
+  $('panel').hidden = !panelOpen;
+  for (const id of ['bRec', 'trk']) $(id).setAttribute('aria-expanded', panelOpen);
+  uiDirty = true;
+}
+function renderUI(){
+  const tail = me.s.tail, parts = tail ? RS.parseRecipes(tail) : [], ready = parts.filter(g => g.fn).map(g => g.fn);
+  const tr = ready.length ? {fn:ready[ready.length - 1], p:RS.recipeProgress(tail, ready[ready.length - 1])} : track(tail);
+  /* compact card: the recipe you follow, letters that do not fit it shown dashed in front */
+  const card = $('trk'), show = !panelOpen && me.alive && !!tr;
+  card.hidden = !show; $('bRec').hidden = panelOpen || show;
+  card.classList.toggle('ready', ready.length > 0);
+  if (show){
+    const extra = tail.length - tr.p.k, shown = Math.min(extra, 3);
+    const strays = extra > 0 ? (extra > shown ? `<span class="meta">+${extra - shown}</span>` : '') + tail.slice(extra - shown, extra).split('').map(b => `<span class="chip b${b}">${b}</span>`).join('') : '';
+    card.innerHTML = `<span class="hd"><span>${tr.fn}</span>${ready.length ? '<span class="go">Fold</span>' : `<span class="meta">${tr.p.k}/${recipeLen(tr.fn)}</span>`}</span>`
+      + `<span class="row">${strays}<span class="slots">${slotsHtml(tr.fn, tr.p)}</span></span>`;
+    card.setAttribute('aria-label', `${tr.fn}, ${tr.p.k} of ${recipeLen(tr.fn)} letters${ready.length ? ', ready to fold' : ''}. Open recipes.`);
+  }
+  $('bFold').classList.toggle('go', ready.length > 0); $('bFold').classList.toggle('pulse', ready.length > 0);
+  if (panelOpen){
+    FNS.forEach(f => {
+      const pr = RS.recipeProgress(tail, f.fn), btn = document.querySelector(`.rec[data-f="${f.fn}"]`);
+      $('sl-' + f.fn.replace(/\W/g, '')).innerHTML = slotsHtml(f.fn, pr);
+      btn.classList.toggle('ready', ready.includes(f.fn));
+      btn.setAttribute('aria-pressed', pinned === f.fn);
+    });
+    const fl = me.s.functions;
+    $('mine').innerHTML = '<span class="seg core">Core</span>' + fl.map(f => `<span class="seg ${f.damaged ? 'dmg' : ''}">${f.fn}${f.bonus ? ' +' + f.bonus : ''}${f.fn === 'Joiner' ? `<span class="st">${f.jstate === 'armed' ? 'armed' : 'fused'}</span>` : ''}</span>`).join('');
+    $('mineN').textContent = `${me.s.length}/${RS.MAXLEN}`;
+  }
+}
+const ORD = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+function renderClock(){
+  const s = Math.ceil(world.timeLeft);
+  $('time').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  $('score').textContent = complexity(me);
+  const z = me.alive ? (ZONE_TEXT[zoneAt(me.s.head.x, me.s.head.y)] || '') : '';
+  $('zone').textContent = z.split(':')[0];
+  $('zone').title = z;
+  const rows = world.standings();
+  $('rank').textContent = ORD(rows.findIndex(r => r.p === me) + 1);
+  if (panelOpen) $('board').innerHTML = rows.map(r => `<li class="${r.p === me ? 'me' : ''}"${r.p.isBot ? ` title="${BOTS.describe(r.p)}"` : ''}><span class="dot" style="--c:var(--${r.p.col})"></span>`
+    + `<span>${r.p.name}</span><span class="n">${r.score}</span></li>`).join('');
+}
+
+/* ---------- input ---------- */
+function aimPlayer(){
+  if (!pointer){ me.tx = me.s.head.x; me.ty = me.s.head.y; return; }
+  me.tx = clamp(camX + pointer.x / scale, 5, W - 5); me.ty = clamp(camY + pointer.y / scale, 5, H - 5);
+}
+function setPointer(e){ const r = tc.getBoundingClientRect(); pointer = {x:e.clientX - r.left, y:e.clientY - r.top}; }
+let held = false;
+tc.addEventListener('pointerdown', e => { held = true; setPointer(e); });
+tc.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || held) setPointer(e); });
+['pointerup', 'pointercancel'].forEach(n => tc.addEventListener(n, () => { held = false; }));
+function togglePause(){ if (net || sim.state !== 'play') return; paused = !paused; $('bPause').setAttribute('aria-pressed', paused); if (paused) say('Paused.'); }
+$('bPause').addEventListener('click', togglePause);
+$('bLow').addEventListener('click', () => {
+  const low = RS.S.goo !== 'off';
+  RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo');
+  $('bLow').setAttribute('aria-pressed', low);
+  try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
+});
+$('bRec').addEventListener('click', () => openPanel(true));
+$('trk').addEventListener('click', () => openPanel(true));
+$('bClose').addEventListener('click', () => openPanel(false));
+$('bFold').addEventListener('click', () => { if (world.state === 'play' && me && !doFold(me)) say('Nothing to fold yet.'); });
+$('bDrop').addEventListener('click', () => { if (world.state === 'play' && me) doDrop(me); });
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const onButton = e.target instanceof HTMLButtonElement;
+  if (e.key === ' ' || e.key === 'f' || e.key === 'F'){
+    if (e.key === ' ' && onButton && e.target.id !== 'bFold') return;
+    e.preventDefault();
+    if (!net && sim.state === 'ready'){ begin(); return; }
+    if (world.state === 'play' && me && !paused && !doFold(me)) say('Nothing to fold yet.');
+  } else if (e.key === 'x' || e.key === 'X' || e.key === 'Backspace'){ e.preventDefault(); if (world.state === 'play' && me && !paused) doDrop(me); }
+  else if (e.key === 'p' || e.key === 'P') togglePause();
+  else if (e.key === 'r' || e.key === 'R') openPanel();
+  else if (e.key === 'Escape' && panelOpen) openPanel(false);
+  else if (e.key === 't' || e.key === 'T') { showThoughts = !showThoughts; say(showThoughts ? 'Showing what the bots are thinking.' : 'Bot thoughts hidden.'); }
+});
+
+/* ---------- boot ---------- */
+function start(){
+  /* the lab's look, a little larger so strands read at game scale */
+  RS.S.glyphSize = 4; RS.S.gooSize = 30; RS.restyle();
+  readTokens(); buildList();
+  try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); } } catch(e){}
+  if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
+  reset(); resize();
+  window.addEventListener('resize', resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+  let last = performance.now(), fpsT = 0, fpsN = 0, acc = 0;
+  (function frame(now){
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    fpsT += dt; fpsN++; if (fpsT >= 1){ window.__fps = fpsN / fpsT; fpsT = 0; fpsN = 0; }
+    /* fixed 1/60 s steps, as in the specimen, so swimming feels the same at any frame rate */
+    acc += dt; let n = 0;
+    while (acc >= 1 / 60 && n < 4){ if (!paused) step(1 / 60); acc -= 1 / 60; n++; }
+    if (n === 4) acc = 0;
+    if (me){
+      if (uiDirty){ uiDirty = false; renderUI(); }
+      clockT += dt; if (clockT > 0.25){ clockT = 0; renderClock(); }
+      draw(now / 1000);
+    }
+    requestAnimationFrame(frame);
+  })(last);
+  window.__game = {step, begin, doFold, doDrop, reset, sim, net, world, strike:sim.strike, uvFlash:sim.uvFlash, impact:sim.impact, geyserBurst:sim.geyserBurst,
+    complexity, spawnFrag:sim.spawnFrag, track, get mapEv(){ return sim.mapEv; },
+    get me(){ return me; }, get players(){ return sim.players; }, get frags(){ return sim.frags; }, get nucs(){ return sim.nucs; },
+    get timeLeft(){ return sim.timeLeft; }, get over(){ return sim.state === 'over'; }, get fps(){ return window.__fps; }, RS, stage};
+}
+const hot = window.claude && window.claude.hot;
+if (hot && hot.ready) hot.ready(start); else start();
+})();
+
+</script>
+</body>
+</html>
