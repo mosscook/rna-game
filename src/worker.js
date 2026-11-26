@@ -3,18 +3,23 @@
      rna.game/<room>           a shared room: anyone who opens the same name plays together
      rna.game/r/<room>         the same room (older links)
      rna.game/ws/<room>        the room's WebSocket (the page connects here itself)
+     rna.game/version          which version is live, so open pages can offer a refresh after a deploy
    Room names: letters, numbers and dashes, up to 32, not case sensitive. */
+import {versionOf} from './room.js';
 export {GameRoom} from './room.js';
 
 const NAME = '[a-z0-9][a-z0-9-]{0,31}';
 const WS = new RegExp(`^/ws/(${NAME})$`, 'i');
 const PAGE = new RegExp(`^/(?:r/)?(${NAME})/?$`, 'i');
 /* paths that are never rooms */
-const RESERVED = new Set(['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots']);
+const RESERVED = new Set(['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots', 'version', 'lab']);
 
 export default {
   async fetch(req, env){
     const url = new URL(req.url);
+
+    if (url.pathname === '/version')
+      return Response.json({v:versionOf(env)}, {headers:{'Cache-Control':'no-store'}});
 
     const ws = url.pathname.match(WS);
     if (ws){

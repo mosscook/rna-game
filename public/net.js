@@ -20,7 +20,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function create(o){
   const {RS, MAP, stage} = o;
-  const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}}, o.hooks || {});
+  const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}, outdated(){}}, o.hooks || {});
+  /* o.version: the page's own version, or a function returning it (the page learns it from /version after loading) */
+  const pageVersion = () => typeof o.version === 'function' ? o.version() : o.version;
   let ws = null, meId = null, seed = null, state = 'connecting', tl = 0, tlAt = 0, offset = null, rtt = 0.08, url = '', name = '';
   let lastSend = 0, lastAim = null, retry = 0, closedByUs = false;
   /* a random token for this tab only (gone when the tab closes): lets a refresh or a dropped connection take your strand back */
@@ -75,6 +77,8 @@ function create(o){
     switch (m.t){
       case 'w':
         meId = m.id; retry = 0;
+        /* the server was redeployed since this page loaded: offer a refresh (the game keeps working meanwhile) */
+        { const mine = pageVersion(); if (m.v && mine && m.v !== 'dev' && m.v !== mine) hooks.outdated(m.v); }
         if (m.seed !== seed){ seed = m.seed; clearAll(); MAP.generate(seed); }
         else { N.clear(); nucs = []; }   /* rejoining the same map: the server sends the nearby letters again */
         state = STATES[m.st] || m.st; tl = m.tl; tlAt = now();

@@ -9,6 +9,7 @@ complex strand. Built for Chromebooks, with no accounts and no tracking.
 | `rna.game/` | Play alone against bots. The home page also has a box for joining a room. |
 | `rna.game/<room>` | A shared room. Everyone who opens the same name plays together, e.g. `rna.game/period3`. |
 | `rna.game/r/<room>` | Older form of a room link. It redirects to `rna.game/<room>`. |
+| `rna.game/version` | Which version is live. Open pages check it so they can offer a refresh after a deploy. |
 
 Room names can use letters, numbers and dashes, up to 32 characters. They aren't case sensitive.
 
@@ -35,13 +36,17 @@ Every push to `main` deploys to Cloudflare once the repo is connected. To connec
 
 `wrangler.toml` attaches `rna.game` as the Worker's custom domain, so the first deploy also creates its DNS record and certificate.
 
+**The tests run before every deploy.** `wrangler.toml` sets `npm test` as the build step, so if the page doesn't parse or a headless round fails, the deploy stops and the live game stays as it was. The failure shows in the build log under Workers & Pages → rna-game → Deployments.
+
+**Open pages offer a refresh after a deploy.** Cloudflare gives the Worker its version id (`CF_VERSION_METADATA`). A page asks `/version` once it loads, checks again every 5 minutes and whenever the tab comes back into view, and shows a "New version ready. Refresh" button when the id changes. In a room the server also sends its version when a player joins. A deploy restarts every room, so players reconnect and see the button straight away. The game keeps working until they press it.
+
 ## Working on it locally
 
 ```sh
 npm install
-npm test                                   # plays a full round with no page
+npm test                                   # checks the page scripts parse, then plays a full round with no page
 npx wrangler dev --var ROUND_SECONDS:20 --var RESULTS_SECONDS:4
-node test/room.mjs                         # fake players join, steer, reconnect, fill the room, finish a round
+npm run test:room                          # with wrangler dev running: fake players join, steer, reconnect, fill the room, finish a round
 ```
 
 Then open `http://localhost:8787/` for single-player, or `http://localhost:8787/test` for a room.

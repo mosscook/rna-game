@@ -9,6 +9,9 @@
 import {DurableObject} from 'cloudflare:workers';
 import {makeGame, FN} from './game.js';
 
+/* which deploy this is (Cloudflare's version id), so pages loaded before a deploy can offer a refresh */
+export function versionOf(env){ const m = env && env.CF_VERSION_METADATA; return (m && m.id) || 'dev'; }
+
 const HZ = 30, TICK = 1 / HZ;
 const MIN_STRANDS = 10;          /* bots keep the room at least this busy */
 const MAX_HUMANS = 12;           /* more than this and Chromebooks struggle to draw the room */
@@ -174,7 +177,7 @@ export class GameRoom extends DurableObject {
   welcome(c){
     const sim = this.sim;
     c.known = new Map();
-    this.send(c, {t:'w', id:c.p.id, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
+    this.send(c, {t:'w', v:versionOf(this.env), id:c.p.id, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
     this.send(c, this.rosterMsg());
     for (const p of sim.players) this.send(c, this.strandMsg(p.s, p.id, false));
     for (const f of sim.frags) this.send(c, this.strandMsg(f.s, f.id, true));

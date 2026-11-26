@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/headless.mjs"
+    "test": "node test/page.mjs && node test/headless.mjs",
+    "test:room": "node test/room.mjs"
   },
   "repository": {
     "type": "git",

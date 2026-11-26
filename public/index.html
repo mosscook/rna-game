@@ -104,6 +104,9 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .toast{position:absolute;left:50%;bottom:58px;transform:translateX(-50%);max-width:min(88%,520px);padding:7px 12px;border-radius:8px;
   background:var(--ink);color:var(--surface);font-size:13.5px;text-align:center;pointer-events:none;opacity:0;transition:opacity .2s}
 .toast.on{opacity:.92}
+.newver{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:6;padding:7px 14px;border-radius:99px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);font:700 13px/1.2 var(--font-body);cursor:pointer;box-shadow:0 4px 18px rgb(0 0 0/.35)}
+.newver:hover{border-color:var(--ink)}
 
 /* start and end screens */
 .overlay{position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--pond) 55%,transparent);overflow:auto;z-index:5}
@@ -253,9 +256,30 @@ const sim = window.SoupSim.create({MAP, BOTS, stage, minStrands:10, hooks:{
   end:rows => showEnd(rows),
   tint:(col, bot) => bot ? {spine:T[col], goo:T[col]} : null}});
 /* multiplayer: a page at rna.game/<room> joins that room on the server; the home page is single-player against bots */
-const ROOM = (n => n && !['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots'].includes(n) ? n : null)(
+const ROOM = (n => n && !['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots', 'version', 'lab'].includes(n) ? n : null)(
   ((location.pathname.match(/^\/(?:r\/)?([a-z0-9][a-z0-9-]{0,31})\/?$/i) || [])[1] || '').toLowerCase());
-const net = ROOM && window.SoupNet ? window.SoupNet.create({RS, MAP, stage, hooks:{
+/* after a deploy, offer a refresh. The page asks /version which deploy it was loaded from, then checks again
+   every few minutes and whenever the tab comes back into view; in a room the server also says on (re)joining. */
+let VERSION = null;
+function offerRefresh(){
+  if ($('newver')) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.id = 'newver'; b.className = 'newver'; b.textContent = 'New version ready. Refresh';
+  b.addEventListener('click', () => location.reload());
+  $('toast').before(b);
+}
+async function checkVersion(){
+  if (!/^https?:$/.test(location.protocol) || document.hidden) return;
+  try {
+    const r = await fetch('/version', {cache:'no-store'}); if (!r.ok) return;
+    const {v} = await r.json(); if (!v || v === 'dev') return;
+    if (!VERSION) VERSION = v; else if (v !== VERSION) offerRefresh();
+  } catch(e){}
+}
+checkVersion(); setInterval(checkVersion, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', checkVersion);
+const net = ROOM && window.SoupNet ? window.SoupNet.create({RS, MAP, stage, version:() => VERSION, hooks:{
+  outdated:() => offerRefresh(),
   say:text => say(text),
   dirty:() => { uiDirty = true; },
   fx:e => fx.push(Object.assign({t:0}, e)),
