@@ -4,11 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RNA Strand Soup v2</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
   /* Layout: the soup fills the whole screen; everything else floats over it, small and out of the way.
@@ -20,9 +15,10 @@
   --ice:#D6ECF7; --ice-edge:#4F90B8; --mg:#7FA36C;
   --p1:#5B6B8C; --p2:#9A4577; --p3:#2C7F88; --p4:#7B5B45; --p5:#A8641F; --p6:#5B8A2A; --p7:#B8483A; --p8:#7D7740; --p9:#8E4E9E;
   --h1:#0F8F8F; --h2:#C2410C; --h3:#2563EB; --h4:#B4237A; --h5:#4D7C0F; --h6:#9333EA; --h7:#B45309; --h8:#0E7490; --h9:#BE123C; --h10:#15803D; --h11:#7C3AED; --h12:#A16207;
-  --font-display:'Bricolage Grotesque','Trebuchet MS',sans-serif;
-  --font-body:'Atkinson Hyperlegible Next','Atkinson Hyperlegible',Verdana,sans-serif;
-  --font-mono:'Atkinson Hyperlegible Mono',ui-monospace,'Courier New',monospace;
+  /* the device's own fonts: nothing loads from other sites */
+  --font-display:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-body:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:ui-monospace,'Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){

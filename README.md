@@ -48,4 +48,4 @@ Then open `http://localhost:8787/` for single-player, or `http://localhost:8787/
 
 ## Privacy
 
-The server keeps only what a round needs while the room is running: three-letter codon names, strand state and scores. Nothing is written to storage. There are no accounts, analytics or ads, and Worker logs are off. A random token in the tab's session storage lets a refreshed tab take its strand back, and it disappears when the tab closes. The page still loads its fonts from Google Fonts, so those should be self-hosted before wide use.
+The server keeps only what a round needs while the room is running: three-letter codon names, strand state and scores. Nothing is written to storage. There are no accounts, analytics or ads, and Worker logs are off. A random token in the tab's session storage lets a refreshed tab take its strand back, and it disappears when the tab closes. The page uses the device's own fonts and loads nothing from other sites.
