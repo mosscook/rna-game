@@ -19,7 +19,8 @@ const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 const wrapA = a => ((a + Math.PI * 3) % TAU) - Math.PI;
 
 let G = null, MAP = null, RS = null, K = null, T = 0;
-const FNS = ['Mover', 'Cleaver', 'Membrane', 'Detector', 'Joiner', 'Repairer', 'Self-cutter'];
+/* segment types, their bot tastes and how a bot weighs each: segments.js */
+const SEG = window.SoupSegments, FNS = SEG.names;
 const TRAITS = ['aggression', 'caution', 'greed', 'curiosity', 'patience', 'opportunism', 'grudge'];
 const NAMES = {
   aggression:['Fang', 'Razor', 'Snapper', 'Brute'],
@@ -38,8 +39,10 @@ let LETTER_HOMES = null, REGIONS = null;
 
 function init(api){
   G = api; MAP = api.MAP; RS = api.RS; K = MAP.K;
-  LETTER_HOMES = {A:[K.SPRING, K.POCKET, K.LAGOON], G:[K.SPRING, K.POCKET, K.LAGOON], C:[K.UV, K.POCKET, K.FLATS], U:[K.UV, K.POCKET, K.FLATS]};
-  REGIONS = {lagoon:[K.LAGOON, K.FLATS], chimneys:[K.PORE, K.POCKET], island:[K.SPRING, K.CLAY, K.UV], ice:[K.BRINE]};
+  /* where letters gather, and the regions a bot can call home (biomes.js) */
+  const BIO = window.SoupBiomes;
+  LETTER_HOMES = Object.fromEntries(Object.entries(BIO.LETTER_HOMES).map(([b, keys]) => [b, keys.map(k => K[k])]));
+  REGIONS = Object.fromEntries(BIO.REGIONS.filter(r => r.cells && r.botHome).map(r => [r.id, r.cells.map(k => K[k])]));
 }
 
 /* ---------- birth: a random mind with one trait that stands out ---------- */
@@ -56,13 +59,11 @@ function makeMind(i, taken){
   if (traits.aggression > 0.75) traits.caution *= 0.7;
   const skill = rnd(0.35, 1);
   const taste = {}; for (const f of FNS) taste[f] = rnd(0.75, 1.3);
-  const homes = {lagoon:0.5 + traits.greed, chimneys:0.3 + traits.caution + traits.patience * 0.5, island:0.3 + traits.curiosity + traits.greed * 0.3, ice:0.2 + traits.caution * 0.6 + traits.patience * 0.4};
+  const homes = {}; for (const r of window.SoupBiomes.REGIONS) if (r.cells && r.botHome) homes[r.id] = r.botHome(traits);
   let r = Math.random() * Object.values(homes).reduce((a, b) => a + b, 0), home = 'lagoon';
   for (const [k, v] of Object.entries(homes)){ r -= v; if (r < 0){ home = k; break; } }
   /* the standout trait tilts which recipes it likes */
-  const LIKES = {aggression:['Cleaver'], caution:['Membrane', 'Detector'], greed:['Mover'], curiosity:['Mover', 'Detector'],
-                 patience:['Detector', 'Membrane'], opportunism:['Joiner'], grudge:['Cleaver', 'Membrane']};
-  for (const f of LIKES[lead]) taste[f] *= rnd(1.3, 1.6);
+  for (const s of SEG.LIST) if (s.likedBy && s.likedBy.includes(lead)) taste[s.fn] *= rnd(1.3, 1.6);
   const name = pick(NAMES[lead]);
   return {name, lead, traits, skill, taste, home,
           react:0.55 - 0.32 * skill,           /* seconds between decisions */
@@ -87,12 +88,11 @@ function tick(dt){
       const k = Math.min(1, dt * 5); v.vx += (vx - v.vx) * k; v.vy += (vy - v.vy) * k;
     } else { v.vx = 0; v.vy = 0; }
     v.x = h.x; v.y = h.y;
-    /* where this strand's Cleaver spikes are right now */
+    /* where this strand's Cleaver spikes (anything with tips) are right now */
     const tips = p._tips || (p._tips = []); tips.length = 0;
     if (p.alive) for (const f of G.working(p)){
-      if (f.fn !== 'Cleaver') continue;
-      const L = f.end - f.start;
-      for (const j of [f.start + Math.round(L / 4), f.start + Math.round(3 * L / 4)]){ const n = p.s.nodes[j]; if (n) tips.push(n); }
+      const seg = SEG.get(f.fn); if (!seg || !seg.tips) continue;
+      for (const j of seg.tips(f)){ const n = p.s.nodes[j]; if (n) tips.push(n); }
     }
     if (p.mind){
       const m = p.mind;
@@ -118,7 +118,7 @@ function onRespawn(p){ const ai = p.ai; ai.mode = 'forage'; ai.modeT = 0; ai.pat
 /* ---------- looking around ---------- */
 const working = p => G.working(p);
 const hasFn = (p, fn) => G.has(p, fn);
-function earlyFor(p){ return hasFn(p, 'Detector') ? 4.5 : 1.8; }
+function earlyFor(p){ return SEG.warnEarly(working(p)); }
 function scores(){ return G.players.map(o => ({o, s:G.complexity(o)})).sort((a, b) => b.s - a.s); }
 
 function perceive(p){
@@ -156,7 +156,7 @@ function perceive(p){
   info.late = G.timeLeft < 50;
   info.damaged = p.s.functions.filter(f => f.damaged);
   info.cleaver = p._tips.length > 0;
-  info.joinerArmed = working(p).some(f => f.fn === 'Joiner' && f.jstate === 'armed') && !p.s.tail.length;
+  info.joinerArmed = working(p).some(f => f.jstate === 'armed') && !p.s.tail.length;
   return info;
 }
 
@@ -179,32 +179,12 @@ function planRecipe(p, info){
     /* rarer letters around here make a recipe slower to finish */
     const core = RS.RECIPES[fn]; let slow = 0; for (const b of core) slow += 0.25 / share(b); slow /= core.length;
     const tEst = left / rate * clamp(slow, 0.6, 3);
-    let gain = kinds.has(fn) ? 1 : 3, want = 0;
     const n = G.countFn(p, fn);
-    switch (fn){
-      case 'Mover': want = 0.3 + 0.5 * tr.curiosity + 0.4 * tr.greed + (m.fear > 0.3 ? tr.caution : 0) - 0.3 * n; if (n >= 3) gain *= 0.5; break;
-      case 'Cleaver': want = 1.7 * tr.aggression + 0.5 * tr.opportunism + 0.8 * m.anger + (info.late && info.rank > 1 ? 0.6 : 0); if (n >= 2) want *= 0.35; break;
-      case 'Membrane': want = 1.4 * tr.caution + 0.35 * rivalSpikes + 0.6 * m.fear + 0.08 * p.s.functions.length; if (n >= 2) want *= 0.4; break;
-      case 'Detector': want = 0.9 * tr.caution + 0.4 * tr.curiosity + 0.3 * tr.opportunism; if (n) want *= 0.3; break;
-      case 'Joiner': {
-        /* fragments nobody else is already going for */
-        const free = info.frags.filter(r => r.d < 1600 && !G.players.some(o => o !== p && o.ai && o.ai.mode === 'join' && o.ai.fragPick && o.ai.fragPick.f === r.f)).length;
-        want = 1.1 * tr.opportunism + 0.45 * free + (info.cleaver ? 0.5 * tr.aggression : 0);
-        if (free) gain += 1.2;
-        if (n){ want *= 0.3 + 0.7 * tr.opportunism; if (!free) gain *= 0.5; }
-        break;
-      }
-      case 'Repairer': {
-        gain = info.damaged.reduce((s, f) => s + (kinds.has(f.fn) ? 1 : 3), 0);
-        if (gain < 2) continue;
-        want = 0.4 + 0.6 * tr.greed - 0.5 * tr.patience; break;
-      }
-      case 'Self-cutter': {
-        /* only worth it when the structure right before the tail is broken: it recycles it into letters */
-        if (!lastSt || !lastSt.damaged || hasFn(p, 'Repairer')) continue;
-        gain = 0.6; want = 0.5 * tr.opportunism; break;
-      }
-    }
+    /* each segment type weighs itself (segments.js) */
+    const c = {gain:kinds.has(fn) ? 1 : 3, want:0, tr, m, n, info, p, kinds, lastSt, rivalSpikes, G, has:f => hasFn(p, f)};
+    const plan = SEG.get(fn).plan;
+    if (plan && plan(c) === false) continue;
+    const gain = c.gain, want = c.want;
     let u = (gain + Math.max(0, want)) * m.taste[fn] / Math.pow(5 + tEst, 0.75);
     if (fits) u += prog.k * 0.05; else u -= (tail.length - prog.k) * 0.04;
     if (tEst > G.timeLeft * 0.9) u *= 0.15;
@@ -247,7 +227,7 @@ function bestLetter(p, info, need){
     const t = MAP.typeAt(q.x, q.y);
     if (t === K.FLATS && MAP.tide < 0.5) c *= 1 + 0.8 * tr.caution;
     if (t === K.UV && working(p).length > 2) c *= 1 + 0.6 * tr.caution;
-    if (MAP.saltAt(q.x, q.y) && hasFn(p, 'Membrane')) c *= 1.6;
+    if (MAP.saltAt(q.x, q.y) && SEG.any(working(p), 'saltBreaks')) c *= 1.6;
     if (info.threat){ const oh = info.threat.s.head; if (dist(oh.x, oh.y, q.x, q.y) < 300) c *= 1 + 1.5 * tr.caution; }
     if (c < bc){ bc = c; best = q; }
   }
@@ -281,7 +261,7 @@ function preyValue(p, info, o, d){
   if (tailN >= 4 && tailN * 0.3 * (0.5 + tr.opportunism + tr.greed * 0.5) > v){ v = tailN * 0.3 * (0.5 + tr.opportunism + tr.greed * 0.5); node = from + Math.floor(tailN / 2); }
   /* otherwise a working function with no Membrane beside it */
   if (node == null){
-    const open = fl.filter(f => !f.damaged && f.fn && f.fn !== 'Membrane' && !G.shieldFor(o, f));
+    const open = fl.filter(f => !f.damaged && f.fn && !(SEG.get(f.fn) || {}).shield && !G.shieldFor(o, f));
     if (!open.length) return null;
     const f = open[open.length - 1]; v = 1 + 0.15 * open.length; node = Math.round((f.start + f.end) / 2);
   }
@@ -289,7 +269,7 @@ function preyValue(p, info, o, d){
   v += (m.grudges[o.id] || 0) * (0.5 + 1.5 * tr.grudge);
   if (info.late && o === info.leader && info.rank > 1) v += 1.2 * (0.4 + tr.aggression);   /* knock the leader down */
   if (o === info.leader && info.lead >= 4) v += 0.5;
-  if (o._tips.length && !hasFn(p, 'Membrane')) v -= 1.2 * tr.caution;                      /* they bite back */
+  if (o._tips.length && !SEG.any(working(p), 'shield')) v -= 1.2 * tr.caution;                      /* they bite back */
   if (MAP.shelterAt(o.s.head.x, o.s.head.y)) v -= 0.6;
   /* do not dog-pile: if others already hunt this one, look elsewhere */
   const hunters = G.players.filter(b => b !== p && b.ai && b.ai.mode === 'hunt' && b.ai.prey === o).length;
@@ -378,7 +358,7 @@ const MODES = {
   },
   mend:{
     score(p, i){
-      if (!i.damaged.length || p.ai.goal === 'Repairer') return 0;
+      if (!i.damaged.length || SEG.bodyOf(p.ai.goal) === 'helpers') return 0;
       const tr = p.mind.traits, h = i.h, sp = MAP.nearestOf([K.BRINE], h.x, h.y, 3000);
       p.ai.brine = sp; if (!sp) return 0;
       const inIce = MAP.typeAt(h.x, h.y) === K.BRINE;

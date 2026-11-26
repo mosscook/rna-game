@@ -16,14 +16,43 @@ Room names can use letters, numbers and dashes, up to 32 characters. They aren't
 ## How it works
 
 - **`public/`**: the game page. It's the same code as the RNA Strand Soup prototype.
+  - `segments.js` lists every segment type (Mover, Cleaver and the rest): recipe, shape, what it does, its recipe card, and how bots weigh it.
+  - `biomes.js` lists the ground types, the named places, and the regions that build the map.
   - `sim.js` runs the game itself.
   - `rna-strand.js` handles strand physics and SVG drawing.
-  - `map.js` builds the map, `bots.js` runs the bot players, and `net.js` is the multiplayer client.
+  - `map.js` builds the map from the regions and runs its moving hazards. `bots.js` runs the bot players, and `net.js` is the multiplayer client.
 - **`src/worker.js`**: serves the page and sends each room's WebSocket (`/ws/<room>`) to that room's Durable Object.
 - **`src/room.js`**: one Durable Object per room name. It runs `sim.js` for everyone in the room at 30 steps a second and sends each player only what is near them. Rounds run back to back: 5 minutes of play, 15 seconds of results, then a new map. Bots keep at least 10 strands in a room, and each room holds up to 12 players. If a player drops out, their strand waits 30 seconds so a refreshed tab gets it back. Once a room is empty for 30 seconds it stops and costs nothing.
 - **`src/game.js` and `src/dom-shim.js`**: let the browser files run on the server, where nothing is drawn.
 
 You can change the room settings in the constants at the top of `src/room.js`.
+
+## Adding a segment type
+
+Add one entry to the list in `public/segments.js`. The comment at the top of that file explains every field. In short:
+
+- `fn`, `core`: the name and the recipe's middle letters. Cores must all differ.
+- `body`: which shape it folds into. Reuse one of the seven (blades, spikes, chamber, circle, jaws, ring, helpers). A new shape needs drawing code in `rna-strand.js`.
+- `does`, `tag`, `sci`: the recipe card.
+- What it does in play, if it fits an existing ability: `swim` (speed and turning), `tips` (strikes rivals), `shield`, `saltBreaks`, `warnEarly`, `findsFragments`. A new kind of ability needs code in `sim.js`.
+- `likedBy` and `plan(c)`: which bot personalities like it, and how a bot weighs building it.
+
+The page's recipe list, the server, multiplayer and the bots all pick it up from there. `npm test` checks the entry.
+
+## Adding a biome
+
+In `public/biomes.js`:
+
+1. Add any new ground types to the end of `CELLS`: speed, letters, colour, drawing layer, and optional effects (`shelter`, `reach`, `mends`).
+2. Add the place to `ZONES`: the name shown on screen, and the line of science the first time a player arrives.
+3. Add a region to `REGIONS` that paints it onto the map. Regions run in order, and later ones can place themselves around the lagoon. Give it `cells` and `botHome` if bots should treat it as home.
+
+Moving hazards (the tide, geysers, shifting ice, meteorites, UV flashes, rafts) still live in `map.js`.
+
+## Checking a change
+
+- `npm test` runs before every deploy. It checks that the page scripts parse, checks the registries, and plays a round.
+- `npm run fingerprint` plays three rounds with fixed random numbers and compares them with `test/fingerprint.json`. A cleanup that's not meant to change the game must match exactly. A change that is meant to change the game (new rules, new numbers, a new segment or biome) will differ. Play it to check, then record it with `npm run fingerprint -- --save`.
 
 ## Deploying
 
@@ -44,7 +73,8 @@ Every push to `main` deploys to Cloudflare once the repo is connected. To connec
 
 ```sh
 npm install
-npm test                                   # checks the page scripts parse, then plays a full round with no page
+npm test                                   # page scripts parse, registries are sound, a full round plays with no page
+npm run fingerprint                        # did this change how the game plays? (see above)
 npx wrangler dev --var ROUND_SECONDS:20 --var RESULTS_SECONDS:4
 npm run test:room                          # with wrangler dev running: fake players join, steer, reconnect, fill the room, finish a round
 ```

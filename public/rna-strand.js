@@ -37,6 +37,8 @@ const pick = a => a[Math.floor(Math.random() * a.length)];
 const wrapA = a => ((a + Math.PI * 3) % TAU) - Math.PI;
 const f1 = v => v.toFixed(1);
 const MAXLEN = 240;
+/* segment types and their body plans live in segments.js */
+const SEG = window.SoupSegments, BODY = fn => SEG.bodyOf(fn);
 
 /* ---------- chemistry ---------- */
 const BASES = ['A','U','G','C'], COMP = {A:'U', U:'A', G:'C', C:'G'}, HB = {A:2, U:2, G:3, C:3};
@@ -253,7 +255,7 @@ function partsFold(s, minStem){
   return {arms, clamps, units, mods};
 }
 /* Cleaver: the strand runs base of spike A -> tip A -> centre -> tip B -> base, so one base sits at each tip */
-const isCleaver = m => !!m && (m.cleaver || (m.recipe && m.fn === 'Cleaver'));
+const isCleaver = m => !!m && (m.cleaver || (m.recipe && BODY(m.fn) === 'spikes'));
 function spikeIdx(m){ const L = m.end - m.start; return {tA:Math.round(L / 4), C:Math.round(L / 2), tB:Math.round(3 * L / 4), L}; }
 function spikeShape(m){
   const {tA, C, tB, L} = spikeIdx(m), Lu = S.spikeLen, sl = S.spikeSlope;
@@ -281,7 +283,7 @@ function detGeom(u){
 }
 /* ---------- game recipes: a 2-letter stem, the function's core, then the stem's partners in reverse ----------
    Mover is A–U rich (flexible blades), Membrane G–C rich (the strongest pairs, a sturdy wall). */
-const RECIPES = {Mover:'UUAAUU', Cleaver:'CUGCUG', Membrane:'GCCGGC', Detector:'ACAACAACA', 'Self-cutter':'UAG', Joiner:'GGA', Repairer:'GACGACGAC'};
+const RECIPES = Object.fromEntries(SEG.LIST.map(s => [s.fn, s.core]));
 const RECIPE_LIST = Object.entries(RECIPES).sort((a, b) => b[1].length - a[1].length);
 const recipeLen = fn => RECIPES[fn].length + 4;
 function recipeMatch(s, k, fn){
@@ -475,19 +477,23 @@ function makeStrand(stage, opts){
       const {fn, start, end} = sg, len = end - start + 1;
       if (end >= n) continue;
       if (!fn){ if (len >= 5) mods.push(arm(start, end)); else junk.push({kind:'junk', fn:'', start, end, stem:0}); continue; }
-      if (fn === 'Mover' || fn === 'Repairer'){
-        const cut = fn === 'Repairer' ? start + Math.ceil(len / 2) : start + Math.floor(len / 2) - 1;
-        const x = fn === 'Repairer' ? {repairer:true} : {};
+      /* the shape comes from the segment's body plan (segments.js) */
+      const body = BODY(fn);
+      if (body === 'blades' || body === 'helpers'){
+        const rep = body === 'helpers';
+        const cut = rep ? start + Math.ceil(len / 2) : start + Math.floor(len / 2) - 1;
+        const x = rep ? {repairer:true} : {};
         const h1 = arm(start, cut, x), h2 = arm(cut + 1, end, x); mods.push(h1, h2);
-        units.push({kind:fn === 'Mover' ? 'tandem' : 'repairer', fn, arms:[h1, h2], start, end});
-      } else if (fn === 'Membrane') units.push({kind:'tandem', fn, arms:[], start, end});
-      else if (fn === 'Cleaver'){ const h = arm(start, end, {cleaver:true}); mods.push(h); units.push({kind:'arm', fn, arms:[h], start, end}); }
-      else if (fn === 'Joiner'){ const h = arm(start, end, {joiner:true}); delete h.sparse; mods.push(h); units.push({kind:'joiner', fn, arms:[h], start, end}); }
-      else if (fn === 'Self-cutter'){ const h = arm(start, end, {cutter:true}); mods.push(h); units.push({kind:'cutter', fn, arms:[h], start, end}); }
-      else if (fn === 'Detector'){ const h = arm(start, end, {detector:true}); const u = {kind:'detector', fn, start, end, n:len, a:h.a, b:h.b, stem:h.stem, loop:h.loop, hb:0, recipe:false}; units.push(u); mods.push(u); }
+        units.push({kind:rep ? 'repairer' : 'tandem', fn, arms:[h1, h2], start, end});
+      } else if (body === 'chamber') units.push({kind:'tandem', fn, arms:[], start, end});
+      else if (body === 'spikes'){ const h = arm(start, end, {cleaver:true}); mods.push(h); units.push({kind:'arm', fn, arms:[h], start, end}); }
+      else if (body === 'jaws'){ const h = arm(start, end, {joiner:true}); delete h.sparse; mods.push(h); units.push({kind:'joiner', fn, arms:[h], start, end}); }
+      else if (body === 'ring'){ const h = arm(start, end, {cutter:true}); mods.push(h); units.push({kind:'cutter', fn, arms:[h], start, end}); }
+      else if (body === 'circle'){ const h = arm(start, end, {detector:true}); const u = {kind:'detector', fn, start, end, n:len, a:h.a, b:h.b, stem:h.stem, loop:h.loop, hb:0, recipe:false}; units.push(u); mods.push(u); }
+      else { const h = arm(start, end); mods.push(h); units.push({kind:'arm', fn, arms:[h], start, end}); }   /* no known body: a plain hairpin */
     }
     /* a Joiner is armed while nothing follows it; once a structure is joined right behind it, it fuses around it for +1 */
-    for (const u of units.filter(v => v.fn === 'Joiner')){
+    for (const u of units.filter(v => BODY(v.fn) === 'jaws')){
       const h = u.arms[0];
       if (u.end === n - 1){ h.jstate = u.jstate = 'armed'; continue; }
       const nx = units.find(v => v.start === u.end + 1);
@@ -505,7 +511,7 @@ function makeStrand(stage, opts){
     const addStem = (a, b, stem) => { for (let q = 0; q < stem; q++){ const i = a - q, j = b + q; partner[i] = j; partner[j] = i; role[i] = role[j] = 'stem';
       const key = i + '-' + j; next.set(key, pairs.get(key) || {i, j, s:0, delay:q * 0.22 / S.foldSpeed}); } };
     pf.arms.forEach(h => { addStem(h.a, h.b, h.stem); for (let i = h.a + 1; i < h.b; i++){ loopOf[i] = h; role[i] = 'loop'; } });
-    pf.units.forEach(u => { if (u.fn === 'Cleaver' && u.arms) u.arms[0].cleaver = true; });
+    pf.units.forEach(u => { if (BODY(u.fn) === 'spikes' && u.arms) u.arms[0].cleaver = true; });
     pairs = next; sticky.clear();
     fold = {mods:pf.mods, partner, loopOf, role, units:pf.units, tags:pf.units, arms:pf.arms, junk:pf.junk || []};
   }
@@ -598,7 +604,7 @@ function makeStrand(stage, opts){
     if (dl < 1e-3){ dx = -Math.cos(heading); dy = -Math.sin(heading); dl = 1; }
     for (let k = 1; k < 80; k++) trail.push({x:last.x + dx / dl * k * 12, y:last.y + dy / dl * k * 12});
   }
-  function detectors(){ const m = new Map(); for (const u of fold.units || []) if (u.fn === 'Detector') m.set(u.start, u); return m; }
+  function detectors(){ const m = new Map(); for (const u of fold.units || []) if (BODY(u.fn) === 'circle') m.set(u.start, u); return m; }
   function layDetector(u, place, d, put){
     const G = detGeom(u), cnt = G.length, pr = modProg(u), Rd = S.detSize * LB;
     const L = (cnt - 1) * LB * (1 - pr) + 2 * Rd * pr;
@@ -618,7 +624,7 @@ function makeStrand(stage, opts){
   function chambers(){
     const m = new Map(); if (S.memStyle !== 'chamber') return m;
     const src = fold.units && fold.units.length ? fold.units : (fold.mods || []);
-    for (const u of src) if (u.fn === 'Membrane') m.set(u.start, u);
+    for (const u of src) if (BODY(u.fn) === 'chamber') m.set(u.start, u);
     return m;
   }
   /* Joiner: armed at the tail it is a back-facing snout whose loop splays into biting jaws; fused it becomes a ring around the next segment */
@@ -739,12 +745,12 @@ function makeStrand(stage, opts){
     const putC = (i, x, y, z, ax, ay) => { const q = N[i]; q.x = q.px = x; q.y = q.py = y; q.z = z; q.inward = true; q.ax = ax; q.ay = ay; };
     const modAt = new Map(); fold.mods.forEach((m, mi) => modAt.set(m.start, mi));
     const hubOf = new Map();
-    if (S.turbine) for (const u of fold.units || []) if (u.fn === 'Mover' && u.arms){
+    if (S.turbine) for (const u of fold.units || []) if (BODY(u.fn) === 'blades' && u.arms){
       const sp = (spinState.get(u.start) || 0) + dt * S.spin * (0.25 + moving) * 4;
       spinState.set(u.start, sp);
       u.arms.forEach((h, k) => hubOf.set(h.start, {u, k, n:u.arms.length, spin:sp}));
     }
-    if (S.memStyle === 'sleeve') for (const u of fold.units || []) if (u.fn === 'Membrane' && u.arms){
+    if (S.memStyle === 'sleeve') for (const u of fold.units || []) if (BODY(u.fn) === 'chamber' && u.arms){
       const br = S.behave ? Math.sin(clock * 1.5) : 0;
       u.arms.forEach((h, k) => hubOf.set(h.start, {u, k, n:u.arms.length, sleeve:true, rake:0.8 + 0.15 * br}));
     }
@@ -871,7 +877,7 @@ function makeStrand(stage, opts){
   }
   /* Self-cutter: forms, pops out as a ring, slides upstrand to the structure ahead, tightens, and both burst into loose bases */
   let cut = null, scatter = [];
-  function findCutter(){ return (fold.units || []).find(u => u.fn === 'Self-cutter' && !rangeDamaged(u)) || null; }
+  function findCutter(){ return (fold.units || []).find(u => BODY(u.fn) === 'ring' && !rangeDamaged(u)) || null; }
   function targetBefore(idx){
     let best = null;
     for (const u of (fold.units || []).concat(fold.mods || [])) if (u.end < idx && (!best || u.end > best.end || (u.end === best.end && u.start < best.start))) best = u;
@@ -1009,11 +1015,11 @@ function makeStrand(stage, opts){
   function updateRepair(dt){
     for (const f of repFlash) f.t += dt; repFlash = repFlash.filter(f => f.t < 0.8);
     if (!repEv){
-      const u = (fold.units || []).find(u => u.fn === 'Repairer' && !rangeDamaged(u));
+      const u = (fold.units || []).find(u => BODY(u.fn) === 'helpers' && !rangeDamaged(u));
       if (u) repEv = {t:0, start:u.start, end:u.end, letters:seq.slice(u.start, u.end + 1).join(''),
         h:u.arms.map(h => [h.start - u.start, h.end - u.start])};
     } else if ((repEv.t += dt) >= 1.2){
-      const ok = seq.slice(repEv.start, repEv.end + 1).join('') === repEv.letters && (fold.units || []).some(u => u.fn === 'Repairer' && u.start === repEv.start);
+      const ok = seq.slice(repEv.start, repEv.end + 1).join('') === repEv.letters && (fold.units || []).some(u => BODY(u.fn) === 'helpers' && u.start === repEv.start);
       if (ok){
         const L = repEv.letters, st = repEv.start, en = repEv.end, pos = Math.max(0, st - 0.5), H = repEv.h;
         repEv = null; removeRange(st, en);
@@ -1170,7 +1176,7 @@ function makeStrand(stage, opts){
     {
       const units = fold.units || [], mods = fold.mods || [];
       const blockOf = m => units.find(u => m.start >= u.start && m.end <= u.end) || m;
-      for (const u of (units.length ? units : mods).filter(x => x.fn === 'Membrane')){
+      for (const u of (units.length ? units : mods).filter(x => BODY(x.fn) === 'chamber')){
         let lo = u.start, hi = u.end;
         const before = mods.filter(m => m.end < u.start).pop(), after = mods.find(m => m.start > u.end);
         if (before) lo = blockOf(before).start;

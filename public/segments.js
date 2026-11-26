@@ -1,0 +1,122 @@
+/* =====================================================================
+   Segment types: every function a strand can fold, in one place.
+   The game, the bots, the page and the server all read this list. To add a segment type, add an entry.
+
+   Each entry:
+     fn       the name players see. Also the key everywhere else.
+     core     the recipe's middle letters. A recipe is 2 stem letters + core + the stem's partners in reverse.
+              Cores must all differ (the test checks).
+     body     the shape it folds into, with the strand mechanics that come with that shape (rna-strand.js):
+                blades   two hairpins side by side; with 3D on they spin like a turbine
+                spikes   one long hairpin folded into two opposing spikes
+                chamber  a swollen chamber; goo spreads to its neighbours
+                circle   a circle split by the spine
+                jaws     a mouth at the tail end. Armed while it is the last structure; when something joins
+                         right behind it, it fuses around that and gives it +1
+                ring     leaves the strand as a ring, cuts off the structure ahead of it, both burst into letters
+                helpers  leaves the strand as two helpers that travel up it once, mending damage
+              A new segment can reuse any of these. A new shape needs code in rna-strand.js.
+     does, tag, sci   the recipe card: what it does, how real it is, the science behind it
+   What it does in the game (sim.js reads these; leave out the ones that do not apply):
+     swim       {speed, turn, turnBot}: added per working copy. speed multiplies swim speed (0.3 = +30%),
+                turn adds to the turn rate (humans / bots)
+     tips(f)    the strand positions that strike rivals (damage, then cut damaged structures)
+     shield     takes hits meant for the working functions on either side of it
+     saltBreaks chance each half second that a drying salt pool damages it
+     warnEarly  seconds of warning before UV flashes and meteorites (without one: 1.8)
+     findsFragments  points the player to the nearest fragment
+   How bots think about it (bots.js):
+     likedBy    personality traits that make a bot fond of it
+     plan(c)    sets c.want (and can change c.gain, the score it would add) for a bot weighing what to build;
+                return false to rule it out. c has: tr traits, m mood, n working copies, info (what the bot sees),
+                p (the bot), kinds (fns it has), has(fn), lastSt (its last structure), rivalSpikes, G (the game)
+   ===================================================================== */
+window.SoupSegments = (() => {
+'use strict';
+
+const LIST = [
+  {fn:'Mover', core:'UUAAUU', body:'blades',
+   does:'Swim faster and turn tighter. Its two blades spin like a turbine.',
+   tag:'Game only', sci:'No RNA can swim. Movement is the biggest thing this game invents.',
+   swim:{speed:0.3, turn:0.6, turnBot:0.5},
+   likedBy:['greed', 'curiosity'],
+   plan(c){ c.want = 0.3 + 0.5 * c.tr.curiosity + 0.4 * c.tr.greed + (c.m.fear > 0.3 ? c.tr.caution : 0) - 0.3 * c.n; if (c.n >= 3) c.gain *= 0.5; }},
+
+  {fn:'Cleaver', core:'CUGCUG', body:'spikes',
+   does:'Its two spikes damage what they touch on rival strands, then cut damaged structures off. Everything behind the cut floats free.',
+   tag:'Real science', sci:'Hammerhead ribozymes can be built to find a target RNA by base pairing, then cut it.',
+   /* one base sits at each spike tip */
+   tips(f){ const L = f.end - f.start; return [f.start + Math.round(L / 4), f.start + Math.round(3 * L / 4)]; },
+   likedBy:['aggression', 'grudge'],
+   plan(c){ c.want = 1.7 * c.tr.aggression + 0.5 * c.tr.opportunism + 0.8 * c.m.anger + (c.info.late && c.info.rank > 1 ? 0.6 : 0); if (c.n >= 2) c.want *= 0.35; }},
+
+  {fn:'Membrane', core:'GCCGGC', body:'chamber',
+   does:'Takes the hits meant for the functions on either side of it. Dissolves in magnesium.',
+   tag:'Real science', sci:'Bubbles of fatty acid can hold RNA, grow and divide. Magnesium breaks them apart.',
+   shield:true, saltBreaks:0.25,
+   likedBy:['caution', 'patience', 'grudge'],
+   plan(c){ c.want = 1.4 * c.tr.caution + 0.35 * c.rivalSpikes + 0.6 * c.m.fear + 0.08 * c.p.s.functions.length; if (c.n >= 2) c.want *= 0.4; }},
+
+  {fn:'Detector', core:'ACAACAACA', body:'circle',
+   does:'Warns you of UV flashes and meteorites early and points to the nearest fragment.',
+   tag:'Real science', sci:'Riboswitches change shape when they catch a particular molecule, switching genes on or off.',
+   warnEarly:4.5, findsFragments:true,
+   likedBy:['caution', 'curiosity', 'patience'],
+   plan(c){ c.want = 0.9 * c.tr.caution + 0.4 * c.tr.curiosity + 0.3 * c.tr.opportunism; if (c.n) c.want *= 0.3; }},
+
+  {fn:'Joiner', core:'GGA', body:'jaws',
+   does:'While it is the very end of your strand, back your tail into a fragment to join it. It fuses around what it grabbed: +1.',
+   tag:'Real science', sci:'The class I ligase, one of the first ribozymes evolved from random RNA, joins strands together.',
+   likedBy:['opportunism'],
+   plan(c){
+     const p = c.p, G = c.G;
+     /* fragments nobody else is already going for */
+     const free = c.info.frags.filter(r => r.d < 1600 && !G.players.some(o => o !== p && o.ai && o.ai.mode === 'join' && o.ai.fragPick && o.ai.fragPick.f === r.f)).length;
+     c.want = 1.1 * c.tr.opportunism + 0.45 * free + (c.info.cleaver ? 0.5 * c.tr.aggression : 0);
+     if (free) c.gain += 1.2;
+     if (c.n){ c.want *= 0.3 + 0.7 * c.tr.opportunism; if (!free) c.gain *= 0.5; }
+   }},
+
+  {fn:'Repairer', core:'GACGACGAC', body:'helpers',
+   does:'Leaves the strand as two helpers that travel up it once, mending damage and clearing junk.',
+   tag:'Game idea', sci:'Cells today repair RNA and DNA with protein enzymes. Whether early RNA could mend itself is an open question.',
+   likedBy:[],
+   plan(c){
+     /* worth what it would mend */
+     c.gain = c.info.damaged.reduce((s, f) => s + (c.kinds.has(f.fn) ? 1 : 3), 0);
+     if (c.gain < 2) return false;
+     c.want = 0.4 + 0.6 * c.tr.greed - 0.5 * c.tr.patience;
+   }},
+
+  {fn:'Self-cutter', core:'UAG', body:'ring',
+   does:'One use. Leaves as a ring, cuts off the structure ahead of it, and both burst into letters you can collect again.',
+   tag:'Real science', sci:'Most natural ribozymes, like the hammerhead, cut their own backbone at one exact spot.',
+   likedBy:[],
+   plan(c){
+     /* only worth it when the structure right before the tail is broken: it recycles it into letters */
+     if (!c.lastSt || !c.lastSt.damaged || c.has('Repairer')) return false;
+     c.gain = 0.6; c.want = 0.5 * c.tr.opportunism;
+   }}
+];
+
+const BY = Object.fromEntries(LIST.map(s => [s.fn, s]));
+const get = fn => (fn && BY[fn]) || null;
+const names = LIST.map(s => s.fn);
+const bodyOf = fn => { const s = get(fn); return s ? s.body : null; };
+
+/* swim bonus from a strand's working functions */
+function swimOf(fns){
+  const out = {speed:0, turn:0, turnBot:0};
+  for (const s of LIST){
+    if (!s.swim) continue;
+    let n = 0; for (const f of fns) if (f.fn === s.fn) n++;
+    out.speed += s.swim.speed * n; out.turn += s.swim.turn * n; out.turnBot += s.swim.turnBot * n;
+  }
+  return out;
+}
+/* seconds of warning before hazards, from a strand's working functions */
+function warnEarly(fns){ let e = 1.8; for (const f of fns){ const s = get(f.fn); if (s && s.warnEarly > e) e = s.warnEarly; } return e; }
+const any = (fns, key) => fns.some(f => { const s = get(f.fn); return !!(s && s[key]); });
+
+return {LIST, names, get, bodyOf, swimOf, warnEarly, any};
+})();

@@ -1,0 +1,29 @@
+{
+  "maps": {
+    "1": "1a992a91d7844b94",
+    "2": "c334118d6dbb792e",
+    "3": "ec1dc81e30366300",
+    "99": "371074251f889afc",
+    "4242": "9987e69e321709d6"
+  },
+  "rounds": {
+    "11": {
+      "snaps": "5f239ffc3c3662e5",
+      "end": "AUG:13 Drifter:9 Hoarder:9 Glut:8 Clam:7 Magpie:6 Sponge:4 Scout:3 Spite:3 Warden:3",
+      "said": "7d2aa4ff3a23a905",
+      "messages": 9
+    },
+    "777": {
+      "snaps": "1675b6a5786d336b",
+      "end": "Sponge:16 Sentinel:15 Magpie:13 Spite:13 Feud:10 Clam:10 AUG:10 Comet:6 Fang:6 Shelly:0",
+      "said": "029fbbe471c7ec6e",
+      "messages": 17
+    },
+    "12345": {
+      "snaps": "bf72a2ac3640f8c4",
+      "end": "Clam:13 Lurker:11 Glut:9 Shelly:9 Rover:6 Warden:6 Rancor:6 Brute:3 AUG:3 Grudge:0",
+      "said": "b6de32d0e2424f39",
+      "messages": 5
+    }
+  }
+}

@@ -13,31 +13,12 @@ const makeSoupMap = () => {
 'use strict';
 const TAU = Math.PI * 2;
 const W = 9200, H = 6000, CELL = 50, GW = W / CELL, GH = H / CELL, CH = 10, CR = 0.8;
-const K = {DEEP:0, OCEAN:1, LAGOON:2, FLATS:3, RIDGE:4, CHIMNEY:5, PORE:6, POCKET:7, ROCK:8, SPRING:9, CLAY:10, UV:11, ICE:12, BRINE:13};
-const SOLID = [0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0];
-/* how fast you swim, how many letters gather (per cell), and which letters */
-const MIX = {
-  soup:{A:0.34, U:0.16, G:0.25, C:0.25}, even:{A:0.25, U:0.25, G:0.25, C:0.25},
-  purine:{A:0.38, U:0.12, G:0.38, C:0.12}, pyrimidine:{A:0.12, U:0.38, G:0.12, C:0.38}
-};
-const INFO = [
-  /* DEEP    */ {speed:1,    spawn:0,    mix:'soup'},
-  /* OCEAN   */ {speed:1,    spawn:0.04, mix:'soup'},
-  /* LAGOON  */ {speed:1,    spawn:0.9,  mix:'soup'},
-  /* FLATS   */ {speed:1,    spawn:0.7,  mix:'soup'},
-  /* RIDGE   */ {speed:0,    spawn:0,    mix:'soup'},
-  /* CHIMNEY */ {speed:0,    spawn:0,    mix:'soup'},
-  /* PORE    */ {speed:0.85, spawn:0.45, mix:'even'},
-  /* POCKET  */ {speed:0.8,  spawn:5,    mix:'even'},
-  /* ROCK    */ {speed:0,    spawn:0,    mix:'soup'},
-  /* SPRING  */ {speed:0.9,  spawn:1.6,  mix:'purine'},
-  /* CLAY    */ {speed:0.45, spawn:1.6,  mix:'soup'},
-  /* UV      */ {speed:1,    spawn:2.2,  mix:'pyrimidine'},
-  /* ICE     */ {speed:0,    spawn:0,    mix:'soup'},
-  /* BRINE   */ {speed:0.5,  spawn:1.1,  mix:'even'}
-];
-const COL = ['#03060a', '#07110f', '#0c2420', '#2a2a1f', '#262a28', '#8f8a7c', '#0e1a1a', '#15271f', '#121215', '#0f3034', '#3b2e22', '#22385a', '#8cbad0', '#0c2431'];
-const EDGE = {[K.RIDGE]:'#3a3f3a', [K.CHIMNEY]:'#c8c2b0', [K.ROCK]:'#34343c', [K.ICE]:'#cdeaf7'};
+/* ground types, places and regions: biomes.js */
+const BIO = window.SoupBiomes, CELLS = BIO.CELLS, K = BIO.K, MIX = BIO.MIX;
+const SOLID = CELLS.map(c => c.solid ? 1 : 0), COL = CELLS.map(c => c.color);
+const byLayer = list => list.sort((a, b) => CELLS[a].layer - CELLS[b].layer);
+const WATER_LAYERS = byLayer(CELLS.map((c, i) => i).filter(i => CELLS[i].layer && !CELLS[i].edge));
+const WALL_LAYERS = byLayer(CELLS.map((c, i) => i).filter(i => CELLS[i].edge));
 const LABELS = [];
 
 /* ---------- seeded randomness and smooth noise ---------- */
@@ -86,125 +67,15 @@ function generate(s){
       }
     }
   };
-  /* the open ocean darkens toward the edges: a desert of dilute water */
-  each((cx, cy, x, y) => { const e = Math.min(x, y, W - x, H - y); if (e < 420 + 160 * fbm(x / 400, y / 400)) setC(cx, cy, K.DEEP); });
-
-  /* 1. tide-pool lagoon in the middle */
-  const L = {x:W * 0.5, y:H * 0.5, a:1180, b:1380};
-  each((cx, cy, x, y) => { const d = Math.hypot((x - L.x) / L.a, (y - L.y) / L.b); if (d < 0.85 + 0.3 * fbm(x / 500, y / 500)) setC(cx, cy, K.FLATS); });
-  pools.push({x:L.x, y:L.y, r:300, salt:false});
-  for (let tries = 0; pools.length < 10 && tries < 400; tries++){
-    const a = rr(0, TAU), d = Math.sqrt(rng()) * 0.78, x = L.x + Math.cos(a) * L.a * d, y = L.y + Math.sin(a) * L.b * d, r = rr(160, 300);
-    if (pools.some(p => Math.hypot(p.x - x, p.y - y) < p.r + r + 90)) continue;
-    pools.push({x, y, r, salt:false});
-  }
-  pools.forEach(p => blob(p.x, p.y, p.r, K.LAGOON));
-  /* drying pools concentrate salts: these turn into magnesium pools at low tide */
-  pools.slice(1).sort(() => rng() - 0.5).slice(0, 3).forEach(p => { p.salt = true; });
-  /* low rock ridges wander between the pools */
-  each((cx, cy, x, y) => { if (typeAtCell(cx, cy) === K.FLATS && Math.abs(fbm(x / 380 + 40, y / 380) - 0.5) < 0.022 && !pools.some(p => Math.hypot(p.x - x, p.y - y) < p.r + 70)) setC(cx, cy, K.RIDGE); });
-  LABELS.push({t:'TIDE-POOL LAGOON', x:L.x, y:L.y - L.b - 40});
-
-  /* 2. volcanic island to the east */
-  const I = {x:W * 0.82, y:H * 0.5, a:960, b:1500};
-  const inIsland = (x, y) => Math.hypot((x - I.x) / I.a, (y - I.y) / I.b) < 0.88 + 0.26 * fbm(x / 420 + 9, y / 420);
-  /* UV shallows ring the island's beaches, clay flats spread from its western foot */
-  each((cx, cy, x, y) => {
-    const d = Math.hypot((x - I.x) / (I.a + 520), (y - I.y) / (I.b + 520));
-    if (typeAtCell(cx, cy) !== K.DEEP && d < 0.95 + 0.2 * fbm(x / 350, y / 350 + 7)) setC(cx, cy, K.UV);
-  });
-  each((cx, cy, x, y) => { if (x < I.x - I.a * 0.5 && Math.abs(y - I.y) < 850 + 200 * fbm(x / 300, y / 300 + 3) && x > I.x - I.a - 760 && typeAtCell(cx, cy) === K.UV) setC(cx, cy, K.CLAY); });
-  each((cx, cy, x, y) => { if (inIsland(x, y)) setC(cx, cy, K.ROCK); });
-  /* hot spring terraces step down the slope from the peak toward the west coast, joined by spillways */
-  const steps = 7, path = [];
-  for (let k = 0; k < steps; k++){
-    const f = k / (steps - 1);
-    path.push({x:I.x + I.a * 0.55 - f * I.a * 1.25, y:I.y + Math.sin(k * 1.7) * I.b * 0.42 + rr(-80, 80)});
-  }
-  path.forEach((p, k) => { const s = {x:p.x, y:p.y, r:rr(130, 175), k}; springs.push(s); blob(s.x, s.y, s.r, K.SPRING); });
-  for (let k = 0; k + 1 < springs.length; k++){
-    const a = springs[k], b = springs[k + 1], m = {x:(a.x + b.x) / 2 + rr(-60, 60), y:(a.y + b.y) / 2 + rr(-60, 60)};
-    carveLine([a, m, b], 2, K.SPRING);
-    flows.push({pts:[a, m, b], w:110, v:140, kind:'spill'});
-  }
-  /* the lowest pool spills out across the clay into the lagoon */
-  const low = springs[springs.length - 1], out = [{x:low.x, y:low.y}, {x:I.x - I.a - 120, y:low.y * 0.6 + I.y * 0.4}, {x:L.x + L.a * 0.95, y:L.y + rr(-200, 200)}];
-  carveLine(out.slice(0, 2), 2, K.SPRING, [K.ROCK]);
-  flows.push({pts:out, w:150, v:115, kind:'spill'});
-  springs.filter((s, k) => k % 2 === 1).forEach(s => geysers.push({x:s.x, y:s.y, r:85, t:rr(2, 10), phase:'wait'}));
-  LABELS.push({t:'HOT SPRINGS', x:I.x, y:I.y - I.b * 0.62}, {t:'CLAY FLATS', x:I.x - I.a - 380, y:I.y + 120}, {t:'UV SHALLOWS', x:I.x, y:I.y + I.b + 330}, {t:'UV SHALLOWS', x:I.x, y:I.y - I.b - 300});
-
-  /* 3. white chimneys to the west: a pore maze with nursery pockets, black smokers at its deep edge */
-  const MX0 = 500, MY0 = 1800, MC = 5, mw = 9, mh = 15, MX1 = MX0 + mw * MC * CELL, MY1 = MY0 + mh * MC * CELL;
-  const c0x = MX0 / CELL, c0y = MY0 / CELL;
-  for (let cy = c0y; cy < c0y + mh * MC; cy++) for (let cx = c0x; cx < c0x + mw * MC; cx++) setC(cx, cy, K.CHIMNEY);
-  const seen = new Uint8Array(mw * mh), links = [];
-  const carveCell = (i, j, t) => { for (let oy = 1; oy < 4; oy++) for (let ox = 1; ox < 4; ox++) setC(c0x + i * MC + ox, c0y + j * MC + oy, t); };
-  const carveLink = (i, j, di, dj) => {
-    if (di) { const x = c0x + Math.max(i, i + di) * MC; for (let oy = 1; oy < 4; oy++) for (let ox = -1; ox < 1; ox++) setC(x + ox, c0y + j * MC + oy, K.PORE); }
-    else { const y = c0y + Math.max(j, j + dj) * MC; for (let ox = 1; ox < 4; ox++) for (let oy = -1; oy < 1; oy++) setC(c0x + i * MC + ox, y + oy, K.PORE); }
-  };
-  const deg = new Uint8Array(mw * mh), stack = [[Math.floor(mw / 2), Math.floor(mh / 2)]];
-  seen[stack[0][1] * mw + stack[0][0]] = 1;
-  while (stack.length){
-    const [i, j] = stack[stack.length - 1];
-    const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([di, dj]) => { const a = i + di, b = j + dj; return a >= 0 && b >= 0 && a < mw && b < mh && !seen[b * mw + a]; });
-    if (!nb.length){ stack.pop(); continue; }
-    const [di, dj] = nb[Math.floor(rng() * nb.length)];
-    links.push([i, j, di, dj]); deg[j * mw + i]++; deg[(j + dj) * mw + i + di]++;
-    seen[(j + dj) * mw + i + di] = 1; stack.push([i + di, j + dj]);
-  }
-  /* a few loops so the maze has more than one way through */
-  for (let k = 0; k < 18; k++){ const i = Math.floor(rr(0, mw - 1)), j = Math.floor(rr(0, mh - 1)), h = rng() < 0.5; links.push(h ? [i, j, 1, 0] : [i, j, 0, 1]); deg[j * mw + i]++; deg[(h ? j : j + 1) * mw + (h ? i + 1 : i)]++; }
-  for (let j = 0; j < mh; j++) for (let i = 0; i < mw; i++) carveCell(i, j, K.PORE);
-  links.forEach(([i, j, di, dj]) => carveLink(i, j, di, dj));
-  /* entrances: three on the lagoon side, one north toward the ice, one south */
-  const exits = [];
-  for (const j of [2, 7, 12]){ const y = c0y + j * MC; for (let ox = 0; ox < 3; ox++) for (let oy = 1; oy < 4; oy++) setC(c0x + mw * MC - 1 + ox, y + oy, K.PORE); exits.push({x:MX1 + 60, y:(y + 2.5) * CELL}); deg[j * mw + mw - 1]++; }
-  for (let oy = -2; oy < 1; oy++) for (let ox = 1; ox < 4; ox++){ setC(c0x + 5 * MC + ox, c0y + oy, K.PORE); setC(c0x + 3 * MC + ox, c0y + mh * MC + oy + 1, K.PORE); }
-  deg[5]++; deg[(mh - 1) * mw + 3]++;
-  /* dead ends become nursery pockets: warm, safe, and full of letters */
-  const pockets = [];
-  for (let j = 0; j < mh; j++) for (let i = 1; i < mw; i++) if (deg[j * mw + i] === 1){ carveCell(i, j, K.POCKET); pockets.push([i, j]); }
-  /* a ragged rim so the chimney field does not look like a box */
-  each((cx, cy, x, y) => {
-    const inside = x > MX0 && x < MX1 && y > MY0 && y < MY1, near = x > MX0 - 260 && x < MX1 + 200 && y > MY0 - 220 && y < MY1 + 220;
-    if (!inside && near && typeAtCell(cx, cy) === K.OCEAN && fbm(x / 160, y / 160 + 21) > 0.6) setC(cx, cy, K.CHIMNEY);
-  });
-  exits.forEach(e => carveLine([{x:e.x - 80, y:e.y}, {x:e.x + 180, y:e.y}], 3, K.PORE, [K.CHIMNEY]));
-  /* black smokers stand in the westmost column of the maze and out in the deep water beyond it */
-  for (let j = 1; j < mh; j += 3){ smokers.push({x:(c0x + 2.5) * CELL, y:(c0y + j * MC + 2.5) * CELL, r:rr(52, 66)}); }
-  for (let k = 0; k < 3; k++) smokers.push({x:rr(240, 400), y:rr(MY0 + 300, MY1 - 300), r:rr(60, 80)});
-  /* seeping warm water carries letters out of the chimneys toward the lagoon */
-  exits.forEach(e => flows.push({pts:[e, {x:(e.x + L.x - L.a) / 2, y:e.y * 0.7 + L.y * 0.3}, {x:L.x - L.a * 0.85, y:e.y * 0.4 + L.y * 0.6}], w:130, v:70, kind:'seep'}));
-  LABELS.push({t:'WHITE CHIMNEYS', x:(MX0 + MX1) / 2, y:MY0 - 150}, {t:'BLACK SMOKERS', x:420, y:MY1 + 160});
-
-  /* 4. the cold corner: ice veins */
-  const IX = 2700, IY = 1520;
-  each((cx, cy, x, y) => { const d = Math.hypot(x / IX, y / IY); if (d < 0.95 + 0.18 * fbm(x / 300 + 5, y / 300) && typeAtCell(cx, cy) !== K.CHIMNEY) setC(cx, cy, K.ICE); });
-  const veins = [];
-  for (let v = 0; v < 7; v++){
-    /* each vein starts at the ice's southern or eastern edge and wanders inward */
-    let x, y, a;
-    if (v % 2){ x = rr(400, IX - 300); y = IY * 1.05; a = -Math.PI / 2 + rr(-0.5, 0.5); }
-    else { x = IX * 1.05; y = rr(300, IY - 250); a = Math.PI + rr(-0.5, 0.5); }
-    const pts = [{x, y}];
-    for (let k = 0; k < 22; k++){ a += rr(-0.55, 0.55); x += Math.cos(a) * 90; y += Math.sin(a) * 90; x = Math.max(160, Math.min(IX, x)); y = Math.max(160, Math.min(IY, y)); pts.push({x, y}); }
-    veins.push(pts); carveLine(pts, 2, K.BRINE, [K.ICE]);
-  }
-  /* meltwater runs from the ice toward the lagoon */
-  flows.push({pts:[{x:IX * 0.85, y:IY * 1.05}, {x:IX + 500, y:IY + 450}, {x:L.x - L.a * 0.7, y:L.y - L.b * 0.6}], w:150, v:75, kind:'melt'});
-  LABELS.push({t:'ICE VEINS', x:IX * 0.45, y:IY * 0.45});
-
-  /* 5. the ocean gyre circles the lagoon, carrying pumice rafts */
-  raftRoute = []; for (let k = 0; k <= 48; k++){ const a = k / 48 * TAU; raftRoute.push({x:L.x + Math.cos(a) * (L.a + 380), y:L.y + Math.sin(a) * (L.b + 420)}); }
-  flows.push({pts:raftRoute, w:220, v:55, kind:'gyre', loop:true});
-  for (let k = 0; k < 5; k++) rafts.push({u:k / 5 + rr(0, 0.05), r:rr(105, 130), gaps:[rr(0, TAU), rr(0, TAU)], spin:rr(-0.05, 0.05), x:0, y:0, rot:rr(0, TAU)});
-  placeRafts(0);
-  LABELS.push({t:'OPEN OCEAN', x:W * 0.5, y:H - 330}, {t:'OPEN OCEAN', x:W * 0.5, y:300});
+  /* the regions paint the map in order (biomes.js) */
+  const B = {W, H, CELL, GW, GH, K, TAU, rng, rr, fbm, each, setC, blob, carveLine, typeAtCell,
+    pools, springs, flows, geysers, smokers, rafts, labels:LABELS, lagoon:null,
+    get raftRoute(){ return raftRoute; }, set raftRoute(v){ raftRoute = v; }, placeRafts};
+  for (const region of BIO.REGIONS) region.build(B);
+  const L = B.lagoon;
 
   /* spawn tables: every open cell, grouped by type */
-  byType = INFO.map(() => []);
+  byType = CELLS.map(() => []);
   for (let i = 0; i < grid.length; i++) if (!SOLID[grid[i]]) byType[grid[i]].push(i);
   buildMinimap();
   const open = sp => nearestOf([K.LAGOON, K.FLATS, K.OCEAN], sp.x, sp.y, 1500) || sp;
@@ -242,10 +113,11 @@ const craterAt = (x, y) => craters.find(c => Math.hypot(x - c.x, y - c.y) < c.r)
 function speedAt(x, y){
   const t = typeAt(x, y);
   if (t === K.FLATS) return 0.3 + 0.7 * Math.min(1, tide / 0.55);
-  return INFO[t].speed || 1;
+  return CELLS[t].speed || 1;
 }
+const cellAt = (x, y) => CELLS[typeAt(x, y)];
 /* shelters: nursery pockets, ice veins and the inside of a pumice raft keep out radiation and meteorites */
-const shelterAt = (x, y) => { const t = typeAt(x, y); return t === K.POCKET || t === K.BRINE || !!raftInside(x, y); };
+const shelterAt = (x, y) => !!CELLS[typeAt(x, y)].shelter || !!raftInside(x, y);
 function zoneAt(x, y){
   if (smokerAt(x, y, 90)) return 'smoker';
   if (raftInside(x, y)) return 'raft';
@@ -253,7 +125,7 @@ function zoneAt(x, y){
   const t = typeAt(x, y);
   if (t === K.LAGOON) return saltAt(x, y) ? 'salt' : 'lagoon';
   if (t === K.FLATS) return lowTide() ? 'stranded' : 'flats';
-  return ['ocean', 'ocean', 'lagoon', 'flats', '', '', 'pores', 'pocket', '', 'spring', 'clay', 'uv', '', 'ice'][t] || 'ocean';
+  return CELLS[t].zone || 'ocean';
 }
 /* water flow at a point: spillways, seeps, meltwater and the gyre */
 function flowAt(x, y){
@@ -277,13 +149,13 @@ function flowAt(x, y){
 const fromMix = m => { let r = Math.random(); for (const b of ['A', 'U', 'G', 'C']){ r -= m[b]; if (r < 0) return b; } return 'A'; };
 function spawnSpot(){
   /* pick a cell weighted by how rich its type is (drained flats get richer at low tide), then a letter from its mix */
-  let total = 0; const w = INFO.map((inf, t) => { const v = byType[t].length * inf.spawn * (t === K.FLATS ? (lowTide() ? 3 : 1) : 1); total += v; return v; });
+  let total = 0; const w = CELLS.map((inf, t) => { const v = byType[t].length * inf.spawn * (inf.lowTideSpawn ? (lowTide() ? inf.lowTideSpawn : 1) : 1); total += v; return v; });
   let r = Math.random() * total, t = 0; for (; t < w.length; t++){ r -= w[t]; if (r < 0) break; }
   t = Math.min(t, w.length - 1);
   const list = byType[t]; if (!list.length) return null;
   const i = list[Math.floor(Math.random() * list.length)], cx = i % GW, cy = Math.floor(i / GW);
   const x = (cx + Math.random()) * CELL, y = (cy + Math.random()) * CELL;
-  return {x, y, b:fromMix(MIX[INFO[t].mix]), home:{x:(cx + 0.5) * CELL, y:(cy + 0.5) * CELL, r:140}};
+  return {x, y, b:fromMix(MIX[CELLS[t].mix]), home:{x:(cx + 0.5) * CELL, y:(cy + 0.5) * CELL, r:140}};
 }
 
 /* ---------- path finding for bots: breadth-first over open cells ---------- */
@@ -379,10 +251,10 @@ function renderChunk(kx, ky){
   for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++){ if (typeAtCell(cx, cy) === K.DEEP){ g.fillStyle = COL[K.DEEP]; g.fillRect(cx * CELL, cy * CELL, CELL, CELL); } }
   /* water and ground types as overlapping round blobs, so borders come out soft */
   const blobs = (t, rad) => { g.fillStyle = COL[t]; g.beginPath(); for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) if (typeAtCell(cx, cy) === t){ const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL; g.moveTo(x + rad, y); g.arc(x, y, rad, 0, TAU); } g.fill(); };
-  for (const t of [K.UV, K.CLAY, K.FLATS, K.LAGOON, K.SPRING, K.PORE, K.POCKET, K.BRINE]) blobs(t, CELL * 0.74);
+  for (const t of WATER_LAYERS) blobs(t, CELL * 0.74);
   /* solid walls: an edge colour first, then the fill slightly smaller, so the union gets one outline */
-  for (const t of [K.RIDGE, K.ROCK, K.ICE, K.CHIMNEY]){
-    g.fillStyle = EDGE[t]; g.beginPath();
+  for (const t of WALL_LAYERS){
+    g.fillStyle = CELLS[t].edge; g.beginPath();
     for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) if (typeAtCell(cx, cy) === t){ const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL; g.moveTo(x + CELL * 0.74, y); g.arc(x, y, CELL * 0.74, 0, TAU); }
     g.fill();
     g.fillStyle = COL[t]; g.beginPath();
@@ -392,12 +264,7 @@ function renderChunk(kx, ky){
   /* texture: pores in the chimneys, cracks in the ice, grit in the clay, sparkle in the shallows */
   for (let cy = cy0 + 1; cy < cy1; cy++) for (let cx = cx0 + 1; cx < cx1; cx++){
     const t = typeAtCell(cx, cy), x = cx * CELL, y = cy * CELL, h1 = hash(cx, cy), h2 = hash(cy, cx);
-    if (t === K.CHIMNEY){ g.fillStyle = '#4c4a43'; for (let k = 0; k < 3; k++){ g.beginPath(); g.arc(x + hash(cx * 3 + k, cy) * CELL, y + hash(cx, cy * 3 + k) * CELL, 2 + h1 * 4, 0, TAU); g.fill(); } }
-    else if (t === K.ICE && h1 < 0.35){ g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x + h1 * CELL, y + h2 * CELL); g.lineTo(x + h2 * CELL, y + CELL * (1 - h1)); g.stroke(); }
-    else if (t === K.CLAY){ g.fillStyle = 'rgba(120,95,70,.5)'; g.fillRect(x + h1 * CELL, y + h2 * CELL, 2, 2); g.fillRect(x + h2 * CELL, y + h1 * CELL, 1.5, 1.5); }
-    else if (t === K.ROCK && h1 < 0.3){ g.fillStyle = '#22222a'; g.beginPath(); g.arc(x + h2 * CELL, y + h1 * CELL * 3, 3 + h2 * 5, 0, TAU); g.fill(); }
-    else if (t === K.UV && h1 < 0.25){ g.fillStyle = 'rgba(190,210,255,.18)'; g.fillRect(x + h2 * CELL, y + h1 * CELL * 4 % CELL, 10, 1.5); }
-    else if (t === K.POCKET && h1 < 0.5){ g.fillStyle = 'rgba(160,220,170,.12)'; g.beginPath(); g.arc(x + h2 * CELL, y + h1 * CELL * 2, 6, 0, TAU); g.fill(); }
+    const tex = CELLS[t] && CELLS[t].texture; if (tex) tex(g, x, y, h1, h2, cx, cy, hash, CELL);
   }
   return c;
 }
@@ -534,7 +401,7 @@ function buildMinimap(){
   const g = c.getContext && c.getContext('2d'); if (!g){ mini.dirty = false; return; }   /* no canvas (a server room): nothing to draw */
   const img = g.createImageData(GW, GH);
   const rgb = COL.map(h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
-  for (let i = 0; i < grid.length; i++){ const t = grid[i], [r, gg, b] = t === K.FLATS ? rgb[K.LAGOON] : rgb[t], o = i * 4; img.data[o] = Math.min(255, r * 1.6 + 8); img.data[o + 1] = Math.min(255, gg * 1.6 + 8); img.data[o + 2] = Math.min(255, b * 1.6 + 10); img.data[o + 3] = 255; }
+  for (let i = 0; i < grid.length; i++){ const t = grid[i], mt = CELLS[t].mini ? K[CELLS[t].mini] : t, [r, gg, b] = rgb[mt], o = i * 4; img.data[o] = Math.min(255, r * 1.6 + 8); img.data[o + 1] = Math.min(255, gg * 1.6 + 8); img.data[o + 2] = Math.min(255, b * 1.6 + 10); img.data[o + 3] = 255; }
   g.putImageData(img, 0, 0); mini.c = c; mini.dirty = false;
 }
 function drawMinimap(g, x, y, w){
@@ -578,7 +445,7 @@ function coast(dt){
 
 /* ---------- queries for the bots: where is the nearest or a random cell of some kinds ---------- */
 function nearestOf(types, x, y, maxD){
-  const cx0 = Math.floor(x / CELL), cy0 = Math.floor(y / CELL), want = new Uint8Array(INFO.length);
+  const cx0 = Math.floor(x / CELL), cy0 = Math.floor(y / CELL), want = new Uint8Array(CELLS.length);
   for (const t of types) want[t] = 1;
   const R = Math.ceil((maxD || 3000) / CELL);
   for (let r = 0; r <= R; r++){
@@ -601,7 +468,7 @@ function randomOf(types){
   return null;
 }
 
-return {W, H, CELL, K, generate, update, typeAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
+return {W, H, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
   get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },

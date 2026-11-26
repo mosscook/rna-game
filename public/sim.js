@@ -13,7 +13,7 @@
    Steering: set p.tx, p.ty (a point in the world) before each step. sim.fold(p) / sim.drop(p) are the buttons. */
 window.SoupSim = (() => {
 'use strict';
-const RS = window.RNAStrand;
+const RS = window.RNAStrand, SEG = window.SoupSegments;
 const TAU = Math.PI * 2;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
@@ -22,31 +22,18 @@ const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const RECIPES = RS.RECIPES;
 const recipeLen = fn => RECIPES[fn].length + 4;
-const FN_NAMES = ['Mover', 'Cleaver', 'Membrane', 'Detector', 'Joiner', 'Self-cutter', 'Repairer'];
+const FN_NAMES = SEG.names;
 const BOT_COLS = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'];
 
-const ZONE_FIRST = {
-  lagoon:'The tide-pool lagoon. Giant tides flood these pools and leave them to dry. Each cycle concentrates nucleotides, and drying helps them link. Watch the tide: drained flats strand you, but their edges fill with letters.',
-  stranded:'The tide is out and you are stranded on the flats. Drying concentrates nucleotides here, but you can barely move until the water returns.',
-  salt:'This pool is drying out and its salts are concentrating: magnesium. Ribozymes need magnesium to fold, so Cleavers cut in one hit here, but it breaks Membranes apart.',
-  pores:'White chimneys: towers of carbonate riddled with tiny pores. Warm water seeps through and pushes molecules into dead-end pockets where they pile up.',
-  pocket:'A nursery pocket. Molecules collect in dead ends like this, out of reach of UV and meteorites. A real hypothesis for where RNA could build up.',
-  smoker:'Black smokers: acidic jets of black mineral smoke at over 350 °C. They shred RNA. Touching one destroys your core.',
-  spring:'Volcanic hot springs. Steaming pools step down the slope, and wet–dry cycles on their rims may be the best way to grow long strands. Purines (A and G) are common here. Watch for geysers.',
-  clay:'Clay flats. Clay surfaces grab nucleotides and help link them, and lab experiments grew chains of about 50 this way. You swim slowly, but you grab letters from further away.',
-  uv:'UV shallows. With no ozone layer, UV light plus simple chemicals in shallow water built nucleotides, especially C and U. The same UV damages RNA: watch for flashes.',
-  ice:'Ice veins. Freezing squeezes molecules into thin, concentrated brine channels, and the cold slows breakdown. RNA enzymes still work in ice. Slow and safe: damage slowly mends here.',
-  raft:'A pumice raft: foamy volcanic rock drifting on the currents. Inside it you are sheltered from UV and meteorites.',
-  crater:'A fresh meteorite crater. Meteorites carried nucleobases, ribose and phosphorus, and the crater stays warm. Grab the letters before the others do.',
-  ocean:'The open ocean. Water here is too dilute for chemistry to get going: a desert. Head back toward the lagoon, the chimneys or the island.'
-};
+/* the line of science a player gets the first time they reach each kind of place (biomes.js) */
+const ZONE_FIRST = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).filter(([, z]) => z.intro).map(([k, z]) => [k, z.intro]));
 
 function create(opts){
   const MAP = opts.MAP, BOTS = opts.BOTS, stage = opts.stage, W = MAP.W, H = MAP.H, MK = MAP.K;
   const hooks = Object.assign({say(){}, fx(){}, dirty(){}, end(){}, tint(){ return null; }}, opts.hooks || {});
   const ROUND = opts.round || 300, NUC_TARGET = opts.nucTarget || 350, MAXLOOSE = 16;
   const EAT_R = 16, HIT_R = 13, FRAG_MAX = 7, FRAG_EVERY = 25, FRAG_LIFE = 70;
-  const OPEN_TYPES = [MK.DEEP, MK.OCEAN, MK.LAGOON, MK.FLATS, MK.PORE, MK.POCKET, MK.SPRING, MK.CLAY, MK.UV, MK.BRINE];
+  const OPEN_TYPES = MAP.CELLS.map((c, i) => i).filter(i => !MAP.CELLS[i].solid);
   let minStrands = opts.minStrands != null ? opts.minStrands : 10;
 
   let players = [], nucs = [], frags = [], news = [];
@@ -172,7 +159,7 @@ function create(opts){
 
   /* ---------- movement ---------- */
   function swim(p, dt){
-    const m = countFn(p, 'Mover'), L = p.s.length, h = p.s.head, prev = {x:h.x, y:h.y};
+    const L = p.s.length, h = p.s.head, prev = {x:h.x, y:h.y};
     if (p.fling){
       /* a geyser threw you: you fly over rock and land in another pool */
       p.fling.t -= dt; p.s.move(p.fling.vx * dt, p.fling.vy * dt); p.s.step(dt, {turn:0, speed:0});
@@ -180,11 +167,12 @@ function create(opts){
       return;
     }
     /* the strand swims at full effort everywhere; thick terrain (clay, brine, drained flats) is drag on how far it gets */
-    const sp = 170 * (1 + 0.3 * m) / (1 + 0.003 * L) * (p.isBot ? 0.85 : 1), drag = MAP.speedAt(h.x, h.y);
+    const sw = SEG.swimOf(working(p));   /* Movers, or anything else with a swim bonus */
+    const sp = 170 * (1 + sw.speed) / (1 + 0.003 * L) * (p.isBot ? 0.85 : 1), drag = MAP.speedAt(h.x, h.y);
     p.top = sp * drag;
     p.s.cruise(dt, {x:p.tx, y:p.ty}, p.isBot
-      ? {speed:sp, drag, turnCap:2.6 + 0.5 * m, gain:2.5, ease:4, minSpeed:0.55, slowWithin:90 * Math.max(0.5, drag), phase:p.id}
-      : {speed:sp, drag, turnCap:3 + 0.6 * m, hold:16});
+      ? {speed:sp, drag, turnCap:2.6 + sw.turnBot, gain:2.5, ease:4, minSpeed:0.55, slowWithin:90 * Math.max(0.5, drag), phase:p.id}
+      : {speed:sp, drag, turnCap:3 + sw.turn, hold:16});
     const fl = MAP.flowAt(h.x, h.y);
     if (fl.x || fl.y){ const k = 1 / (1 + 0.003 * L); p.s.move(fl.x * k * dt, fl.y * k * dt); }
     collide(p.s, prev);
@@ -223,12 +211,13 @@ function create(opts){
     if (p.isBot) BOTS.onRespawn(p);
     dirty(p); tell(p, 'A new core formed with a single Mover. Start again from there.');
   }
-  /* a working Membrane next to the struck function takes the hit instead */
+  /* a working shield (a Membrane) next to the struck function takes the hit instead */
+  const isShield = fn => { const s = SEG.get(fn); return !!(s && s.shield); };
   function shieldFor(p, st){
-    if (!st || st.fn === 'Membrane') return null;
+    if (!st || isShield(st.fn)) return null;
     const fl = p.s.functions, k = fl.findIndex(f => f.start === st.start);
     if (k < 0) return null;
-    return [fl[k - 1], fl[k + 1]].find(f => f && f.fn === 'Membrane' && !f.damaged) || null;
+    return [fl[k - 1], fl[k + 1]].find(f => f && isShield(f.fn) && !f.damaged) || null;
   }
   function strike(b, j, by, oneHit){
     const st = b.s.structureAt(j);
@@ -240,7 +229,7 @@ function create(opts){
       dirty(b); tell(b, `${by.name}'s Cleaver knocked loose letters off your tail.`);
       return true;
     }
-    const sh = shieldFor(b, st), tgt = sh ? {fn:'Membrane', start:sh.start, damaged:false} : st;
+    const sh = shieldFor(b, st), tgt = sh ? {fn:sh.fn, start:sh.start, damaged:false} : st;
     const name = tgt.fn || 'junk arm';
     const n = b.s.nodes[j];
     if (tgt.damaged || (oneHit && !sh)){
@@ -257,7 +246,7 @@ function create(opts){
     BOTS.onHit(b, by, false);
     b.s.damageAt(tgt.start); b.inv = 1.2;
     if (n) puff(n.x, n.y, 'warn', 22);
-    dirty(b); tell(b, sh ? `Your Membrane took ${by.name}'s hit for your ${st.fn || 'arm'}.` : `${by.name} damaged your ${name}. It stops working until a Repairer mends it. Another hit cuts it off.`);
+    dirty(b); tell(b, sh ? `Your ${sh.fn} took ${by.name}'s hit for your ${st.fn || 'arm'}.` : `${by.name} damaged your ${name}. It stops working until a Repairer mends it. Another hit cuts it off.`);
     tell(by, `You damaged ${b.name}'s ${name}. Hit it again to cut.`);
     return true;
   }
@@ -290,8 +279,8 @@ function create(opts){
       if (p.isBot) BOTS.think(p, dt);
       swim(p, dt);
       const h = p.s.head;
-      /* clay grabs letters: you can pick them up from further away */
-      const reach = EAT_R * (MAP.typeAt(h.x, h.y) === MK.CLAY ? 1.8 : 1);
+      /* some ground (clay) grabs letters: you can pick them up from further away */
+      const reach = EAT_R * (MAP.cellAt(h.x, h.y).reach || 1);
       if (p.s.tail.length < MAXLOOSE && p.s.length < RS.MAXLEN && !p.fling){
         for (let i = nucs.length - 1; i >= 0; i--){
           const q = nucs[i];
@@ -310,13 +299,12 @@ function create(opts){
       }
     }
 
-    /* Cleavers: each spike tip damages what it touches; damaged structures, or anything in magnesium, get cut */
+    /* Cleavers (anything with tips): each tip damages what it touches; damaged structures, or anything in magnesium, get cut */
     for (const a of players){
       if (!a.alive) continue;
       for (const f of working(a)){
-        if (f.fn !== 'Cleaver') continue;
-        const L = f.end - f.start;
-        for (const tip of [f.start + Math.round(L / 4), f.start + Math.round(3 * L / 4)]){
+        const seg = SEG.get(f.fn); if (!seg || !seg.tips) continue;
+        for (const tip of seg.tips(f)){
           const na = a.s.nodes[tip]; if (!na) continue;
           const oneHit = MAP.saltAt(na.x, na.y);
           for (const b of players){
@@ -331,10 +319,10 @@ function create(opts){
         }
       }
     }
-    /* Joiners: an armed Joiner on the tail takes in a fragment the tail touches */
+    /* Joiners (jaws): an armed Joiner on the tail takes in a fragment the tail touches */
     for (const p of players){
       if (!p.alive || p.jcd > 0 || !frags.length) continue;
-      if (!working(p).some(f => f.fn === 'Joiner' && f.jstate === 'armed')) continue;
+      const jaws = working(p).find(f => f.jstate === 'armed'); if (!jaws) continue;
       const t = p.s.nodes[p.s.nodes.length - 1]; if (!t) continue;
       const f = frags.find(fr => fr.s.nodes.some(n => dist(t.x, t.y, n.x, n.y) < 30));
       if (!f) continue;
@@ -348,8 +336,8 @@ function create(opts){
       puff(t.x, t.y, p.col, 34);
       if (!p.isBot){
         dirty(p);
-        const fused = p.s.functions.find(u => u.fn === 'Joiner' && u.jstate === 'fused');
-        tell(p, `Your Joiner took in a fragment of ${add.length} letters.` + (fused ? ' It fused around what it grabbed: +1.' : ''));
+        const fused = p.s.functions.find(u => u.jstate === 'fused');
+        tell(p, `Your ${jaws.fn} took in a fragment of ${add.length} letters.` + (fused ? ' It fused around what it grabbed: +1.' : ''));
       }
     }
     /* smoker heat, salt pools and ice veins, twice a second */
@@ -365,16 +353,17 @@ function create(opts){
           if (st && !st.damaged){ p.s.damageAt(j); puff(nn[j].x, nn[j].y, 'warn', 20); dirty(p); tell(p, `Heat from a black smoker damaged your ${st.fn || 'arm'}.`); break; }
         }
         for (const f of working(p)){
-          if (f.fn !== 'Membrane') continue;
+          const seg = SEG.get(f.fn), sb = seg && seg.saltBreaks; if (!sb) continue;
           const n = nn[Math.round((f.start + f.end) / 2)];
-          if (!n || !MAP.saltAt(n.x, n.y) || Math.random() > 0.25) continue;
+          if (!n || !MAP.saltAt(n.x, n.y) || Math.random() > sb) continue;
           p.s.damageAt(f.start); puff(n.x, n.y, 'mg', 24);
-          dirty(p); tell(p, 'The magnesium in this drying pool dissolved your Membrane. A Repairer, or time in the ice veins, can mend it.');
+          dirty(p); tell(p, `The magnesium in this drying pool dissolved your ${f.fn}. A Repairer, or time in the ice veins, can mend it.`);
         }
-        /* the cold slows breakdown: in an ice vein, damage mends one structure at a time */
-        if (MAP.typeAt(p.s.head.x, p.s.head.y) === MK.BRINE){
+        /* the cold slows breakdown: in an ice vein (any ground that mends), damage mends one structure at a time */
+        const mends = MAP.cellAt(p.s.head.x, p.s.head.y).mends;
+        if (mends){
           p.iceT = (p.iceT || 0) + 0.5;
-          if (p.iceT >= 6){
+          if (p.iceT >= mends){
             const d = p.s.functions.find(f => f.damaged);
             if (d){ p.iceT = 0; p.s.mendAt(d.start); dirty(p); tell(p, `The cold of the ice vein let your ${d.fn} mend.`); }
           }
@@ -475,5 +464,5 @@ function create(opts){
     get timeLeft(){ return timeLeft; }, set timeLeft(v){ timeLeft = v; }, get state(){ return state; }, get seed(){ return seed; }, get mapEv(){ return mapEv; }};
 }
 
-return {create, recipeLen, RECIPES, ZONE_FIRST, FN_NAMES, BOT_COLS};
+return {create, recipeLen, RECIPES, ZONE_FIRST, FN_NAMES, BOT_COLS, SEG};
 })();

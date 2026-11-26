@@ -11,7 +11,7 @@
    working(p), has(p, fn), complexity(p), fold(p), drop(p), me. */
 window.SoupNet = (() => {
 'use strict';
-const FN = ['Mover', 'Cleaver', 'Membrane', 'Detector', 'Joiner', 'Self-cutter', 'Repairer'];
+const SEG = window.SoupSegments, FN = SEG.names;   /* the server numbers segment types in this order */
 const DELAY = 0.1;                 /* how far behind the server other strands are drawn, seconds */
 const STATES = {p:'play', o:'over', r:'ready', i:'idle'};
 const now = () => performance.now() / 1000;
@@ -131,10 +131,11 @@ function create(o){
   /* ---------- your own strand: predicted here, corrected by the server ---------- */
   function predict(me, dt, aim){
     const s = me.s, h = s.head, prev = {x:h.x, y:h.y};
-    const movers = s.functions.filter(f => !f.damaged && f.fn === 'Mover').length, L = s.length;
-    const sp = 170 * (1 + 0.3 * movers) / (1 + 0.003 * L), drag = MAP.speedAt(h.x, h.y);
+    /* the same swim rule as sim.js */
+    const sw = SEG.swimOf(s.functions.filter(f => !f.damaged)), L = s.length;
+    const sp = 170 * (1 + sw.speed) / (1 + 0.003 * L), drag = MAP.speedAt(h.x, h.y);
     const tg = aim || {x:h.x, y:h.y};
-    s.cruise(dt, tg, {speed:sp, drag, turnCap:3 + 0.6 * movers, hold:16});
+    s.cruise(dt, tg, {speed:sp, drag, turnCap:3 + sw.turn, hold:16});
     const fl = MAP.flowAt(h.x, h.y);
     if (fl.x || fl.y){ const k = 1 / (1 + 0.003 * L); s.move(fl.x * k * dt, fl.y * k * dt); }
     /* walls, as the server does them */

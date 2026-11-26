@@ -198,7 +198,9 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
   <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 </div>
 
+<script src="segments.js"></script>
 <script src="rna-strand.js"></script>
+<script src="biomes.js"></script>
 <script src="map.js"></script>
 <script src="bots.js"></script>
 <script src="sim.js"></script>
@@ -216,35 +218,17 @@ const wrapA = a => ((a + Math.PI * 3) % TAU) - Math.PI;
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-/* ---------- recipes: two stem letters, the core, then the stem's partners in reverse ---------- */
-const FNS = [
-  {fn:'Mover', does:'Swim faster and turn tighter. Its two blades spin like a turbine.',
-   tag:'Game only', sci:'No RNA can swim. Movement is the biggest thing this game invents.'},
-  {fn:'Cleaver', does:'Its two spikes damage what they touch on rival strands, then cut damaged structures off. Everything behind the cut floats free.',
-   tag:'Real science', sci:'Hammerhead ribozymes can be built to find a target RNA by base pairing, then cut it.'},
-  {fn:'Membrane', does:'Takes the hits meant for the functions on either side of it. Dissolves in magnesium.',
-   tag:'Real science', sci:'Bubbles of fatty acid can hold RNA, grow and divide. Magnesium breaks them apart.'},
-  {fn:'Detector', does:'Warns you of UV flashes and meteorites early and points to the nearest fragment.',
-   tag:'Real science', sci:'Riboswitches change shape when they catch a particular molecule, switching genes on or off.'},
-  {fn:'Joiner', does:'While it is the very end of your strand, back your tail into a fragment to join it. It fuses around what it grabbed: +1.',
-   tag:'Real science', sci:'The class I ligase, one of the first ribozymes evolved from random RNA, joins strands together.'},
-  {fn:'Self-cutter', does:'One use. Leaves as a ring, cuts off the structure ahead of it, and both burst into letters you can collect again.',
-   tag:'Real science', sci:'Most natural ribozymes, like the hammerhead, cut their own backbone at one exact spot.'},
-  {fn:'Repairer', does:'Leaves the strand as two helpers that travel up it once, mending damage and clearing junk.',
-   tag:'Game idea', sci:'Cells today repair RNA and DNA with protein enzymes. Whether early RNA could mend itself is an open question.'}
-];
+/* ---------- recipes: two stem letters, the core, then the stem's partners in reverse ----------
+   Each segment type's card (what it does, how real it is, the science) comes from segments.js */
+const SEG = window.SoupSegments, FNS = SEG.LIST;
 const RECIPES = RS.RECIPES;
 const recipeLen = fn => RECIPES[fn].length + 4;
 
 /* ---------- the game runs in sim.js; this file draws it and handles the page ---------- */
 const MAP = window.SoupMap, W = MAP.W, H = MAP.H, MK = MAP.K, BOTS = window.SoupBots;
 const zoneAt = (x, y) => MAP.zoneAt(x, y);
-const ZONE_TEXT = {
-  lagoon:'Tide-pool lagoon', flats:'Tidal flats: flooded', stranded:'Tidal flats: drained, you are stranded', salt:'Drying salt pool: magnesium. Cleavers cut in one hit, Membranes dissolve',
-  pores:'White chimney pores: warm and narrow', pocket:'Nursery pocket: safe from UV and meteorites, rich in letters', smoker:'Black smoker: scalding',
-  spring:'Hot spring terrace: rich in A and G', clay:'Clay flats: slow, but you grab letters from further away', uv:'UV shallows: rich in C and U, and UV flashes damage you',
-  ice:'Ice vein: slow and safe, damage slowly mends', raft:'Inside a pumice raft: sheltered', crater:'Fresh crater: rich in A and G', ocean:'Open ocean: almost no letters'
-};
+/* the name of each place, shown at the top left (biomes.js) */
+const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
 const stage = RS.createStage($('sv'));
 let me = null, fx = [], paused = false, clockT = 0;
 let uiDirty = true, pointer = null, showThoughts = true;
@@ -453,7 +437,7 @@ function draw(t){
     if (p.isBot && showThoughts && p.ai.label && seen(h.x, h.y, 100)) label(tx, p.ai.label, h.x, h.y - 32, T.muted, 10);
   }
   /* warnings sit above the strands: UV flashes and meteorites, earlier with a Detector */
-  MAP.drawWarnings(tx, camX, camY, vw, vh, t, has(me, 'Detector') ? 4.5 : 1.8, (text, x, y) => label(tx, text, x, y, T.ink, 13));
+  MAP.drawWarnings(tx, camX, camY, vw, vh, t, SEG.warnEarly(working(me)), (text, x, y) => label(tx, text, x, y, T.ink, 13));
   for (const f of L.frags){
     const h = f.s.head; if (!seen(h.x, h.y, 200)) continue;
     label(tx, f.owner === 0 ? 'your lost piece' : 'fragment', h.x, h.y - 16, T.muted, 12);
@@ -466,7 +450,7 @@ function draw(t){
     tx.globalAlpha = 1;
   }
   tx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (me.alive && has(me, 'Detector') && L.frags.length){
+  if (me.alive && SEG.any(working(me), 'findsFragments') && L.frags.length){
     let best = null, bd = 1e9; for (const f of L.frags){ const d = dist(mh.x, mh.y, f.s.head.x, f.s.head.y); if (d < bd){ bd = d; best = f; } }
     if (best && bd > 160){
       const a = Math.atan2(best.s.head.y - mh.y, best.s.head.x - mh.x), hx = (mh.x - camX) * scale, hy = (mh.y - camY) * scale;
@@ -548,7 +532,7 @@ function renderUI(){
       btn.setAttribute('aria-pressed', pinned === f.fn);
     });
     const fl = me.s.functions;
-    $('mine').innerHTML = '<span class="seg core">Core</span>' + fl.map(f => `<span class="seg ${f.damaged ? 'dmg' : ''}">${f.fn}${f.bonus ? ' +' + f.bonus : ''}${f.fn === 'Joiner' ? `<span class="st">${f.jstate === 'armed' ? 'armed' : 'fused'}</span>` : ''}</span>`).join('');
+    $('mine').innerHTML = '<span class="seg core">Core</span>' + fl.map(f => `<span class="seg ${f.damaged ? 'dmg' : ''}">${f.fn}${f.bonus ? ' +' + f.bonus : ''}${f.jstate ? `<span class="st">${f.jstate === 'armed' ? 'armed' : 'fused'}</span>` : ''}</span>`).join('');
     $('mineN').textContent = `${me.s.length}/${RS.MAXLEN}`;
   }
 }
