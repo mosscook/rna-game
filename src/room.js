@@ -75,6 +75,7 @@ export class GameRoom extends DurableObject {
   }
   sleep(){
     clearInterval(this.timer); this.timer = null;
+    if (this.game) this.game.stage.dispose();
     this.game = null; this.sim = null; this.away.clear();
   }
   loop(){

@@ -413,7 +413,9 @@ function createStage(svg){
   const L = {gooFL:el('g', {}, world), gooL:el('g', {}, world), main:el('g', {}, world), helperGoo:el('g', {}, world), helpers:el('g', {}, world)};
   const stage = {svg, world, defs, layers:L, glyphDefs, strands:[], zoom:1, nextId:0,
     addStrand:opts => makeStrand(stage, opts || {}),
-    render(){ for (const s of stage.strands) s.render(); }};
+    render(){ for (const s of stage.strands) s.render(); },
+    /* done with this stage (a server room going to sleep, a finished test round): let it be freed */
+    dispose(){ for (const s of stage.strands.slice()) s.remove(); const i = stages.indexOf(stage); if (i >= 0) stages.splice(i, 1); }};
   stages.push(stage);
   if (!GEO.A) rebuildGlyphs(); else buildGlyphDefs(glyphDefs);
   applyColors(stage);

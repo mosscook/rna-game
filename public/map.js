@@ -165,7 +165,10 @@ function lineClear(x0, y0, x1, y1){
   return true;
 }
 function findPath(x0, y0, x1, y1, maxNodes){
-  const s = cellIdx(Math.floor(x0 / CELL), Math.floor(y0 / CELL)), g = cellIdx(Math.floor(x1 / CELL), Math.floor(y1 / CELL));
+  if (![x0, y0, x1, y1].every(Number.isFinite)) return null;
+  /* both ends inside the map: a cell off the edge has no path back, and once looped forever here */
+  const cell = (x, y) => cellIdx(Math.max(0, Math.min(GW - 1, Math.floor(x / CELL))), Math.max(0, Math.min(GH - 1, Math.floor(y / CELL))));
+  const s = cell(x0, y0), g = cell(x1, y1);
   if (SOLID[grid[g]]) return null;
   const prev = new Int32Array(GW * GH).fill(-1), q = new Int32Array(Math.min(GW * GH, maxNodes || GW * GH)); let h = 0, t = 0;
   q[t++] = s; prev[s] = s;
@@ -179,7 +182,7 @@ function findPath(x0, y0, x1, y1, maxNodes){
     }
   }
   if (prev[g] < 0) return null;
-  const out = []; for (let c = g; c !== s; c = prev[c]) out.push({x:(c % GW + 0.5) * CELL, y:(Math.floor(c / GW) + 0.5) * CELL});
+  const out = []; for (let c = g, n = 0; c !== s && n < GW * GH; c = prev[c], n++) out.push({x:(c % GW + 0.5) * CELL, y:(Math.floor(c / GW) + 0.5) * CELL});
   return out.reverse();
 }
 

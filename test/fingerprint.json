@@ -8,22 +8,22 @@
   },
   "rounds": {
     "11": {
-      "snaps": "5f239ffc3c3662e5",
-      "end": "AUG:13 Drifter:9 Hoarder:9 Glut:8 Clam:7 Magpie:6 Sponge:4 Scout:3 Spite:3 Warden:3",
-      "said": "7d2aa4ff3a23a905",
+      "snaps": "71d99fcd5054c253",
+      "end": "Gulper:15 Gull:13 AUG:13 Rancor:10 Stillwater:8 Scout:6 Shelly:6 Razor:6 Jackal:6 Fang:6",
+      "said": "39e5a5b3f59abaf4",
       "messages": 9
     },
     "777": {
-      "snaps": "1675b6a5786d336b",
-      "end": "Sponge:16 Sentinel:15 Magpie:13 Spite:13 Feud:10 Clam:10 AUG:10 Comet:6 Fang:6 Shelly:0",
-      "said": "029fbbe471c7ec6e",
-      "messages": 17
+      "snaps": "dd192fb44f349207",
+      "end": "Gull:11 Scrap:10 AUG:10 Spite:7 Hermit:6 Rancor:6 Feud:3 Sentinel:3 Comet:3 Sponge:0",
+      "said": "fec820f251a686b4",
+      "messages": 14
     },
     "12345": {
-      "snaps": "bf72a2ac3640f8c4",
-      "end": "Clam:13 Lurker:11 Glut:9 Shelly:9 Rover:6 Warden:6 Rancor:6 Brute:3 AUG:3 Grudge:0",
-      "said": "b6de32d0e2424f39",
-      "messages": 5
+      "snaps": "9bf4c060830739a9",
+      "end": "Razor:14 Sponge:14 Grudge:10 Shelly:10 Scout:9 Stillwater:6 Sentinel:6 Burrow:3 AUG:3 Hoarder:0",
+      "said": "486079b46e05d80c",
+      "messages": 4
     }
   }
 }

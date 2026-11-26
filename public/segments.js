@@ -61,8 +61,9 @@ const LIST = [
    does:'Warns you of UV flashes and meteorites early and points to the nearest fragment.',
    tag:'Real science', sci:'Riboswitches change shape when they catch a particular molecule, switching genes on or off.',
    warnEarly:4.5, findsFragments:true,
-   likedBy:['caution', 'curiosity', 'patience'],
-   plan(c){ c.want = 0.9 * c.tr.caution + 0.4 * c.tr.curiosity + 0.3 * c.tr.opportunism; if (c.n) c.want *= 0.3; }},
+   /* opportunists want one too: it leads them to fragments for a Joiner */
+   likedBy:['caution', 'curiosity', 'patience', 'opportunism'],
+   plan(c){ c.want = 0.9 * c.tr.caution + 0.4 * c.tr.curiosity + 0.8 * c.tr.opportunism; if (c.n) c.want *= 0.3; }},
 
   {fn:'Joiner', core:'GGA', body:'jaws',
    does:'While it is the very end of your strand, back your tail into a fragment to join it. It fuses around what it grabbed: +1.',
@@ -70,9 +71,14 @@ const LIST = [
    likedBy:['opportunism'],
    plan(c){
      const p = c.p, G = c.G;
-     /* fragments nobody else is already going for */
-     const free = c.info.frags.filter(r => r.d < 1600 && !G.players.some(o => o !== p && o.ai && o.ai.mode === 'join' && o.ai.fragPick && o.ai.fragPick.f === r.f)).length;
-     c.want = 1.1 * c.tr.opportunism + 0.45 * free + (c.info.cleaver ? 0.5 * c.tr.aggression : 0);
+     /* a useful fragment carries a working segment I lack, or two or more of them */
+     const useful = r => { const fl = r.f.s.functions.filter(f => !f.damaged); return fl.length >= 2 || fl.some(f => !c.kinds.has(f.fn)); };
+     /* useful fragments in sight that nobody else is already going for */
+     const free = c.info.frags.filter(r => r.d < 1600 && useful(r) && !G.players.some(o => o !== p && o.ai && o.ai.mode === 'join' && o.ai.fragPick && o.ai.fragPick.f === r.f)).length;
+     /* without one in sight, only a Detector (which points to fragments) makes a Joiner worth building */
+     const detector = c.has('Detector');
+     if (!free && !detector) return false;
+     c.want = 1.1 * c.tr.opportunism + 0.45 * free + (c.info.cleaver ? 0.5 * c.tr.aggression : 0) + (detector ? 0.3 : 0);
      if (free) c.gain += 1.2;
      if (c.n){ c.want *= 0.3 + 0.7 * c.tr.opportunism; if (!free) c.gain *= 0.5; }
    }},
@@ -83,9 +89,13 @@ const LIST = [
    likedBy:[],
    plan(c){
      /* worth what it would mend */
-     c.gain = c.info.damaged.reduce((s, f) => s + (c.kinds.has(f.fn) ? 1 : 3), 0);
+     const dmg = c.info.damaged;
+     c.gain = dmg.reduce((s, f) => s + (c.kinds.has(f.fn) ? 1 : 3), 0);
      if (c.gain < 2) return false;
-     c.want = 0.4 + 0.6 * c.tr.greed - 0.5 * c.tr.patience;
+     /* the other way to mend is a trip to the ice: a Repairer is worth more when there is none nearby */
+     const M = c.G.MAP, h = c.info.h, cold = M.CELLS.map((x, i) => i).filter(i => M.CELLS[i].mends);
+     const ice = M.nearestOf(cold, h.x, h.y, 2500);
+     c.want = 0.5 + 0.35 * dmg.length + 0.5 * c.tr.caution + 0.3 * c.tr.greed + (ice ? 0 : 0.6);
    }},
 
   {fn:'Self-cutter', core:'UAG', body:'ring',
@@ -93,9 +103,15 @@ const LIST = [
    tag:'Real science', sci:'Most natural ribozymes, like the hammerhead, cut their own backbone at one exact spot.',
    likedBy:[],
    plan(c){
-     /* only worth it when the structure right before the tail is broken: it recycles it into letters */
-     if (!c.lastSt || !c.lastSt.damaged || c.has('Repairer')) return false;
-     c.gain = 0.6; c.want = 0.5 * c.tr.opportunism;
+     /* it cuts the last structure before it. Worth it when that is broken (damaged, or a junk fold), to recycle
+        it into letters and lose its dead weight, and there is no Repairer to mend it instead */
+     if (c.has('Repairer')) return false;
+     const s = c.p.s, folded = s.length - s.tail.length;
+     const last = s.segments.filter(g => g.end < folded).pop(); if (!last) return false;
+     const len = last.end - last.start + 1, st = last.fn ? s.functions.find(f => f.start === last.start) : null;
+     const junk = !last.fn && len >= 5, broken = !!(st && st.damaged);
+     if (!junk && !broken) return false;
+     c.gain = 0.6 + 0.05 * len; c.want = 0.3 + 0.5 * c.tr.opportunism + 0.3 * c.tr.greed;
    }}
 ];
 
