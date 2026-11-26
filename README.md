@@ -13,6 +13,10 @@ complex strand. Built for Chromebooks, with no accounts and no tracking.
 
 Room names can use letters, numbers and dashes, up to 32 characters. They aren't case sensitive.
 
+## Steering
+
+A mouse steers toward the pointer. On touch screens, wherever a finger lands becomes a joystick: drag away from that spot to steer (a short drag swims slowly, about 70 px is full speed), and lift to stop. A faint ring shows while a finger is down. On small screens the lines of science about each place are skipped, since they cover too much of the soup.
+
 ## Watching
 
 Press **Watch** (or V) to follow other strands: ◀ ▶ (or the arrow keys) move between them, **Tour** moves on every 15 seconds, and × (or Esc) goes back to your own strand. While you watch, your strand waits where it is and can still be hit. The bar shows each strand's score, its place, and what a bot is thinking.

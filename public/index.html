@@ -346,7 +346,7 @@ function reset(){
 function step(dt){
   if (net){
     let aim = null;
-    if (pointer && me && watchId == null) aim = {x:clamp(camX + pointer.x / scale, 5, W - 5), y:clamp(camY + pointer.y / scale, 5, H - 5)};
+    if (me && watchId == null) aim = aimAt();
     net.update(dt, aim);
     if (net.me && me !== net.me){ me = net.me; uiDirty = true; }
   } else {
@@ -428,7 +428,12 @@ function renderDev(){
 }
 
 /* ---------- actions ---------- */
-function say(text){ const t = $('toast'); t.textContent = text; t.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => t.classList.remove('on'), 4600); }
+/* on small screens the long lines about each place cover too much of the soup: skip them there */
+const smallScreen = window.matchMedia('(max-width: 760px), (max-height: 520px)');
+const PLACE_LINES = new Set(Object.values(window.SoupBiomes.ZONES).map(z => z.intro).filter(Boolean));
+function say(text){
+  if (smallScreen.matches && PLACE_LINES.has(text)) return;
+  const t = $('toast'); t.textContent = text; t.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => t.classList.remove('on'), 4600); }
 function showEnd(rows){
   const place = me ? rows.findIndex(r => r.p === me) + 1 : 0;
   const kinds = me ? new Set(working(me).map(f => f.fn)).size : 0;
@@ -596,12 +601,14 @@ function draw(t){
       tx.beginPath(); tx.moveTo(12, 0); tx.lineTo(-4, -7); tx.lineTo(-4, 7); tx.closePath(); tx.fillStyle = T.stain; tx.fill(); tx.restore();
     }
   }
-  const mw = cw < 520 ? 110 : 170, mhh = mw * H / W, mx = cw - mw - 10, my = ch - mhh - 10, k = mw / W;
+  /* on narrow screens the minimap sits above the action buttons */
+  const mw = cw < 520 ? 110 : 170, mhh = mw * H / W, mx = cw - mw - 10, my = ch - mhh - 10 - (cw < 520 ? 50 : 0), k = mw / W;
   tx.globalAlpha = 0.95; MAP.drawMinimap(tx, mx, my, mw); tx.globalAlpha = 1;
   tx.lineWidth = 1; tx.strokeStyle = T.line; tx.strokeRect(mx, my, mw, mhh);
   for (const f of L.frags){ tx.fillStyle = T.muted; tx.fillRect(mx + f.s.head.x * k - 1.5, my + f.s.head.y * k - 1.5, 3, 3); }
   for (const p of L.players){ const px = p === me || p.mx == null ? p.s.head.x : p.mx, py = p === me || p.my == null ? p.s.head.y : p.my; if (!p.alive && p.mx == null) continue; tx.fillStyle = T[p.col]; tx.beginPath(); tx.arc(mx + px * k, my + py * k, p === fp ? 4.5 : p === me ? 4 : 2.8, 0, TAU); tx.fill(); if (p === fp && fp !== me){ tx.lineWidth = 1.5; tx.strokeStyle = T.ink; tx.stroke(); } }
   tx.strokeStyle = T.ink; tx.strokeRect(mx + camX * k, my + camY * k, Math.min(vw, W) * k, Math.min(vh, H) * k);
+  drawStick();
 }
 
 /* ---------- interface ---------- */
@@ -692,15 +699,54 @@ function renderClock(){
 }
 
 /* ---------- input ---------- */
-function aimPlayer(){
-  if (!pointer || watchId != null){ me.tx = me.s.head.x; me.ty = me.s.head.y; return; }
-  me.tx = clamp(camX + pointer.x / scale, 5, W - 5); me.ty = clamp(camY + pointer.y / scale, 5, H - 5);
+/* touch steers with a floating joystick: wherever a finger lands becomes its centre, and dragging away from there
+   points the strand. A short drag swims slowly, a full one (STICK_MAX px) at full speed; lifting the finger eases to a stop.
+   A mouse steers toward the pointer, as before. */
+const STICK_DEAD = 10, STICK_MAX = 70;
+let stick = null, touchMode = false;
+/* where the player is steering, in the world, or null for nowhere yet */
+function aimAt(){
+  if (!me) return null;
+  const h = me.s.head;
+  if (touchMode){
+    if (!stick) return {x:h.x, y:h.y};
+    const dx = stick.x - stick.ox, dy = stick.y - stick.oy, len = Math.hypot(dx, dy);
+    if (len < STICK_DEAD) return {x:h.x, y:h.y};
+    const k = Math.min(1, (len - STICK_DEAD) / (STICK_MAX - STICK_DEAD)), reach = 40 + 360 * k;
+    return {x:clamp(h.x + dx / len * reach, 5, W - 5), y:clamp(h.y + dy / len * reach, 5, H - 5)};
+  }
+  if (!pointer) return null;
+  return {x:clamp(camX + pointer.x / scale, 5, W - 5), y:clamp(camY + pointer.y / scale, 5, H - 5)};
 }
-function setPointer(e){ const r = tc.getBoundingClientRect(); pointer = {x:e.clientX - r.left, y:e.clientY - r.top}; }
-let held = false;
-tc.addEventListener('pointerdown', e => { held = true; setPointer(e); });
-tc.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || held) setPointer(e); });
-['pointerup', 'pointercancel'].forEach(n => tc.addEventListener(n, () => { held = false; }));
+function aimPlayer(){
+  const a = watchId == null ? aimAt() : null;
+  if (!a){ me.tx = me.s.head.x; me.ty = me.s.head.y; return; }
+  me.tx = a.x; me.ty = a.y;
+}
+const local = e => { const r = tc.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
+function setPointer(e){ pointer = local(e); }
+tc.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse'){ touchMode = false; setPointer(e); return; }
+  touchMode = true;
+  if (stick) return;   /* one finger steers; others are ignored */
+  const at = local(e); stick = {id:e.pointerId, ox:at.x, oy:at.y, x:at.x, y:at.y};
+  try { tc.setPointerCapture(e.pointerId); } catch(err){}
+});
+tc.addEventListener('pointermove', e => {
+  if (e.pointerType === 'mouse'){ setPointer(e); return; }
+  if (stick && e.pointerId === stick.id){ const at = local(e); stick.x = at.x; stick.y = at.y; }
+});
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(n => tc.addEventListener(n, e => { if (stick && e.pointerId === stick.id) stick = null; }));
+/* while a finger is down: a faint ring where it landed and a knob where it is */
+function drawStick(){
+  if (!stick) return;
+  const dx = stick.x - stick.ox, dy = stick.y - stick.oy, len = Math.hypot(dx, dy), k = len > STICK_MAX ? STICK_MAX / len : 1;
+  tx.globalAlpha = 0.28; tx.lineWidth = 2; tx.strokeStyle = T.ink;
+  tx.beginPath(); tx.arc(stick.ox, stick.oy, STICK_MAX, 0, TAU); tx.stroke();
+  tx.globalAlpha = 0.4; tx.fillStyle = T.ink;
+  tx.beginPath(); tx.arc(stick.ox + dx * k, stick.oy + dy * k, 18, 0, TAU); tx.fill();
+  tx.globalAlpha = 1;
+}
 function togglePause(){ if (net || sim.state !== 'play') return; paused = !paused; $('bPause').setAttribute('aria-pressed', paused); if (paused) say('Paused.'); }
 $('bPause').addEventListener('click', togglePause);
 $('bLow').addEventListener('click', () => {
