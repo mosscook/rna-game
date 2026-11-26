@@ -1,4 +1,4 @@
-# RNA Soup · rna.game
+# rna.game
 
 A classroom multiplayer game about the RNA world. Each player is an early RNA strand in a primordial
 tide pool: collect nucleotides, fold them into working structures, and finish the round with the most
