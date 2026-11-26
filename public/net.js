@@ -6,7 +6,9 @@
    - Letters, map state (tide, rafts, geysers, meteorites, UV, ice), scores and messages arrive as they change.
 
    const net = SoupNet.create({RS, MAP, stage, hooks:{say, dirty, end, welcome, status, tint, fx}})
-   net.connect(url, name); each frame: net.update(dt, aim) where aim is {x, y} or null.
+   net.connect(url, name, {watch}); each frame: net.update(dt, aim) where aim is {x, y} or null.
+   watch:true joins without a strand, to watch only. net.spectate(id) follows another strand (null: your own again);
+   the server then sends what is near that strand.
    It also looks like the single-player sim to the page: players, nucs, frags, state, timeLeft, standings(),
    working(p), has(p, fn), complexity(p), fold(p), drop(p), me. */
 window.SoupNet = (() => {
@@ -23,7 +25,7 @@ function create(o){
   const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}, outdated(){}}, o.hooks || {});
   /* o.version: the page's own version, or a function returning it (the page learns it from /version after loading) */
   const pageVersion = () => typeof o.version === 'function' ? o.version() : o.version;
-  let ws = null, meId = null, seed = null, state = 'connecting', tl = 0, tlAt = 0, offset = null, rtt = 0.08, url = '', name = '';
+  let ws = null, meId = null, seed = null, state = 'connecting', tl = 0, tlAt = 0, offset = null, rtt = 0.08, url = '', name = '', watchOnly = false, watchId = null;
   let lastSend = 0, lastAim = null, retry = 0, closedByUs = false;
   /* a random token for this tab only (gone when the tab closes): lets a refresh or a dropped connection take your strand back */
   let tok = null;
@@ -76,13 +78,14 @@ function create(o){
     let m; try { m = JSON.parse(e.data); } catch(err){ return; }
     switch (m.t){
       case 'w':
-        meId = m.id; retry = 0;
+        meId = m.id == null ? null : m.id; retry = 0;
         /* the server was redeployed since this page loaded: offer a refresh (the game keeps working meanwhile) */
         { const mine = pageVersion(); if (m.v && mine && m.v !== 'dev' && m.v !== mine) hooks.outdated(m.v); }
         if (m.seed !== seed){ seed = m.seed; clearAll(); MAP.generate(seed); }
         else { N.clear(); nucs = []; }   /* rejoining the same map: the server sends the nearby letters again */
         state = STATES[m.st] || m.st; tl = m.tl; tlAt = now();
-        mirror(meId).name = 'You';
+        if (meId != null) mirror(meId).name = 'You';
+        if (watchId != null) send({t:'v', id:watchId});   /* after a reconnect or a new round, keep watching */
         hooks.welcome(m); break;
       case 'r': {
         roster.clear();
@@ -99,7 +102,7 @@ function create(o){
       case 'say': hooks.say(m.text); break;
       case 'e': state = 'over'; hooks.end(m.rows.map(([id, nm, col, sc, bot]) => ({p:P.get(id) || {id, name:nm, col, isBot:!!bot, s:{length:0}}, score:sc}))); break;
       case 'pong': rtt = rtt * 0.8 + (now() - m.at) * 0.2; break;
-      case 'full': hooks.status('This room is full. Try another room name.'); closedByUs = true; break;
+      case 'full': hooks.status(m.watch ? 'Too many people are watching this room.' : 'This room is full. Try another room name.'); closedByUs = true; break;
     }
   }
   function onSnap(m){
@@ -180,8 +183,8 @@ function create(o){
     MAP.coast(dt);
     const t = now();
     /* steering goes to the server about 15 times a second, plus a ping now and then for the round trip */
-    if (ws && ws.readyState === 1 && meId != null){
-      if (aim && t - lastSend > 1 / 15 && (!lastAim || Math.abs(aim.x - lastAim.x) + Math.abs(aim.y - lastAim.y) > 1 || t - lastSend > 0.5)){
+    if (ws && ws.readyState === 1 && (meId != null || watchOnly)){
+      if (aim && meId != null && watchId == null && t - lastSend > 1 / 15 && (!lastAim || Math.abs(aim.x - lastAim.x) + Math.abs(aim.y - lastAim.y) > 1 || t - lastSend > 0.5)){
         ws.send(JSON.stringify({t:'i', x:Math.round(aim.x), y:Math.round(aim.y)})); lastSend = t; lastAim = {x:aim.x, y:aim.y};
       }
       if (!update.pingT || t - update.pingT > 2){ update.pingT = t; ws.send(JSON.stringify({t:'ping', at:t})); }
@@ -208,11 +211,11 @@ function create(o){
   }
 
   /* ---------- connection ---------- */
-  function connect(u, nm){
-    url = u; name = nm; closedByUs = false;
+  function connect(u, nm, opt){
+    url = u; name = nm; closedByUs = false; if (opt) watchOnly = !!opt.watch;
     hooks.status('Connecting…');
     ws = new WebSocket(url);
-    ws.onopen = () => { ws.send(JSON.stringify({t:'j', name, tok})); hooks.status(''); };
+    ws.onopen = () => { ws.send(JSON.stringify(watchOnly ? {t:'j', watch:1} : {t:'j', name, tok})); hooks.status(''); };
     ws.onmessage = onMessage;
     ws.onclose = () => {
       if (closedByUs) return;
@@ -235,6 +238,9 @@ function create(o){
     drop(){ send({t:'d'}); },
     standings(){ return players.filter(p => roster.has(p.id) || p.id === meId).map(p => ({p, score:complexity(p)})).sort((a, b) => b.score - a.score); },
     close(){ closedByUs = true; if (ws) ws.close(); },
+    spectate(id){ watchId = id == null ? null : id; send({t:'v', id:watchId}); },
+    inRoster:id => roster.has(id),
+    get watchOnly(){ return watchOnly; },
     debug:obj => send(Object.assign({t:'debug'}, obj)),   /* ignored by real servers; local testing only */
     get me(){ return meId != null ? P.get(meId) || null : null; }, get players(){ return players; }, get frags(){ return frags; }, get nucs(){ return nucs; },
     get mini(){ return mini; }, get state(){ return state; }, get timeLeft(){ return Math.max(0, tl - (state === 'play' ? now() - tlAt : 0)); },

@@ -62,7 +62,35 @@ check(b2.id === oldId, `reconnect keeps the same strand (${oldId} -> ${b2.id})`)
 const c = player('UUU', 'tokcccccccc'); await c.open(); await sleep(600);
 check(c.id != null && c.id !== a.id && c.id !== b2.id, 'a third player gets their own strand');
 
-/* fill the room: 12 humans max */
+/* spectating: a watch-only tab has no strand and takes no seat; anyone can follow any strand */
+function watcher(){
+  const w = {count:{}, last:{}, ws:null};
+  w.open = () => new Promise((res, rej) => {
+    const ws = new WebSocket(`${BASE}/ws/${room}`); w.ws = ws;
+    ws.on('open', () => { ws.send(JSON.stringify({t:'j', watch:1})); res(w); });
+    ws.on('message', d => { const m = JSON.parse(d.toString()); w.count[m.t] = (w.count[m.t] || 0) + 1; w.last[m.t] = m; });
+    ws.on('error', rej);
+  });
+  return w;
+}
+const w = watcher(); await w.open(); await sleep(1300);
+check(w.last.w && w.last.w.id === null, 'a watcher joins with no strand of its own');
+check(a.last.r.P.filter(e => !e[3]).length === 3, 'the watcher is not on the roster');
+check((w.count.s || 0) > 15 && (w.count.q || 0) >= 10, `the watcher gets snapshots (${w.count.s}) and every strand's shape`);
+const pos = a.last.a.A, ah = a.last.s.P.find(e => e[0] === a.id);
+const far = pos.filter(e => e[0] !== a.id).sort((x, y) => Math.hypot(y[1] - ah[1], y[2] - ah[2]) - Math.hypot(x[1] - ah[1], x[2] - ah[2]))[0];
+w.ws.send(JSON.stringify({t:'v', id:far[0]})); await sleep(500);
+check(w.last.s.P.some(e => e[0] === far[0]), `the watcher follows strand ${far[0]} and gets updates around it`);
+/* a player spectating: their own strand stops, stays in their updates, and the strand they watch is there too */
+a.ws.send(JSON.stringify({t:'v', id:far[0]})); await sleep(300);
+const s0 = a.last.s.P.find(e => e[0] === a.id);
+for (let i = 0; i < 10; i++){ a.aim(s0[1] + 800, s0[2]); await sleep(50); }
+const s1 = a.last.s.P.find(e => e[0] === a.id);
+check(!!s1 && a.last.s.P.some(e => e[0] === far[0]), 'a spectating player still gets their own strand and the one they watch');
+check(Math.hypot(s1[1] - s0[1], s1[2] - s0[2]) < 60, `steering is ignored while spectating (${Math.round(Math.hypot(s1[1] - s0[1], s1[2] - s0[2]))} px)`);
+a.ws.send(JSON.stringify({t:'v', id:null})); await sleep(200);
+
+/* fill the room: 12 humans max (the watcher, still here, does not count) */
 const extra = [];
 for (let i = 0; i < 10; i++){ const x = player('CCC', 'tokx' + i + 'xxxxxx'); extra.push(x); await x.open(); }
 await sleep(800);
@@ -85,5 +113,5 @@ check(a.seeds.length > seeds0 && a.seeds[a.seeds.length - 1] !== a.seeds[seeds0 
 check(a.last.s.st === 'p', 'and it is playing again');
 
 console.log(`\n${failed ? failed + ' failed' : 'all passed'}; A received ${(a.bytes / 1024).toFixed(0)} KB in ${((Date.now() - t0) / 1000 + 6).toFixed(0)}+ s`);
-for (const p of [a, b2]) p.ws.close();
+for (const p of [a, b2, w]) p.ws.close();
 process.exit(failed ? 1 : 0);

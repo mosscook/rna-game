@@ -107,6 +107,15 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .newver{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:6;padding:7px 14px;border-radius:99px;border:1px solid var(--line);
   background:var(--surface);color:var(--ink);font:700 13px/1.2 var(--font-body);cursor:pointer;box-shadow:0 4px 18px rgb(0 0 0/.35)}
 .newver:hover{border-color:var(--ink)}
+/* spectating: a bar at the bottom middle with whose view this is */
+.watch{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:4px;border-radius:99px;max-width:calc(100% - 20px);
+  background:var(--glass);border:1px solid var(--edge);box-shadow:0 2px 10px rgb(0 0 0 / .18);z-index:4}
+.watch .who{display:grid;padding:0 8px;min-width:0;text-align:center;line-height:1.2}
+.watch .who b{font:700 14px/1.2 var(--font-body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.watch .who small{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.watch .btn{height:32px}
+.sheet .alt{background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:13px;justify-self:center}
+.sheet .alt:hover{color:var(--ink)}
 
 /* start and end screens */
 .overlay{position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--pond) 55%,transparent);overflow:auto;z-index:5}
@@ -158,6 +167,17 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .sl.done{border-color:var(--c);background:color-mix(in srgb,var(--c) 18%,var(--surface))}
 .sl.next{border:2px solid var(--ink);line-height:18px}
 .sl.any{font-weight:400;font-size:11px}
+/* ?dev: numbers and test buttons for building and balancing the game */
+.dev{position:absolute;left:10px;top:52px;width:300px;max-height:calc(100% - 120px);overflow-y:auto;padding:8px 10px;border-radius:10px;display:grid;gap:6px;z-index:3;
+  background:var(--glass);border:1px solid var(--edge);font:400 11px/1.45 var(--font-mono);color:var(--muted)}
+.dev pre{margin:0;font:inherit;white-space:pre-wrap}
+.dev pre b{color:var(--ink);font-weight:700}
+.dev .row{display:flex;flex-wrap:wrap;gap:4px}
+.dev .btn{height:24px;padding:0 8px;font:700 11px var(--font-body)}
+.dev .legend{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
+.dev .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;background:var(--c);vertical-align:-1px}
+.dev h3{margin:2px 0 0;font:700 10px var(--font-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+@media (max-width:760px){ .watch{bottom:56px} }
 @media (max-width:640px){
   .hud{gap:8px;padding:4px 10px;max-width:calc(100% - 130px)}
   #zone{display:none}
@@ -190,10 +210,19 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
   <div class="acts" role="toolbar" aria-label="Actions">
     <button class="btn" type="button" id="bFold">Fold<kbd>Space</kbd></button>
     <button class="btn" type="button" id="bDrop">Drop<kbd>X</kbd></button>
+    <button class="btn" type="button" id="bWatch" aria-pressed="false" title="Watch other strands (V)">Watch<kbd>V</kbd></button>
     <button class="btn sm" type="button" id="bLow" aria-pressed="false" aria-label="Low detail" title="Low detail">Lo</button>
     <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
   </div>
 
+  <aside class="dev" id="dev" aria-label="Developer tools" hidden></aside>
+  <div class="watch" id="watchBar" role="group" aria-label="Spectating" hidden>
+    <button class="btn sm" type="button" id="wPrev" aria-label="Previous strand" title="Previous (←)">&#9664;</button>
+    <span class="who" aria-live="polite"><b id="wName"></b><small id="wNote"></small></span>
+    <button class="btn sm" type="button" id="wNext" aria-label="Next strand" title="Next (→)">&#9654;</button>
+    <button class="btn" type="button" id="wTour" aria-pressed="false" title="Move to the next strand every 15 seconds">Tour</button>
+    <button class="btn sm" type="button" id="wStop" aria-label="Stop watching" title="Back to your strand (V)">&times;</button>
+  </div>
   <p class="toast" id="toast" aria-live="polite"></p>
   <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 </div>
@@ -268,13 +297,42 @@ const net = ROOM && window.SoupNet ? window.SoupNet.create({RS, MAP, stage, vers
   dirty:() => { uiDirty = true; },
   fx:e => fx.push(Object.assign({t:0}, e)),
   end:rows => showEnd(rows),
-  welcome:() => { me = net.me; uiDirty = true; camT = null; $('overlay').hidden = true; },
+  welcome:() => { me = net.me; uiDirty = true; camT = null; $('overlay').hidden = true; if (watchOnly) $('watchBar').hidden = false; },
   status:text => { const el = $('netStatus'); if (el) el.textContent = text; else if (text) say(text); },
   tint:(col, bot) => col === 'stain' ? null : {spine:T[col], goo:T[col]}}}) : null;
 /* the page draws whichever world it has: the local sim, or the mirror of a server room */
 const world = net || sim;
 const working = p => world.working(p), has = (p, fn) => world.has(p, fn), complexity = p => world.complexity(p);
 const L = {get players(){ return world.players; }, get nucs(){ return world.nucs; }, get frags(){ return world.frags; }};
+
+/* ---------- spectating: the camera follows another strand; your own waits where it is ---------- */
+let watchId = null, tour = false, tourT = 0, watchOnly = false;
+/* whose view the screen shows: the strand being watched, or yours */
+const focusP = () => (watchId != null && L.players.find(p => p.id === watchId)) || me;
+const others = () => L.players.filter(p => p !== me && (!net || net.inRoster(p.id))).sort((a, b) => a.id - b.id);
+function watch(p){
+  watchId = p ? p.id : null; tourT = 0;
+  if (net) net.spectate(watchId);
+  camT = null;   /* jump straight there */
+  $('watchBar').hidden = watchId == null;
+  $('bWatch').setAttribute('aria-pressed', watchId != null);
+  if (watchId != null && panelOpen) openPanel(false);
+  uiDirty = true; renderWatch();
+}
+function cycle(d){
+  const list = others(); if (!list.length) return;
+  const i = list.findIndex(p => p.id === watchId);
+  watch(list[i < 0 ? (d > 0 ? 0 : list.length - 1) : (i + d + list.length) % list.length]);
+}
+function stopWatching(){ if (watchOnly) return; tour = false; $('wTour').setAttribute('aria-pressed', 'false'); watch(null); }
+function setTour(on){ tour = on; tourT = 0; $('wTour').setAttribute('aria-pressed', on); }
+function renderWatch(){
+  const p = watchId != null ? focusP() : null; if (!p || p === me) return;
+  const rows = world.standings(), rank = rows.findIndex(r => r.p === p) + 1;
+  $('wName').textContent = `${p.name} · ${complexity(p)}${rank ? ' · ' + ORD(rank) : ''}`;
+  const style = p.isBot && p.mind ? BOTS.describe(p) : '';
+  $('wNote').textContent = !p.alive ? 'waiting to re-form' : [p.ai && p.ai.label, style].filter(Boolean).join(' · ') || (p.isBot ? 'bot' : 'player');
+}
 
 function reset(){
   if (net){ showJoin(); return; }
@@ -288,25 +346,95 @@ function reset(){
 function step(dt){
   if (net){
     let aim = null;
-    if (pointer && me) aim = {x:clamp(camX + pointer.x / scale, 5, W - 5), y:clamp(camY + pointer.y / scale, 5, H - 5)};
+    if (pointer && me && watchId == null) aim = {x:clamp(camX + pointer.x / scale, 5, W - 5), y:clamp(camY + pointer.y / scale, 5, H - 5)};
     net.update(dt, aim);
     if (net.me && me !== net.me){ me = net.me; uiDirty = true; }
   } else {
     if (sim.state === 'play') aimPlayer();
-    sim.step(dt);
+    const t0 = DEV ? performance.now() : 0;
+    for (let k = 0; k < devFast; k++) sim.step(dt);
+    if (DEV) stepMs += (performance.now() - t0 - stepMs) * 0.05;
   }
   for (let i = fx.length - 1; i >= 0; i--){ fx[i].t += dt; if (fx[i].t > fx[i].dur) fx.splice(i, 1); }
 }
 const doFold = p => world.fold(p), doDrop = p => world.drop(p);
 
+/* ---------- ?dev: frame and step times, what is under the pointer, a ground-type map, and (single-player) test buttons ---------- */
+const DEV = new URLSearchParams(location.search).has('dev');
+let devBiomes = false, devFast = 1, stepMs = 0, drawMs = 0;
+const BIO = window.SoupBiomes;
+const devCol = i => `hsl(${(i * 137.5) % 360} 75% 55%)`;
+function devSetup(){
+  if (!DEV) return;
+  const solo = !net, seg = SEG.LIST.map(s => `<button class="btn" type="button" data-add="${s.fn}">+${s.fn}</button>`).join('');
+  $('dev').innerHTML = `<pre id="devStats"></pre>`
+    + `<div class="row"><button class="btn" type="button" id="dBio" aria-pressed="false">Ground map <kbd>B</kbd></button></div>`
+    + (solo ? `<h3>Add to your strand</h3><div class="row">${seg}</div>`
+      + `<h3>Make it happen here</h3><div class="row"><button class="btn" type="button" data-do="frag">Fragment</button><button class="btn" type="button" data-do="meteor">Meteorite</button>`
+      + `<button class="btn" type="button" data-do="uv">UV flash</button><button class="btn" type="button" data-do="damage">Damage me</button></div>`
+      + `<h3>Round</h3><div class="row"><button class="btn" type="button" id="dFast" aria-pressed="false">Speed ×4</button><button class="btn" type="button" data-do="minute">−1 min</button>`
+      + `<button class="btn" type="button" data-do="end">End round</button><button class="btn" type="button" id="dBots" aria-pressed="false">No bots</button></div>` : '')
+    + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`;
+  $('dev').hidden = false;
+  $('dBio').addEventListener('click', toggleBiomes);
+  if (!solo) return;
+  /* "here" is where the pointer is, or your head */
+  const here = () => pointer ? {x:clamp(camX + pointer.x / scale, 5, W - 5), y:clamp(camY + pointer.y / scale, 5, H - 5)} : {x:me.s.head.x, y:me.s.head.y};
+  $('dev').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || !me) return;
+    if (b.dataset.add){ const add = RS.recipeSeq(b.dataset.add); me.s.appendFolded(add, [{fn:b.dataset.add, start:0, end:add.length - 1}]); uiDirty = true; }
+    const h = me.s.head;
+    switch (b.dataset.do){
+      case 'frag': sim.spawnFrag({x:h.x + 140, y:h.y}); break;
+      case 'meteor': { const at = here(); MAP.meteors.push({x:at.x, y:at.y, t:4.5, r:240}); break; }
+      case 'uv': { const at = here(); MAP.uvFlashes.push({x:at.x, y:at.y, r:170, t:3.5}); break; }
+      case 'damage': me.s.damage(); uiDirty = true; break;
+      case 'minute': sim.timeLeft = Math.max(1, sim.timeLeft - 60); break;
+      case 'end': sim.timeLeft = 0.05; break;
+    }
+  });
+  $('dFast').addEventListener('click', () => { devFast = devFast === 1 ? 4 : 1; $('dFast').setAttribute('aria-pressed', devFast > 1); });
+  $('dBots').addEventListener('click', () => { const none = $('dBots').getAttribute('aria-pressed') !== 'true'; sim.setMinStrands(none ? 1 : 10); $('dBots').setAttribute('aria-pressed', none); });
+}
+function toggleBiomes(){ devBiomes = !devBiomes; $('dBio').setAttribute('aria-pressed', devBiomes); $('devLegend').hidden = !devBiomes; }
+/* every cell in view tinted by its ground type */
+function drawBiomes(g, vw, vh){
+  const C = MAP.CELL, x0 = Math.max(0, Math.floor(camX / C)), x1 = Math.min(W / C - 1, Math.floor((camX + vw) / C));
+  const y0 = Math.max(0, Math.floor(camY / C)), y1 = Math.min(H / C - 1, Math.floor((camY + vh) / C));
+  const byType = BIO.CELLS.map(() => []);
+  for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) byType[MAP.typeAt((cx + 0.5) * C, (cy + 0.5) * C)].push(cx, cy);
+  g.globalAlpha = 0.42;
+  byType.forEach((list, t) => {
+    if (!list.length) return;
+    g.fillStyle = devCol(t); g.beginPath();
+    for (let i = 0; i < list.length; i += 2) g.rect(list[i] * C, list[i + 1] * C, C - 1, C - 1);
+    g.fill();
+  });
+  g.globalAlpha = 1;
+}
+function renderDev(){
+  if (!DEV) return;
+  const fp = focusP(), alive = L.players.filter(p => p.alive).length;
+  let s = `<b>${Math.round(window.__fps || 0)}</b> fps · step <b>${stepMs.toFixed(2)}</b> ms · draw <b>${drawMs.toFixed(1)}</b> ms\n`
+    + `${alive}/${L.players.length} strands · ${L.nucs.length} letters · ${L.frags.length} fragments\n`
+    + `seed ${world.seed} · tide ${Math.round(MAP.tide * 100)}% · ${MAP.chunkCount} chunks cached · ${Math.round(cw * dpr)}×${Math.round(ch * dpr)} px\n`;
+  if (net) s += `round trip <b>${Math.round(net.rtt * 1000)}</b> ms\n`;
+  if (fp) s += `${fp === me ? 'you' : fp.name} at ${Math.round(fp.s.head.x)}, ${Math.round(fp.s.head.y)} · ${fp.s.length} letters\n`;
+  if (pointer){
+    const x = camX + pointer.x / scale, y = camY + pointer.y / scale, c = MAP.cellAt(x, y);
+    s += `pointer ${Math.round(x)}, ${Math.round(y)}: <b>${c.key.toLowerCase()}</b> · zone ${MAP.zoneAt(x, y)} · speed ${MAP.speedAt(x, y).toFixed(2)} · letters ${c.spawn}${c.shelter ? ' · shelter' : ''}`;
+  }
+  $('devStats').innerHTML = s;
+}
+
 /* ---------- actions ---------- */
 function say(text){ const t = $('toast'); t.textContent = text; t.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => t.classList.remove('on'), 4600); }
 function showEnd(rows){
-  const place = rows.findIndex(r => r.p === me) + 1;
-  const kinds = new Set(working(me).map(f => f.fn)).size;
-  $('sheet').innerHTML = `<h2>${place === 1 ? 'Most complex strand in the soup' : 'Time. You placed ' + place + ' of ' + rows.length}</h2>`
+  const place = me ? rows.findIndex(r => r.p === me) + 1 : 0;
+  const kinds = me ? new Set(working(me).map(f => f.fn)).size : 0;
+  $('sheet').innerHTML = `<h2>${!me ? 'Round over' : place === 1 ? 'Most complex strand in the soup' : 'Time. You placed ' + place + ' of ' + rows.length}</h2>`
     + `<ol class="rank">${rows.map(r => `<li class="${r.p === me ? 'me' : ''}"><span class="dot" style="--c:var(--${r.p.col})"></span><span>${r.p.name}${r.p.isBot ? `<small class="style">${BOTS.describe(r.p)}</small>` : ''}</span><span>${r.score}</span></li>`).join('')}</ol>`
-    + `<p class="fine">You finished with ${plural(me.s.length, 'letter')} and ${plural(kinds, 'working kind')} of function. A new kind scores 3, a repeat 1, a fused Joiner adds 1.</p>`
+    + (me ? `<p class="fine">You finished with ${plural(me.s.length, 'letter')} and ${plural(kinds, 'working kind')} of function. A new kind scores 3, a repeat 1, a fused Joiner adds 1.</p>` : '')
     + (net ? `<p class="fine">The next round starts in a few seconds, on a new map.</p>` : `<button class="btn go" type="button" id="again">Play again</button>`);
   $('overlay').hidden = false;
   if (!net){ $('again').addEventListener('click', () => reset()); $('again').focus(); }
@@ -324,9 +452,11 @@ function showIntro(show){
     </ol>
     <p class="fine">The RNA world is a leading hypothesis, not settled fact. Base pairing, ribozymes and magnesium are real; swimming and the exact shapes are invented for the game.</p>
     <button class="btn go" type="button" id="begin">Start the round</button>
+    <button class="alt" type="button" id="watchBots">Or just watch the bots</button>
     <form class="room" id="roomForm"><label for="roomName">Or play together:</label><span class="host">${location.host}/</span><input id="roomName" placeholder="period3" maxlength="32" autocomplete="off" spellcheck="false" aria-label="Room name"><button class="btn" type="submit">Join room</button></form>
     <p class="fine">Everyone who opens the same room name plays in the same soup. Any name works.</p>`;
   $('begin').addEventListener('click', begin);
+  $('watchBots').addEventListener('click', () => { begin(); cycle(1); setTour(true); });
   $('roomForm').addEventListener('submit', e => {
     e.preventDefault();
     const name = $('roomName').value.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+/, '').slice(0, 32);
@@ -344,6 +474,7 @@ function showJoin(){
     <div class="codon" role="group" aria-label="Codon name">${[0, 1, 2].map(i => `<button type="button" class="cd b${codon[i]}" data-i="${i}" aria-label="Letter ${i + 1}: ${codon[i]}">${codon[i]}</button>`).join('')}
       <button type="button" class="cd dice" id="dice" aria-label="Random codon">&#8635;</button></div>
     <button class="btn go" type="button" id="begin">Join</button>
+    <button class="alt" type="button" id="justWatch">Just watch (for a projector: no strand, not counted as a player)</button>
     <p class="fine" id="netStatus"></p>`;
   $('sheet').querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => {
     const i = +b.dataset.i, nx = 'AUGC'['AUGC'.indexOf(codon[i]) + 1] || 'A';
@@ -351,6 +482,12 @@ function showJoin(){
   }));
   $('dice').addEventListener('click', () => { codon = [0, 0, 0].map(() => 'AUGC'[Math.floor(Math.random() * 4)]).join(''); showJoin(); });
   $('begin').addEventListener('click', begin); $('begin').focus();
+  $('justWatch').addEventListener('click', () => {
+    watchOnly = true; setTour(true);
+    for (const id of ['bFold', 'bDrop', 'bWatch', 'bRec', 'wStop']) $(id).hidden = true;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    net.connect(`${proto}//${location.host}/ws/${ROOM}`, null, {watch:true});
+  });
 }
 function joinRoom(){
   try { localStorage.setItem('soup.codon', codon); } catch(e){}
@@ -397,9 +534,9 @@ function label(c, text, x, y, col, size){
 }
 function draw(t){
   scale = clamp(Math.min(cw, ch) / 620, 0.75, 1.15);
-  const vw = cw / scale, vh = ch / scale, mh = me.s.head;
+  const fp = focusP(), vw = cw / scale, vh = ch / scale, mh = fp.s.head;
   /* the camera glides after a point between the head and the middle of the body, like the specimen's */
-  const nn = me.s.nodes; let bx = mh.x, by = mh.y;
+  const nn = fp.s.nodes; let bx = mh.x, by = mh.y;
   if (nn.length){ let sx = 0, sy = 0; for (const q of nn){ sx += q.x; sy += q.y; } bx = mh.x * 0.6 + sx / nn.length * 0.4; by = mh.y * 0.6 + sy / nn.length * 0.4; }
   const gx = vw >= W ? (W - vw) / 2 : clamp(bx - vw / 2, 0, W - vw), gy = vh >= H ? (H - vh) / 2 : clamp(by - vh / 2, 0, H - vh);
   const ce = camT == null ? 1 : Math.min(1, (t - camT) * 4); camT = t;
@@ -411,6 +548,7 @@ function draw(t){
   /* the ground: cached chunks in view only, then the tide, currents, smokers, geysers, craters and rafts */
   MAP.drawBase(ctx, camX, camY, vw, vh, t);
   MAP.drawOver(ctx, camX, camY, vw, vh, still ? 0 : t);
+  if (devBiomes) drawBiomes(ctx, vw, vh);
   ctx.font = `700 9px ${T.mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const need = wantedLetters();
   ctx.lineCap = 'round';
@@ -437,7 +575,7 @@ function draw(t){
     if (p.isBot && showThoughts && p.ai.label && seen(h.x, h.y, 100)) label(tx, p.ai.label, h.x, h.y - 32, T.muted, 10);
   }
   /* warnings sit above the strands: UV flashes and meteorites, earlier with a Detector */
-  MAP.drawWarnings(tx, camX, camY, vw, vh, t, SEG.warnEarly(working(me)), (text, x, y) => label(tx, text, x, y, T.ink, 13));
+  MAP.drawWarnings(tx, camX, camY, vw, vh, t, SEG.warnEarly(working(fp)), (text, x, y) => label(tx, text, x, y, T.ink, 13));
   for (const f of L.frags){
     const h = f.s.head; if (!seen(h.x, h.y, 200)) continue;
     label(tx, f.owner === 0 ? 'your lost piece' : 'fragment', h.x, h.y - 16, T.muted, 12);
@@ -450,7 +588,7 @@ function draw(t){
     tx.globalAlpha = 1;
   }
   tx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (me.alive && SEG.any(working(me), 'findsFragments') && L.frags.length){
+  if (fp === me && me.alive && SEG.any(working(me), 'findsFragments') && L.frags.length){
     let best = null, bd = 1e9; for (const f of L.frags){ const d = dist(mh.x, mh.y, f.s.head.x, f.s.head.y); if (d < bd){ bd = d; best = f; } }
     if (best && bd > 160){
       const a = Math.atan2(best.s.head.y - mh.y, best.s.head.x - mh.x), hx = (mh.x - camX) * scale, hy = (mh.y - camY) * scale;
@@ -462,7 +600,7 @@ function draw(t){
   tx.globalAlpha = 0.95; MAP.drawMinimap(tx, mx, my, mw); tx.globalAlpha = 1;
   tx.lineWidth = 1; tx.strokeStyle = T.line; tx.strokeRect(mx, my, mw, mhh);
   for (const f of L.frags){ tx.fillStyle = T.muted; tx.fillRect(mx + f.s.head.x * k - 1.5, my + f.s.head.y * k - 1.5, 3, 3); }
-  for (const p of L.players){ const px = p === me || p.mx == null ? p.s.head.x : p.mx, py = p === me || p.my == null ? p.s.head.y : p.my; if (!p.alive && p.mx == null) continue; tx.fillStyle = T[p.col]; tx.beginPath(); tx.arc(mx + px * k, my + py * k, p === me ? 4 : 2.8, 0, TAU); tx.fill(); }
+  for (const p of L.players){ const px = p === me || p.mx == null ? p.s.head.x : p.mx, py = p === me || p.my == null ? p.s.head.y : p.my; if (!p.alive && p.mx == null) continue; tx.fillStyle = T[p.col]; tx.beginPath(); tx.arc(mx + px * k, my + py * k, p === fp ? 4.5 : p === me ? 4 : 2.8, 0, TAU); tx.fill(); if (p === fp && fp !== me){ tx.lineWidth = 1.5; tx.strokeStyle = T.ink; tx.stroke(); } }
   tx.strokeStyle = T.ink; tx.strokeRect(mx + camX * k, my + camY * k, Math.min(vw, W) * k, Math.min(vh, H) * k);
 }
 
@@ -476,7 +614,7 @@ function track(tail){
   return top && top.p.k >= 3 ? top : null;
 }
 function wantedLetters(){
-  const out = {}; if (!me || !me.alive) return out;
+  const out = {}; if (!me || !me.alive || watchId != null) return out;
   const tail = me.s.tail, tr = track(tail);
   if (tr && tr.p.k < recipeLen(tr.fn)){ const need = RS.recipeNeed(tr.p.t, tr.fn, tr.p.k); if (need) out[need] = true; }
   return out;
@@ -510,11 +648,12 @@ function openPanel(on){
   uiDirty = true;
 }
 function renderUI(){
+  if (!me){ $('trk').hidden = true; $('bRec').hidden = true; return; }
   const tail = me.s.tail, parts = tail ? RS.parseRecipes(tail) : [], ready = parts.filter(g => g.fn).map(g => g.fn);
   const tr = ready.length ? {fn:ready[ready.length - 1], p:RS.recipeProgress(tail, ready[ready.length - 1])} : track(tail);
   /* compact card: the recipe you follow, letters that do not fit it shown dashed in front */
-  const card = $('trk'), show = !panelOpen && me.alive && !!tr;
-  card.hidden = !show; $('bRec').hidden = panelOpen || show;
+  const card = $('trk'), show = !panelOpen && me.alive && !!tr && watchId == null;
+  card.hidden = !show; $('bRec').hidden = panelOpen || show || watchId != null;
   card.classList.toggle('ready', ready.length > 0);
   if (show){
     const extra = tail.length - tr.p.k, shown = Math.min(extra, 3);
@@ -540,19 +679,21 @@ const ORD = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12
 function renderClock(){
   const s = Math.ceil(world.timeLeft);
   $('time').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  $('score').textContent = complexity(me);
-  const z = me.alive ? (ZONE_TEXT[zoneAt(me.s.head.x, me.s.head.y)] || '') : '';
+  const fp = focusP();
+  $('score').textContent = complexity(fp);
+  const z = fp.alive ? (ZONE_TEXT[zoneAt(fp.s.head.x, fp.s.head.y)] || '') : '';
   $('zone').textContent = z.split(':')[0];
   $('zone').title = z;
   const rows = world.standings();
-  $('rank').textContent = ORD(rows.findIndex(r => r.p === me) + 1);
+  const rk = rows.findIndex(r => r.p === fp) + 1; $('rank').textContent = rk ? ORD(rk) : '';
+  renderWatch();
   if (panelOpen) $('board').innerHTML = rows.map(r => `<li class="${r.p === me ? 'me' : ''}"${r.p.isBot ? ` title="${BOTS.describe(r.p)}"` : ''}><span class="dot" style="--c:var(--${r.p.col})"></span>`
     + `<span>${r.p.name}</span><span class="n">${r.score}</span></li>`).join('');
 }
 
 /* ---------- input ---------- */
 function aimPlayer(){
-  if (!pointer){ me.tx = me.s.head.x; me.ty = me.s.head.y; return; }
+  if (!pointer || watchId != null){ me.tx = me.s.head.x; me.ty = me.s.head.y; return; }
   me.tx = clamp(camX + pointer.x / scale, 5, W - 5); me.ty = clamp(camY + pointer.y / scale, 5, H - 5);
 }
 function setPointer(e){ const r = tc.getBoundingClientRect(); pointer = {x:e.clientX - r.left, y:e.clientY - r.top}; }
@@ -569,6 +710,11 @@ $('bLow').addEventListener('click', () => {
   try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
 });
 $('bRec').addEventListener('click', () => openPanel(true));
+$('bWatch').addEventListener('click', () => { if (watchId == null) cycle(1); else stopWatching(); });
+$('wPrev').addEventListener('click', () => { setTour(false); cycle(-1); });
+$('wNext').addEventListener('click', () => { setTour(false); cycle(1); });
+$('wTour').addEventListener('click', () => setTour(!tour));
+$('wStop').addEventListener('click', stopWatching);
 $('trk').addEventListener('click', () => openPanel(true));
 $('bClose').addEventListener('click', () => openPanel(false));
 $('bFold').addEventListener('click', () => { if (world.state === 'play' && me && !doFold(me)) say('Nothing to fold yet.'); });
@@ -580,11 +726,17 @@ document.addEventListener('keydown', e => {
     if (e.key === ' ' && onButton && e.target.id !== 'bFold') return;
     e.preventDefault();
     if (!net && sim.state === 'ready'){ begin(); return; }
+    if (watchId != null){ say('You are watching. Press V to go back to your strand.'); return; }
     if (world.state === 'play' && me && !paused && !doFold(me)) say('Nothing to fold yet.');
   } else if (e.key === 'x' || e.key === 'X' || e.key === 'Backspace'){ e.preventDefault(); if (world.state === 'play' && me && !paused) doDrop(me); }
   else if (e.key === 'p' || e.key === 'P') togglePause();
   else if (e.key === 'r' || e.key === 'R') openPanel();
   else if (e.key === 'Escape' && panelOpen) openPanel(false);
+  else if (e.key === 'v' || e.key === 'V'){ if (watchId == null) cycle(1); else stopWatching(); }
+  else if ((e.key === 'ArrowRight' || e.key === ']') && (watchId != null || watchOnly)){ e.preventDefault(); setTour(false); cycle(1); }
+  else if ((e.key === 'ArrowLeft' || e.key === '[') && (watchId != null || watchOnly)){ e.preventDefault(); setTour(false); cycle(-1); }
+  else if (e.key === 'Escape' && watchId != null) stopWatching();
+  else if (DEV && (e.key === 'b' || e.key === 'B')) toggleBiomes();
   else if (e.key === 't' || e.key === 'T') { showThoughts = !showThoughts; say(showThoughts ? 'Showing what the bots are thinking.' : 'Bot thoughts hidden.'); }
 });
 
@@ -592,7 +744,7 @@ document.addEventListener('keydown', e => {
 function start(){
   /* the lab's look, a little larger so strands read at game scale */
   RS.S.glyphSize = 4; RS.S.gooSize = 30; RS.restyle();
-  readTokens(); buildList();
+  readTokens(); buildList(); devSetup();
   try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); } } catch(e){}
   if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
   reset(); resize();
@@ -606,10 +758,16 @@ function start(){
     acc += dt; let n = 0;
     while (acc >= 1 / 60 && n < 4){ if (!paused) step(1 / 60); acc -= 1 / 60; n++; }
     if (n === 4) acc = 0;
-    if (me){
+    /* a watcher has no strand: follow someone as soon as the room's strands arrive */
+    if (watchOnly && watchId == null && others().length) watch(others()[0]);
+    /* the tour moves on every 15 seconds */
+    if (tour && watchId != null){ tourT += dt; if (tourT > 15) cycle(1); }
+    if (me || (watchOnly && watchId != null && focusP())){
       if (uiDirty){ uiDirty = false; renderUI(); }
-      clockT += dt; if (clockT > 0.25){ clockT = 0; renderClock(); }
+      clockT += dt; if (clockT > 0.25){ clockT = 0; renderClock(); renderDev(); }
+      const d0 = DEV ? performance.now() : 0;
       draw(now / 1000);
+      if (DEV) drawMs += (performance.now() - d0 - drawMs) * 0.05;
     }
     requestAnimationFrame(frame);
   })(last);

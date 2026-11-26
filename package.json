@@ -10,7 +10,8 @@
     "deploy": "wrangler deploy",
     "test": "node test/page.mjs && node test/registry.mjs && node test/headless.mjs",
     "test:room": "node test/room.mjs",
-    "fingerprint": "node test/fingerprint.mjs"
+    "fingerprint": "node test/fingerprint.mjs",
+    "balance": "node test/balance.mjs"
   },
   "repository": {
     "type": "git",

@@ -15,6 +15,7 @@ export function versionOf(env){ const m = env && env.CF_VERSION_METADATA; return
 const HZ = 30, TICK = 1 / HZ;
 const MIN_STRANDS = 10;          /* bots keep the room at least this busy */
 const MAX_HUMANS = 12;           /* more than this and Chromebooks struggle to draw the room */
+const MAX_WATCHERS = 6;          /* tabs that only watch (a teacher's projector): no strand, not counted as players */
 const ROUND = 300;               /* seconds of play */
 const RESULTS = 15;              /* seconds on the results screen before the next map */
 const GRACE = 30;                /* seconds a dropped player's strand waits for them to come back */
@@ -44,7 +45,7 @@ export class GameRoom extends DurableObject {
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', {status:426});
     const pair = new WebSocketPair(), [client, server] = Object.values(pair);
     server.accept();
-    const c = {ws:server, p:null, known:new Map(), budget:MSG_PER_SEC, budgetAt:Date.now(), cx:0, cy:0};
+    const c = {ws:server, p:null, watcher:false, watch:null, known:new Map(), budget:MSG_PER_SEC, budgetAt:Date.now(), cx:0, cy:0};
     this.clients.add(c);
     if (!this.game) this.wake();
     server.addEventListener('message', e => this.onMessage(c, e.data));
@@ -106,7 +107,7 @@ export class GameRoom extends DurableObject {
     this.sim.reset();
     this.sim.start();
     this.qk.clear();
-    for (const c of this.clients) if (c.p) this.welcome(c);
+    for (const c of this.clients) if (c.p || c.watcher) this.welcome(c);
     /* everyone now has every strand as it is, and the roster */
     for (const p of this.sim.players) this.qk.set('p' + p.id, this.qKey(this.strandParts(p.s)));
     for (const f of this.sim.frags) this.qk.set('f' + f.id, this.qKey(this.strandParts(f.s)));
@@ -126,15 +127,27 @@ export class GameRoom extends DurableObject {
     switch (m.t){
       case 'j': this.join(c, m); break;
       case 'i':
-        if (p && p.alive && Number.isFinite(m.x) && Number.isFinite(m.y)){ p.tx = clamp(m.x, 5, this.sim.W - 5); p.ty = clamp(m.y, 5, this.sim.H - 5); }
+        if (p && p.alive && c.watch == null && Number.isFinite(m.x) && Number.isFinite(m.y)){ p.tx = clamp(m.x, 5, this.sim.W - 5); p.ty = clamp(m.y, 5, this.sim.H - 5); }
         break;
       case 'f': if (p && this.sim.state === 'play') this.sim.fold(p); break;
       case 'd': if (p && this.sim.state === 'play') this.sim.drop(p); break;
       case 'ping': if (Number.isFinite(m.at)) this.send(c, {t:'pong', at:m.at}); break;
+      case 'v':
+        /* spectate: follow another strand (its id), or null to go back to your own. Your own strand waits where it is. */
+        c.watch = Number.isInteger(m.id) && this.sim.players.some(o => o.id === m.id) ? m.id : null;
+        if (p && c.watch != null){ p.tx = p.s.head.x; p.ty = p.s.head.y; }
+        break;
     }
   }
   join(c, m){
-    if (c.p) return;
+    if (c.p || c.watcher) return;
+    if (m.watch){
+      /* watch only: no strand, no seat taken from bots */
+      if ([...this.clients].filter(o => o.watcher).length >= MAX_WATCHERS){ this.send(c, {t:'full', watch:1}); try { c.ws.close(1000, 'Too many watchers'); } catch(e){} this.clients.delete(c); return; }
+      c.watcher = true;
+      this.welcome(c);
+      return;
+    }
     const name = typeof m.name === 'string' && /^[AUGC]{3}$/.test(m.name) ? m.name : randomCodon();
     const tok = typeof m.tok === 'string' && /^[a-z0-9]{6,40}$/i.test(m.tok) ? m.tok : null;
     let p = null;
@@ -171,13 +184,13 @@ export class GameRoom extends DurableObject {
 
   /* ---------- what gets sent ---------- */
   send(c, obj){ try { c.ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj)); } catch(e){} }
-  broadcast(obj){ const s = JSON.stringify(obj); for (const c of this.clients) if (c.p) this.send(c, s); }
+  broadcast(obj){ const s = JSON.stringify(obj); for (const c of this.clients) if (c.p || c.watcher) this.send(c, s); }
 
   /* everything a player needs on arrival, or when a new map starts */
   welcome(c){
     const sim = this.sim;
     c.known = new Map();
-    this.send(c, {t:'w', v:versionOf(this.env), id:c.p.id, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
+    this.send(c, {t:'w', v:versionOf(this.env), id:c.p ? c.p.id : null, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
     this.send(c, this.rosterMsg());
     for (const p of sim.players) this.send(c, this.strandMsg(p.s, p.id, false));
     for (const f of sim.frags) this.send(c, this.strandMsg(f.s, f.id, true));
@@ -230,8 +243,11 @@ export class GameRoom extends DurableObject {
     const mini = every(HZ) ? JSON.stringify({t:'a', A:sim.players.filter(p => p.alive).map(p => [p.id, Math.round(p.s.head.x), Math.round(p.s.head.y)])}) : null;
 
     for (const c of this.clients){
-      const me = c.p; if (!me) continue;
-      c.cx = me.s.head.x; c.cy = me.s.head.y;
+      const me = c.p; if (!me && !c.watcher) continue;
+      /* the area sent is around the strand being watched, or your own */
+      const focus = (c.watch != null && sim.players.find(o => o.id === c.watch)) || me || sim.players[0];
+      if (!focus) continue;
+      c.cx = focus.s.head.x; c.cy = focus.s.head.y;
       /* letters: new ones in view, ones that moved or changed, and ones that left or were eaten */
       const add = [], mov = [], del = [];
       const seen = new Set();
@@ -246,7 +262,7 @@ export class GameRoom extends DurableObject {
       }
       for (const id of c.known.keys()) if (!seen.has(id)){ del.push(id); c.known.delete(id); }
       const snap = {t:'s', k:this.k, tl, st,
-        P:P.filter(o => o.p === me || near(c, o.x, o.y)).map(o => o.e),
+        P:P.filter(o => o.p === me || o.p === focus || near(c, o.x, o.y)).map(o => o.e),
         F:F.filter(o => near(c, o.x, o.y)).map(o => o.e)};
       if (add.length || mov.length || del.length) snap.N = [add, mov, del];
       const xs = X.filter(o => near(c, o.x, o.y, 400)).map(o => o.e);

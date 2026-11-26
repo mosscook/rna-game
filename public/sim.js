@@ -129,9 +129,10 @@ function create(opts){
     const f = {id:fragId++, s, age:0, life:FRAG_LIFE, turn:rnd(-0.4, 0.4), owner, prev:{x, y}};
     frags.push(f); return f;
   }
-  function spawnFrag(){
+  function spawnFrag(at){
     let x, y, tries = 0;
-    do { x = rnd(400, W - 400); y = rnd(400, H - 400); tries++; }
+    if (at){ x = at.x; y = at.y; }   /* a chosen spot (dev mode) */
+    else do { x = rnd(400, W - 400); y = rnd(400, H - 400); tries++; }
     while (tries < 200 && (![MK.OCEAN, MK.LAGOON, MK.UV].includes(MAP.typeAt(x, y)) || MAP.smokerAt(x, y, 300) || humans().some(h => dist(x, y, h.s.head.x, h.s.head.y) < 500)));
     const fns = [pick(['Mover', 'Cleaver', 'Membrane', 'Mover'])]; if (Math.random() < 0.5) fns.push(pick(['Mover', 'Cleaver', 'Membrane', 'Detector']));
     let seq = '', segments = [];

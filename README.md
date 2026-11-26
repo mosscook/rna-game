@@ -13,6 +13,13 @@ complex strand. Built for Chromebooks, with no accounts and no tracking.
 
 Room names can use letters, numbers and dashes, up to 32 characters. They aren't case sensitive.
 
+## Watching
+
+Press **Watch** (or V) to follow other strands: ◀ ▶ (or the arrow keys) move between them, **Tour** moves on every 15 seconds, and × (or Esc) goes back to your own strand. While you watch, your strand waits where it is and can still be hit. The bar shows each strand's score, its place, and what a bot is thinking.
+
+- **Single-player:** "Or just watch the bots" on the start screen starts a round and tours the bots.
+- **Rooms:** "Just watch" on the join screen connects with no strand. Watchers aren't counted as players and don't take a seat from a bot, so it suits a projector at the front of the class. Up to 6 watchers per room. The server sends each watcher what is around the strand they follow.
+
 ## How it works
 
 - **`public/`**: the game page. It's the same code as the RNA Strand Soup prototype.
@@ -48,6 +55,25 @@ In `public/biomes.js`:
 3. Add a region to `REGIONS` that paints it onto the map. Regions run in order, and later ones can place themselves around the lagoon. Give it `cells` and `botHome` if bots should treat it as home.
 
 Moving hazards (the tide, geysers, shifting ice, meteorites, UV flashes, rafts) still live in `map.js`.
+
+## Dev mode
+
+Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). A panel shows the frame rate and how long each step and frame take, the counts of strands, letters and fragments, the seed and tide, and the ground type, zone, speed and letter richness under the pointer. **Ground map** (or B) tints every cell by its ground type, with a key.
+
+In single-player the panel also has test buttons: add any segment to your strand; make a fragment, meteorite or UV flash where the pointer is; damage your strand; run time 4× faster; skip a minute; end the round; clear the bots. In rooms it only shows information, so nobody can cheat in a shared game.
+
+## Balance
+
+`npm run balance` plays 12 bot-only rounds of 5 minutes (in parallel, one per CPU core) and reports:
+
+- scores: the winner, the median strand, last place, ties
+- each personality: how often it wins, its average place and score, cuts made and taken, deaths
+- skill: whether better bots score more
+- each segment type: how many strands have one at the end, how many copies, how often winners have one, how long it is held
+- deaths by cause, where bots spend their time, and how each home region does
+- a short "worth a look" list of anything out of line, such as a personality winning far more than its share, or a segment almost nobody builds
+
+Options: `--rounds 40` (more rounds, less noise), `--seconds 120`, `--seed 7` (repeat a run exactly), `--json out.json` (every round's numbers). Run it before and after a balance change and compare.
 
 ## Checking a change
 
