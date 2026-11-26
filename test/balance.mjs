@@ -10,6 +10,8 @@ import {availableParallelism} from 'node:os';
 import {writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
+/* segments that leave the strand as they work (ring and helpers bodies): counted by use, not by holding */
+const ONE_USE = ['Repairer', 'Self-cutter'];
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const mulberry = s => () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 
@@ -18,7 +20,11 @@ async function playRound(seed, seconds){
   const {makeGame} = await import('../src/game.js');
   Math.random = mulberry(seed);
   let ended = null;
-  const {sim, MAP, BOTS} = makeGame({minStrands:10, round:seconds, hooks:{end:rows => { ended = rows; }}});
+  const {sim, MAP, BOTS, stage} = makeGame({minStrands:10, round:seconds, hooks:{end:rows => { ended = rows; }}});
+  /* one-use segments leave the strand when they work, so count them from the strand's own events */
+  const evs = new Map(), addStrand = stage.addStrand;
+  stage.addStrand = o => { let s = null; s = addStrand.call(stage, Object.assign({}, o, {onEvent:(t, d) => {
+    if (s){ const c = evs.get(s) || {}; c[t] = (c[t] || 0) + 1; evs.set(s, c); } if (o.onEvent) o.onEvent(t, d); }})); return s; };
   sim.reset(seed);
   const rec = new Map();
   const R = p => { let r = rec.get(p.id); if (!r){ r = {name:p.name, lead:p.mind.lead, skill:p.mind.skill, home:p.mind.home, deaths:{}, hitsDealt:0, cutsDealt:0, hitsTaken:0, cutsTaken:0, zones:{}, held:{}, samples:0}; rec.set(p.id, r); } return r; };
@@ -39,7 +45,8 @@ async function playRound(seed, seconds){
   }
   const rows = (ended || sim.standings()).map((row, i) => {
     const r = R(row.p);
-    return {...r, rank:i + 1, score:row.score, letters:row.p.s.length,
+    const e = evs.get(row.p.s) || {};
+    return {...r, rank:i + 1, score:row.score, letters:row.p.s.length, used:{Repairer:e.repairerLaunched || 0, 'Self-cutter':e.cutterLaunched || 0}, mended:e.mended || 0,
       final:sim.working(row.p).map(f => f.fn), damaged:row.p.s.functions.filter(f => f.damaged).length};
   });
   return {seed, rows};
@@ -102,10 +109,16 @@ function report(results, run){
   const st = fns.map(fn => {
     const has = rows.filter(r => r.final.includes(fn)), winHas = winners.filter(r => r.final.includes(fn));
     const share = has.length / N;
-    if (share < 0.05) notes.push(`${fn}: almost nobody has one at the end (${pct(share)})`);
+    if (share < 0.05 && !ONE_USE.includes(fn)) notes.push(`${fn}: almost nobody has one at the end (${pct(share)})`);
     return [fn, pct(share), f1(avg(has, r => r.final.filter(x => x === fn).length)), pct(winHas.length / winners.length), pct(avg(rows, r => (r.held[fn] || 0) / Math.max(1, r.samples)))];
   }).sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
-  table(['segment', 'strands with one', 'copies', 'winners with one', 'time held'], st);
+  table(['segment', 'strands with one', 'copies', 'winners with one', 'time held'], st.filter(r => !ONE_USE.includes(r[0])));
+  /* one-use segments leave the strand as they work: count how often they were used instead */
+  for (const fn of ONE_USE){
+    const n = avg(rows, r => r.used[fn] || 0), users = rows.filter(r => r.used[fn]).length / N;
+    console.log(`${fn} (one use): used ${f1(n * 10)} times per round, by ${pct(users)} of bots` + (fn === 'Repairer' ? `, mending ${f1(avg(rows, r => r.mended) * 10)} structures per round` : ''));
+    if (users < 0.03) notes.push(`${fn}: bots almost never use one (${pct(users)} of bots)`);
+  }
   console.log(`Damaged structures left at the end: ${f1(avg(rows, r => r.damaged))} per strand. Letters per strand: ${f1(avg(rows, r => r.letters))}.\n`);
 
   console.log('DEATHS (per bot per round)');
