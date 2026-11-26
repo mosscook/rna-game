@@ -18,7 +18,8 @@ function player(name, tok){
     ws.on('message', d => {
       const s = d.toString(); p.bytes += s.length;
       const m = JSON.parse(s); p.count[m.t] = (p.count[m.t] || 0) + 1; p.last = p.last || {}; p.last[m.t] = m;
-      if (m.t === 'w'){ p.id = m.id; p.seeds.push(m.seed); }
+      if (m.t === 'w'){ p.id = m.id; p.seeds.push(m.seed); p.lobby = !!m.lb; }
+      if (m.t === 'h') p.host = m;
       if (m.t === 'e') p.ended = m;
       if (m.t === 'full') p.full = true;
     });
@@ -29,9 +30,17 @@ function player(name, tok){
 }
 
 const a = player('AUG', 'tokaaaaaaaa'), b = player('GCA', 'tokbbbbbbbb');
-await a.open(); await b.open();
-await sleep(1500);
+await a.open(); await sleep(300); await b.open();
+await sleep(1000);
 check(a.id != null && b.id != null && a.id !== b.id, `both joined with their own strands (${a.id}, ${b.id})`);
+/* the lobby: practice with no bots until the host starts */
+check(a.lobby && b.lobby, 'a new room opens in the lobby');
+check(a.last.r.P.length === 2 && a.last.r.P.every(e => !e[3]), `the lobby has no bots (${a.last.r.P.length} strands)`);
+check(a.host && a.host.you === 1 && b.host && b.host.you === 0 && b.host.name === 'AUG', 'the first player hosts; the second sees who');
+b.ws.send(JSON.stringify({t:'start'})); await sleep(500);
+check(a.lobby && b.seeds.length === 1, 'only the host can start');
+a.ws.send(JSON.stringify({t:'start'})); await sleep(1000);
+check(!a.lobby && !b.lobby && a.seeds.length === 2, 'the host starts the game: everyone moves to a new map');
 check(a.count.r >= 1 && a.last.r.P.length >= 10, `roster has ${a.last.r && a.last.r.P.length} strands (bots fill to 10)`);
 check(a.last.r.P.filter(e => !e[3]).map(e => e[1]).sort().join() === 'AUG,GCA', 'roster shows both codon names');
 check(a.count.q >= 10, `got the shape of every strand (${a.count.q} q messages)`);
@@ -109,8 +118,11 @@ while (!a.ended && Date.now() - t0 > -1 && Date.now() - t0 < 30000) await sleep(
 check(!!a.ended, `round ended with ${a.ended && a.ended.rows.length} ranked`);
 const seeds0 = a.seeds.length;
 await sleep(6000);
-check(a.seeds.length > seeds0 && a.seeds[a.seeds.length - 1] !== a.seeds[seeds0 - 1], 'next round starts on a new map');
-check(a.last.s.st === 'p', 'and it is playing again');
+check(a.seeds.length > seeds0 && a.seeds[a.seeds.length - 1] !== a.seeds[seeds0 - 1], 'after the results, a new map loads');
+check(a.last.s.st === 'p' && a.lobby, 'and the room is back in the lobby');
+/* the host leaves: the next player who has been here longest takes over */
+a.ws.close(); await sleep(600);
+check(b2.host && b2.host.you === 1, 'when the host leaves, the next player hosts');
 
 console.log(`\n${failed ? failed + ' failed' : 'all passed'}; A received ${(a.bytes / 1024).toFixed(0)} KB in ${((Date.now() - t0) / 1000 + 6).toFixed(0)}+ s`);
 for (const p of [a, b2, w]) p.ws.close();

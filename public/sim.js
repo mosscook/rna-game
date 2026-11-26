@@ -31,7 +31,9 @@ const ZONE_FIRST = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).fi
 function create(opts){
   const MAP = opts.MAP, BOTS = opts.BOTS, stage = opts.stage, W = MAP.W, H = MAP.H, MK = MAP.K;
   const hooks = Object.assign({say(){}, fx(){}, dirty(){}, end(){}, tint(){ return null; }}, opts.hooks || {});
-  const ROUND = opts.round || 300, NUC_TARGET = opts.nucTarget || 350, MAXLOOSE = 16;
+  const ROUND = opts.round || 300, NUC_TARGET = opts.nucTarget || 350, LOBBY_NUCS = 150, MAXLOOSE = 16;
+  /* lobby: a practice pool before a room's game (map.js); no bots, hazards, fragments, harm or clock */
+  let lobby = false, nucTarget = NUC_TARGET;
   /* fragments drift until a Joiner takes them or a black smoker breaks them up; at most FRAG_MAX + 2 at once */
   const EAT_R = 16, HIT_R = 13, FRAG_MAX = 7, FRAG_EVERY = 25, FRAG_LIFE = Infinity;
   const OPEN_TYPES = MAP.CELLS.map((c, i) => i).filter(i => !MAP.CELLS[i].solid);
@@ -145,19 +147,20 @@ function create(opts){
   }
   function removeFrag(f){ f.s.remove(); const i = frags.indexOf(f); if (i >= 0) frags.splice(i, 1); }
 
-  function reset(newSeed){
+  function reset(newSeed, opt){
+    lobby = !!(opt && opt.lobby); nucTarget = lobby ? LOBBY_NUCS : NUC_TARGET;
     const keep = humans();
     for (const p of players) if (p.isBot) p.s.remove();
     for (const f of frags.slice()) removeFrag(f);
     players = [];
     seed = newSeed != null ? newSeed : Math.floor(Math.random() * 1e9);
-    spawns = MAP.generate(seed);
+    spawns = MAP.generate(seed, lobby ? {lobby:true} : undefined);
     news = []; nucs = [];
     /* humans carry over between rounds as fresh strands, keeping who they are */
     for (const p of keep){ birth(p, spawns.player.x + rnd(-160, 160), spawns.player.y + rnd(-160, 160)); p.seenZone = {}; players.push(p); }
     fillBots();
-    for (let i = 0; i < NUC_TARGET; i++) spawnNuc();
-    for (let i = 0; i < 4; i++) spawnFrag();
+    for (let i = 0; i < nucTarget; i++) spawnNuc();
+    if (!lobby) for (let i = 0; i < 4; i++) spawnFrag();
     timeLeft = ROUND; state = 'ready'; fragT = FRAG_EVERY; heatT = 0; spawnT = 0;
   }
   function start(){ if (state === 'ready') state = 'play'; }
@@ -272,11 +275,11 @@ function create(opts){
       if (q.x < 12 || q.x > W - 12 || q.y < 12 || q.y > H - 12 || MAP.smokerAt(q.x, q.y)) nucs.splice(i, 1);
     }
     MAP.update(dt, mapEv, players.filter(p => p.alive).map(p => p.s.head));
-    spawnT += dt; while (spawnT > 0.12){ spawnT -= 0.12; if (nucs.length < NUC_TARGET) spawnNuc(); }
+    spawnT += dt; while (spawnT > 0.12){ spawnT -= 0.12; if (nucs.length < nucTarget) spawnNuc(); }
     for (const f of frags.slice()) stepFrag(f, dt);
     if (state !== 'play'){ for (const p of players) if (p.alive) p.s.step(dt, {target:p.s.head, speed:0}); return; }
 
-    timeLeft -= dt;
+    if (!lobby) timeLeft -= dt;
     BOTS.tick(dt);
     if (timeLeft <= 0){ timeLeft = 0; endRound(); return; }
 
@@ -301,14 +304,15 @@ function create(opts){
       }
       if (p.inv <= 0 && !p.fling && MAP.smokerAt(h.x, h.y)){ p.deathBy = 'A black smoker shredded your core, and your strand fell apart into letters.'; die(p); continue; }
       /* the first time a human reaches each kind of place, a line of science about it */
-      if (!p.isBot){
+      if (!p.isBot && !lobby){
         const z = MAP.zoneAt(h.x, h.y);
         if (ZONE_FIRST[z] && !p.seenZone[z]){ p.seenZone[z] = true; tell(p, ZONE_FIRST[z]); }
       }
     }
 
-    /* Cleavers (anything with tips): each tip damages what it touches; damaged structures, or anything in magnesium, get cut */
-    for (const a of players){
+    /* Cleavers (anything with tips): each tip damages what it touches; damaged structures, or anything in magnesium, get cut.
+       Not in the lobby: it is for practice */
+    if (!lobby) for (const a of players){
       if (!a.alive) continue;
       for (const f of working(a)){
         const seg = SEG.get(f.fn); if (!seg || !seg.tips) continue;
@@ -383,7 +387,7 @@ function create(opts){
     }
     /* fragments keep drifting in */
     fragT -= dt;
-    if (fragT <= 0){ fragT = FRAG_EVERY; if (frags.length < 4) spawnFrag(); }
+    if (fragT <= 0){ fragT = FRAG_EVERY; if (frags.length < 4 && !lobby) spawnFrag(); }
   }
   function stepFrag(f, dt){
     f.age += dt;
@@ -474,7 +478,7 @@ function create(opts){
     working, has, countFn, shieldFor, recipeLen,
     setMinStrands(n){ minStrands = n; fillBots(); },
     get players(){ return players; }, get nucs(){ return nucs; }, get frags(){ return frags; }, get news(){ return news; },
-    get timeLeft(){ return timeLeft; }, set timeLeft(v){ timeLeft = v; }, get state(){ return state; }, get seed(){ return seed; }, get mapEv(){ return mapEv; }};
+    get lobby(){ return lobby; }, get timeLeft(){ return timeLeft; }, set timeLeft(v){ timeLeft = v; }, get state(){ return state; }, get seed(){ return seed; }, get mapEv(){ return mapEv; }};
 }
 
 return {create, recipeLen, RECIPES, ZONE_FIRST, FN_NAMES, BOT_COLS, SEG};

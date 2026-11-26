@@ -107,9 +107,16 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .toast{position:absolute;left:50%;bottom:58px;transform:translateX(-50%);max-width:min(88%,520px);padding:7px 12px;border-radius:8px;
   background:var(--ink);color:var(--surface);font-size:13.5px;text-align:center;pointer-events:none;opacity:0;transition:opacity .2s}
 .toast.on{opacity:.92}
-.newver{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:6;padding:7px 14px;border-radius:99px;border:1px solid var(--line);
+.newver{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:6;padding:7px 14px;border-radius:99px;border:1px solid var(--line);
   background:var(--surface);color:var(--ink);font:700 13px/1.2 var(--font-body);cursor:pointer;box-shadow:0 4px 18px rgb(0 0 0/.35)}
 .newver:hover{border-color:var(--ink)}
+/* a room's lobby: who is here, and Start for the host */
+.lobbybar{position:absolute;left:50%;top:10px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:5px 5px 5px 14px;border-radius:99px;z-index:4;
+  background:var(--glass);border:1px solid var(--edge);box-shadow:0 2px 10px rgb(0 0 0 / .18);font-size:13px;color:var(--muted);max-width:calc(100% - 20px)}
+.lobbybar b{color:var(--ink)}
+.lobbybar .btn{height:32px}
+.lobbybar.wait{padding-right:14px}
+@media (max-width:760px){ .lobbybar{top:52px} }
 /* spectating: a bar at the bottom middle with whose view this is */
 .watch{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:4px;border-radius:99px;max-width:calc(100% - 20px);
   background:var(--glass);border:1px solid var(--edge);box-shadow:0 2px 10px rgb(0 0 0 / .18);z-index:4}
@@ -229,6 +236,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
   </div>
 
+  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><button class="btn go" type="button" id="bStart">Start game</button></div>
   <aside class="dev" id="dev" aria-label="Developer tools" hidden></aside>
   <div class="watch" id="watchBar" role="group" aria-label="Spectating" hidden>
     <button class="btn sm" type="button" id="wPrev" aria-label="Previous strand" title="Previous (←)">&#9664;</button>
@@ -313,6 +321,7 @@ const net = ROOM && window.SoupNet ? window.SoupNet.create({RS, MAP, stage, vers
   end:rows => showEnd(rows),
   welcome:() => { me = net.me; uiDirty = true; camT = null; $('overlay').hidden = true; if (watchOnly) $('watchBar').hidden = false; },
   status:text => { const el = $('netStatus'); if (el) el.textContent = text; else if (text) say(text); },
+  host:() => renderLobby(),
   tint:(col, bot) => col === 'stain' ? null : {spine:T[col], goo:T[col]}}}) : null;
 /* the page draws whichever world it has: the local sim, or the mirror of a server room */
 const world = net || sim;
@@ -455,7 +464,7 @@ function showEnd(rows){
   $('sheet').innerHTML = `<h2>${!me ? 'Round over' : place === 1 ? 'Most complex strand in the soup' : 'Time. You placed ' + place + ' of ' + rows.length}</h2>`
     + `<ol class="rank">${rows.map(r => `<li class="${r.p === me ? 'me' : ''}"><span class="dot" style="--c:var(--${r.p.col})"></span><span>${r.p.name}${r.p.isBot ? `<small class="style">${BOTS.describe(r.p)}</small>` : ''}</span><span>${r.score}</span></li>`).join('')}</ol>`
     + (me ? `<p class="fine">You finished with ${plural(me.s.length, 'letter')} and ${plural(kinds, 'working kind')} of function. A new kind scores 3, a repeat 1, a fused Joiner adds 1.</p>` : '')
-    + (net ? `<p class="fine">The next round starts in a few seconds, on a new map.</p>` : `<button class="btn go" type="button" id="again">Play again</button>`);
+    + (net ? `<p class="fine">Back to the lobby in a few seconds. ${net.isHost ? 'You start the next round.' : 'The host starts the next round.'}</p>` : `<button class="btn go" type="button" id="again">Play again</button>`);
   $('overlay').hidden = false;
   if (!net){ $('again').addEventListener('click', () => reset()); $('again').focus(); }
 }
@@ -739,12 +748,22 @@ function renderUI(){
   }
 }
 const ORD = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+/* the lobby bar: shown in a room until the host starts the game */
+function renderLobby(){
+  const on = !!(net && net.lobby && world.state === 'play'), bar = $('lobbyBar');
+  bar.hidden = !on; if (!on) return;
+  const n = L.players.filter(p => !p.isBot && net.inRoster(p.id)).length;
+  const here = `${n} ${n === 1 ? 'player' : 'players'} here`;
+  $('lobbyText').innerHTML = net.isHost ? `<b>Lobby</b> · ${here} · practise, then start when everyone is ready` : `<b>Lobby</b> · ${here} · waiting for <b>${net.hostName}</b> to start`;
+  $('bStart').hidden = !net.isHost; bar.classList.toggle('wait', !net.isHost);
+}
 function renderClock(){
   const s = Math.ceil(world.timeLeft);
-  $('time').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  $('time').textContent = net && net.lobby ? 'Lobby' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  renderLobby();
   const fp = focusP();
   $('score').textContent = complexity(fp);
-  const z = fp.alive ? (ZONE_TEXT[zoneAt(fp.s.head.x, fp.s.head.y)] || '') : '';
+  const z = fp.alive && !(net && net.lobby) ? (ZONE_TEXT[zoneAt(fp.s.head.x, fp.s.head.y)] || '') : '';
   $('zone').textContent = z.split(':')[0];
   $('zone').title = z;
   const rows = world.standings();
@@ -812,6 +831,7 @@ $('bLow').addEventListener('click', () => {
   try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
 });
 $('bRec').addEventListener('click', () => openPanel(true));
+$('bStart').addEventListener('click', () => { if (net && net.isHost) net.start(); });
 $('bWatch').addEventListener('click', () => { if (watchId == null) cycle(1); else stopWatching(); });
 $('wPrev').addEventListener('click', () => { setTour(false); cycle(-1); });
 $('wNext').addEventListener('click', () => { setTour(false); cycle(1); });

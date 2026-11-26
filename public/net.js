@@ -22,9 +22,10 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function create(o){
   const {RS, MAP, stage} = o;
-  const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}, outdated(){}}, o.hooks || {});
+  const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}, outdated(){}, host(){}}, o.hooks || {});
   /* o.version: the page's own version, or a function returning it (the page learns it from /version after loading) */
   const pageVersion = () => typeof o.version === 'function' ? o.version() : o.version;
+  let lobby = false, isHost = false, hostName = '';   /* the room's lobby before a game, and who can start it */
   let ws = null, meId = null, seed = null, state = 'connecting', tl = 0, tlAt = 0, offset = null, rtt = 0.08, url = '', name = '', watchOnly = false, watchId = null;
   let lastSend = 0, lastAim = null, retry = 0, closedByUs = false;
   /* a random token for this tab only (gone when the tab closes): lets a refresh or a dropped connection take your strand back */
@@ -81,7 +82,7 @@ function create(o){
         meId = m.id == null ? null : m.id; retry = 0;
         /* the server was redeployed since this page loaded: offer a refresh (the game keeps working meanwhile) */
         { const mine = pageVersion(); if (m.v && mine && m.v !== 'dev' && m.v !== mine) hooks.outdated(m.v); }
-        if (m.seed !== seed){ seed = m.seed; clearAll(); MAP.generate(seed); }
+        if (m.seed !== seed || !!m.lb !== lobby){ seed = m.seed; lobby = !!m.lb; clearAll(); MAP.generate(seed, lobby ? {lobby:true} : undefined); }
         else { N.clear(); nucs = []; }   /* rejoining the same map: the server sends the nearby letters again */
         state = STATES[m.st] || m.st; tl = m.tl; tlAt = now();
         if (meId != null) mirror(meId).name = 'You';
@@ -102,6 +103,7 @@ function create(o){
       case 'say': hooks.say(m.text); break;
       case 'e': state = 'over'; hooks.end(m.rows.map(([id, nm, col, sc, bot]) => ({p:P.get(id) || {id, name:nm, col, isBot:!!bot, s:{length:0}}, score:sc}))); break;
       case 'pong': rtt = rtt * 0.8 + (now() - m.at) * 0.2; break;
+      case 'h': isHost = !!m.you; hostName = m.name || ''; hooks.host(); break;
       case 'full': hooks.status(m.watch ? 'Too many people are watching this room.' : 'This room is full. Try another room name.'); closedByUs = true; break;
     }
   }
@@ -248,6 +250,8 @@ function create(o){
     standings(){ return players.filter(p => roster.has(p.id) || p.id === meId).map(p => ({p, score:complexity(p)})).sort((a, b) => b.score - a.score); },
     close(){ closedByUs = true; if (ws) ws.close(); },
     spectate(id){ watchId = id == null ? null : id; send({t:'v', id:watchId}); },
+    start(){ send({t:'start'}); },
+    get lobby(){ return lobby; }, get isHost(){ return isHost; }, get hostName(){ return hostName; },
     inRoster:id => roster.has(id),
     get watchOnly(){ return watchOnly; },
     debug:obj => send(Object.assign({t:'debug'}, obj)),   /* ignored by real servers; local testing only */

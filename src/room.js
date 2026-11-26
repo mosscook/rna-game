@@ -3,8 +3,9 @@
    (the same sim.js the browser uses for single-player) and sends each player what is near them,
    in the format public/net.js reads.
 
-   Life of a room: the first player wakes it and a round starts. Rounds run back to back (play, a short
-   results screen, a fresh map). Bots fill empty seats. When the last player leaves, the room waits a
+   Life of a room: the first player wakes it into the lobby, a small practice pool with no bots or clock. The host (whoever
+   has been here longest, a watch-only tab included) presses Start; everyone moves to a fresh map, bots fill the empty seats,
+   and the round runs. After the results screen the room goes back to the lobby for the host to start the next one. When the last player leaves, the room waits a
    little in case it was a refresh, then stops its loop and is forgotten. Nothing about players is stored. */
 import {DurableObject} from 'cloudflare:workers';
 import {makeGame, FN} from './game.js';
@@ -73,8 +74,8 @@ export class GameRoom extends DurableObject {
       end:rows => this.onEnd(rows)
     }});
     this.sim = this.game.sim;
-    this.sim.reset();
-    this.sim.start();
+    this.hostKey = null;
+    this.toLobby(false);
     this.last = Date.now(); this.acc = 0;
     this.timer = setInterval(() => this.loop(), 1000 / HZ);
   }
@@ -101,7 +102,8 @@ export class GameRoom extends DurableObject {
   }
   tick(){
     this.k++;
-    if (this.sim.state === 'over'){ this.overT -= TICK; if (this.overT <= 0) return this.newRound(); }
+    this.sendHost(false);
+    if (this.sim.state === 'over'){ this.overT -= TICK; if (this.overT <= 0) return this.toLobby(); }
     this.sim.step(TICK);
     this.sendChanges();
   }
@@ -109,9 +111,23 @@ export class GameRoom extends DurableObject {
     this.overT = this.results;
     this.broadcast({t:'e', rows:rows.map(r => [r.p.id, r.p.name, r.p.col, r.score, r.p.isBot ? 1 : 0])});
   }
-  newRound(){
+  /* the lobby: practice in a small pool until the host starts the game */
+  toLobby(tell = true){
+    this.lobby = true;
+    this.sim.setMinStrands(0);
+    this.sim.reset(null, {lobby:true});
+    this.sim.start();
+    if (tell) this.resync();
+  }
+  startGame(){
+    this.lobby = false;
+    this.sim.setMinStrands(MIN_STRANDS);
     this.sim.reset();
     this.sim.start();
+    this.resync();
+  }
+  /* after a new map: everyone gets it, every strand as it is, and the roster */
+  resync(){
     this.qk.clear();
     for (const c of this.clients) if (c.p || c.watcher) this.welcome(c);
     /* everyone now has every strand as it is, and the roster */
@@ -138,6 +154,7 @@ export class GameRoom extends DurableObject {
       case 'f': if (p && this.sim.state === 'play') this.sim.fold(p); break;
       case 'd': if (p && this.sim.state === 'play') this.sim.drop(p); break;
       case 'ping': if (Number.isFinite(m.at)) this.send(c, {t:'pong', at:m.at}); break;
+      case 'start': if (this.lobby && c === this.host()) this.startGame(); break;
       case 'v':
         /* spectate: follow another strand (its id), or null to go back to your own. Your own strand waits where it is. */
         c.watch = Number.isInteger(m.id) && this.sim.players.some(o => o.id === m.id) ? m.id : null;
@@ -181,6 +198,16 @@ export class GameRoom extends DurableObject {
     if (p.tok) this.away.set(p.tok, {p, until:Date.now() + GRACE * 1000});
     else this.sim.leave(p);
   }
+  /* the host: whoever has been here longest (a player or a watch-only tab) */
+  host(){ for (const c of this.clients) if (c.p || c.watcher) return c; return null; }
+  /* tell each client who hosts and whether it is them, when that changes */
+  sendHost(force){
+    const h = this.host(), key = h ? (h.p ? 'p' + h.p.id : 'w') + ':' + this.lobby : '';
+    if (!force && key === this.hostKey) return;
+    this.hostKey = key;
+    const name = h ? (h.p ? h.p.name : 'the watcher') : '';
+    for (const c of this.clients) if (c.p || c.watcher) this.send(c, {t:'h', you:c === h ? 1 : 0, name, lb:this.lobby ? 1 : 0});
+  }
   humanCount(){ return this.sim.players.filter(p => !p.isBot).length; }
   freeColor(){
     const used = new Set(this.sim.players.filter(p => !p.isBot).map(p => p.col));
@@ -196,12 +223,14 @@ export class GameRoom extends DurableObject {
   welcome(c){
     const sim = this.sim;
     c.known = new Map();
-    this.send(c, {t:'w', v:versionOf(this.env), id:c.p ? c.p.id : null, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
+    this.send(c, {t:'w', v:versionOf(this.env), lb:this.lobby ? 1 : 0, id:c.p ? c.p.id : null, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
     this.send(c, this.rosterMsg());
     for (const p of sim.players) this.send(c, this.strandMsg(p.s, p.id, false));
     for (const f of sim.frags) this.send(c, this.strandMsg(f.s, f.id, true));
     this.send(c, Object.assign({t:'m'}, this.game.MAP.netState()));
     this.send(c, this.scoresMsg());
+    const h = this.host();
+    this.send(c, {t:'h', you:c === h ? 1 : 0, name:h ? (h.p ? h.p.name : 'the watcher') : '', lb:this.lobby ? 1 : 0});
   }
   rosterMsg(){ return {t:'r', P:this.sim.players.map(p => [p.id, p.name, p.col, p.isBot ? 1 : 0])}; }
   scoresMsg(){ return {t:'b', B:this.sim.players.map(p => [p.id, this.sim.complexity(p)])}; }

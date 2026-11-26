@@ -17,6 +17,10 @@ Room names can use letters, numbers and dashes, up to 32 characters. They aren't
 
 A mouse steers toward the pointer. On touch screens, wherever a finger lands becomes a joystick: drag away from that spot to steer (a short drag swims slowly, about 70 px is full speed), and lift to stop. A faint ring shows while a finger is down. On small screens the lines of science about each place are skipped, since they cover too much of the soup.
 
+## Lobby
+
+A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a "Just watch" tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round. If the host leaves, whoever has been there next longest takes over.
+
 ## Watching
 
 Press **Watch** (or V) to follow other strands: ◀ ▶ (or the arrow keys) move between them, **Tour** moves on every 15 seconds, and × (or Esc) goes back to your own strand. While you watch, your strand waits where it is and can still be hit. The bar shows each strand's score, its place, and what a bot is thinking.
@@ -33,7 +37,7 @@ Press **Watch** (or V) to follow other strands: ◀ ▶ (or the arrow keys) move
   - `rna-strand.js` handles strand physics and SVG drawing.
   - `map.js` builds the map from the regions and runs its moving hazards. `bots.js` runs the bot players, and `net.js` is the multiplayer client.
 - **`src/worker.js`**: serves the page and sends each room's WebSocket (`/ws/<room>`) to that room's Durable Object.
-- **`src/room.js`**: one Durable Object per room name. It runs `sim.js` for everyone in the room at 30 steps a second and sends each player only what is near them. Rounds run back to back: 5 minutes of play, 15 seconds of results, then a new map. Bots keep at least 10 strands in a room, and each room holds up to 12 players. If a player drops out, their strand waits 30 seconds so a refreshed tab gets it back. Once a room is empty for 30 seconds it stops and costs nothing.
+- **`src/room.js`**: one Durable Object per room name. It runs `sim.js` for everyone in the room at 30 steps a second and sends each player only what is near them. A room starts in the lobby; the host starts each round (5 minutes of play, then 15 seconds of results, then back to the lobby). Bots keep at least 10 strands in a room, and each room holds up to 12 players. If a player drops out, their strand waits 30 seconds so a refreshed tab gets it back. Once a room is empty for 30 seconds it stops and costs nothing.
 - **`src/game.js` and `src/dom-shim.js`**: let the browser files run on the server, where nothing is drawn.
 
 You can change the room settings in the constants at the top of `src/room.js`.

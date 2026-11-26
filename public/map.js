@@ -43,11 +43,31 @@ const typeAtCell = (cx, cy) => (cx < 0 || cy < 0 || cx >= GW || cy >= GH) ? K.DE
 const typeAt = (x, y) => typeAtCell(Math.floor(x / CELL), Math.floor(y / CELL));
 
 /* ---------- generation ---------- */
-function generate(s){
+/* the lobby: before a room's game starts, players wait in a small walled pool with clumps of letters that keep refilling.
+   No hazards, no tide effects, nothing that moves but letters and strands. */
+let lobby = false, lobbyClumps = [];
+const LOBBY = {x:W / 2, y:H / 2, a:1100, b:700};
+function generateLobby(){
+  grid.fill(K.ROCK);
+  const each = (fn) => { for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++) fn(cx, cy, (cx + 0.5) * CELL, (cy + 0.5) * CELL); };
+  each((cx, cy, x, y) => { const d = Math.hypot((x - LOBBY.x) / LOBBY.a, (y - LOBBY.y) / LOBBY.b); if (d < 0.9 + 0.12 * fbm(x / 300, y / 300)) grid[cellIdx(cx, cy)] = K.LAGOON; });
+  for (let k = 0; k < 7; k++){ const a = k / 7 * TAU + rr(-0.25, 0.25), d = rr(0.42, 0.66); lobbyClumps.push({x:LOBBY.x + Math.cos(a) * LOBBY.a * d, y:LOBBY.y + Math.sin(a) * LOBBY.b * d, r:120}); }
+  LABELS.push({t:'LOBBY', x:LOBBY.x, y:LOBBY.y - LOBBY.b - 60});
+  raftRoute = [];
+  byType = CELLS.map(() => []);
+  for (let i = 0; i < grid.length; i++) if (!SOLID[grid[i]]) byType[grid[i]].push(i);
+  buildMinimap();
+  const ring = []; for (let i = 0; i < 12; i++){ const t = (i + 0.5) / 12 * TAU; ring.push({x:LOBBY.x + Math.cos(t) * LOBBY.a * 0.25, y:LOBBY.y + Math.sin(t) * LOBBY.b * 0.25}); }
+  return {player:{x:LOBBY.x, y:LOBBY.y}, bots:ring};
+}
+/* opt.lobby: build the lobby instead of the world */
+function generate(s, opt){
   seed = s >>> 0 || 1; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
   grid = new Uint8Array(GW * GH).fill(K.OCEAN);
   flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
   melted = new Set(); chunks.clear(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
+  lobby = !!(opt && opt.lobby); lobbyClumps = [];
+  if (lobby) return generateLobby();
   const setC = (cx, cy, t) => { cx = Math.floor(cx); cy = Math.floor(cy); if (cx >= 0 && cy >= 0 && cx < GW && cy < GH) grid[cellIdx(cx, cy)] = t; };
   const each = (fn) => { for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++) fn(cx, cy, (cx + 0.5) * CELL, (cy + 0.5) * CELL); };
   const blob = (x, y, r, t, onlyOn) => {
@@ -148,6 +168,11 @@ function flowAt(x, y){
 /* ---------- letters: where they gather and what they are ---------- */
 const fromMix = m => { let r = Math.random(); for (const b of ['A', 'U', 'G', 'C']){ r -= m[b]; if (r < 0) return b; } return 'A'; };
 function spawnSpot(){
+  if (lobby){
+    /* the lobby's letters gather in clumps */
+    const c = lobbyClumps[Math.floor(Math.random() * lobbyClumps.length)], a = Math.random() * TAU, d = Math.sqrt(Math.random()) * c.r;
+    return {x:c.x + Math.cos(a) * d, y:c.y + Math.sin(a) * d, b:fromMix(MIX.soup), home:{x:c.x, y:c.y, r:c.r + 30}};
+  }
   /* pick a cell weighted by how rich its type is (drained flats get richer at low tide), then a letter from its mix */
   let total = 0; const w = CELLS.map((inf, t) => { const v = byType[t].length * inf.spawn * (inf.lowTideSpawn ? (lowTide() ? inf.lowTideSpawn : 1) : 1); total += v; return v; });
   let r = Math.random() * total, t = 0; for (; t < w.length; t++){ r -= w[t]; if (r < 0) break; }
@@ -189,6 +214,7 @@ function findPath(x0, y0, x1, y1, maxNodes){
 /* ---------- the living map: tide, geysers, rafts, shifting ice, meteorites, UV flashes ---------- */
 function update(dt, ev, heads){
   clock += dt;
+  if (lobby){ tide = 0.5 + 0.5 * Math.cos(clock * TAU / 80); return; }   /* the lobby has no hazards */
   /* tides: an 80-second cycle, high to low and back */
   tide = 0.5 + 0.5 * Math.cos(clock * TAU / 80);
   placeRafts(dt);
@@ -474,7 +500,7 @@ function randomOf(types){
 return {W, H, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
-  get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
+  get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
   get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }};
 };
 window.SoupMap = makeSoupMap();
