@@ -20,9 +20,18 @@ binding = "ASSETS"
 name = "ROOMS"
 class_name = "GameRoom"
 
+# anonymous health reports (src/reports.js); read them at /reports?key=<REPORT_KEY secret>
+[[durable_objects.bindings]]
+name = "REPORTS"
+class_name = "ReportLog"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GameRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ReportLog"]
 
 [observability]
 enabled = false

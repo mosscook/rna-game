@@ -19,6 +19,7 @@ const MAX_HUMANS = 12;           /* more than this and Chromebooks struggle to d
 const MAX_WATCHERS = 6;          /* tabs that only watch (a teacher's projector): no strand, not counted as players */
 const ROUND = 300;               /* seconds of play */
 const RESULTS = 15;              /* seconds on the results screen before the next map */
+const AUTO_WAIT = 10;            /* seconds the lobby counts down before starting the next round, when the host chose auto-start */
 const GRACE = 30;                /* seconds a dropped player's strand waits for them to come back */
 const SLEEP_AFTER = 30;          /* seconds an empty room waits before it stops */
 const VIEW_X = 1500, VIEW_Y = 1100;   /* half the size of the area each player is sent */
@@ -75,6 +76,7 @@ export class GameRoom extends DurableObject {
     }});
     this.sim = this.game.sim;
     this.hostKey = null;
+    this.auto = false; this.autoAt = 0;
     this.toLobby(false);
     this.last = Date.now(); this.acc = 0;
     this.timer = setInterval(() => this.loop(), 1000 / HZ);
@@ -103,24 +105,28 @@ export class GameRoom extends DurableObject {
   tick(){
     this.k++;
     this.sendHost(false);
-    if (this.sim.state === 'over'){ this.overT -= TICK; if (this.overT <= 0) return this.toLobby(); }
+    if (this.sim.state === 'over'){ this.overT -= TICK; if (this.overT <= 0) return this.toLobby(true, true); }
+    if (this.lobby && this.autoAt && Date.now() >= this.autoAt) return this.startGame();
     this.sim.step(TICK);
     this.sendChanges();
   }
   onEnd(rows){
     this.overT = this.results;
-    this.broadcast({t:'e', rows:rows.map(r => [r.p.id, r.p.name, r.p.col, r.score, r.p.isBot ? 1 : 0])});
+    /* players' own tallies ride along for the results screen: letters, folds, cuts made and taken, hits made and taken, joins, deaths */
+    const st = s => [s.letters, s.folds, s.cuts, s.cutsTaken, s.hits, s.hitsTaken, s.joins, s.deaths];
+    this.broadcast({t:'e', rows:rows.map(r => r.p.isBot ? [r.p.id, r.p.name, r.p.col, r.score, 1] : [r.p.id, r.p.name, r.p.col, r.score, 0, st(r.p.stats)])});
   }
   /* the lobby: practice in a small pool until the host starts the game */
-  toLobby(tell = true){
+  toLobby(tell = true, afterRound = false){
     this.lobby = true;
+    this.autoAt = this.auto && afterRound ? Date.now() + AUTO_WAIT * 1000 : 0;
     this.sim.setMinStrands(0);
     this.sim.reset(null, {lobby:true});
     this.sim.start();
     if (tell) this.resync();
   }
   startGame(){
-    this.lobby = false;
+    this.lobby = false; this.autoAt = 0;
     this.sim.setMinStrands(MIN_STRANDS);
     this.sim.reset();
     this.sim.start();
@@ -155,6 +161,7 @@ export class GameRoom extends DurableObject {
       case 'd': if (p && this.sim.state === 'play') this.sim.drop(p); break;
       case 'ping': if (Number.isFinite(m.at)) this.send(c, {t:'pong', at:m.at}); break;
       case 'start': if (this.lobby && c === this.host()) this.startGame(); break;
+      case 'auto': if (c === this.host()){ this.auto = !!m.on; if (!this.auto) this.autoAt = 0; this.sendHost(true); } break;
       case 'v':
         /* spectate: follow another strand (its id), or null to go back to your own. Your own strand waits where it is. */
         c.watch = Number.isInteger(m.id) && this.sim.players.some(o => o.id === m.id) ? m.id : null;
@@ -202,11 +209,16 @@ export class GameRoom extends DurableObject {
   host(){ for (const c of this.clients) if (c.p || c.watcher) return c; return null; }
   /* tell each client who hosts and whether it is them, when that changes */
   sendHost(force){
-    const h = this.host(), key = h ? (h.p ? 'p' + h.p.id : 'w') + ':' + this.lobby : '';
+    const h = this.host(), key = h ? (h.p ? 'p' + h.p.id : 'w') + ':' + this.lobby + ':' + this.auto + ':' + this.autoAt : '';
     if (!force && key === this.hostKey) return;
     this.hostKey = key;
-    const name = h ? (h.p ? h.p.name : 'the watcher') : '';
-    for (const c of this.clients) if (c.p || c.watcher) this.send(c, {t:'h', you:c === h ? 1 : 0, name, lb:this.lobby ? 1 : 0});
+    for (const c of this.clients) if (c.p || c.watcher) this.send(c, this.hostMsg(c));
+  }
+  /* who hosts, whether it is you, the lobby, and auto-start (with seconds left in its countdown) */
+  hostMsg(c){
+    const h = this.host();
+    return {t:'h', you:c === h ? 1 : 0, name:h ? (h.p ? h.p.name : 'the watcher') : '', lb:this.lobby ? 1 : 0,
+      auto:this.auto ? 1 : 0, in:this.autoAt ? Math.max(0, Math.round((this.autoAt - Date.now()) / 100) / 10) : 0};
   }
   humanCount(){ return this.sim.players.filter(p => !p.isBot).length; }
   freeColor(){
@@ -229,8 +241,7 @@ export class GameRoom extends DurableObject {
     for (const f of sim.frags) this.send(c, this.strandMsg(f.s, f.id, true));
     this.send(c, Object.assign({t:'m'}, this.game.MAP.netState()));
     this.send(c, this.scoresMsg());
-    const h = this.host();
-    this.send(c, {t:'h', you:c === h ? 1 : 0, name:h ? (h.p ? h.p.name : 'the watcher') : '', lb:this.lobby ? 1 : 0});
+    this.send(c, this.hostMsg(c));
   }
   rosterMsg(){ return {t:'r', P:this.sim.players.map(p => [p.id, p.name, p.col, p.isBot ? 1 : 0])}; }
   scoresMsg(){ return {t:'b', B:this.sim.players.map(p => [p.id, this.sim.complexity(p)])}; }

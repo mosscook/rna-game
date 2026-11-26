@@ -15,11 +15,11 @@ Room names can use letters, numbers and dashes, up to 32 characters. They aren't
 
 ## Steering
 
-A mouse steers toward the pointer. On touch screens, wherever a finger lands becomes a joystick: drag away from that spot to steer (a short drag swims slowly, about 70 px is full speed), and lift to stop. A faint ring shows while a finger is down. On small screens the lines of science about each place are skipped, since they cover too much of the soup.
+A mouse steers toward the pointer. Arrow keys or WASD steer too (two at once go diagonally; letting go stops), and whichever was used last is in charge; while you are watching, the arrow keys switch strands instead. On touch screens, wherever a finger lands becomes a joystick: drag away from that spot to steer (a short drag swims slowly, about 70 px is full speed), and lift to stop. A faint ring shows while a finger is down. On small screens the lines of science about each place are skipped, since they cover too much of the soup.
 
 ## Lobby
 
-A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a "Just watch" tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round. If the host leaves, whoever has been there next longest takes over.
+A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a "Just watch" tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
 
 ## Watching
 
@@ -127,6 +127,12 @@ npm run test:room                          # with wrangler dev running: fake pla
 
 Then open `http://localhost:8787/` for single-player, or `http://localhost:8787/test` for a room.
 
+## Health reports
+
+So a playtest shows what broke or struggled on the classroom machines, pages send short anonymous notes. A note goes when a JavaScript error happens (at most 5 per page load) or when the game averages under 20 frames a second over a minute of play (once per page load). It holds the error and where it happened, frame rate, step and draw times, screen and canvas size, whether it is a Chromebook, low detail on or off, single-player, room or watching, and the version. It has no names, codons, room names or IP addresses. A small Durable Object (`src/reports.js`) keeps the latest 2,000 notes. Cloudflare's own logs stay off.
+
+To read them, set a secret once: Cloudflare dashboard → Workers & Pages → rna-game → Settings → Variables and Secrets → Add, type **Secret**, name `REPORT_KEY`, value a long password of your choosing. Then open `rna.game/reports?key=<that password>`. The page shows the most common errors, slow sessions with their timings, and every error. Without the secret, the page doesn't exist.
+
 ## Privacy
 
-The server keeps only what a round needs while the room is running: three-letter codon names, strand state and scores. Nothing is written to storage. There are no accounts, analytics or ads, and Worker logs are off. A random token in the tab's session storage lets a refreshed tab take its strand back, and it disappears when the tab closes. The page uses the device's own fonts and loads nothing from other sites.
+The server keeps only what a round needs while the room is running: three-letter codon names, strand state and scores. Nothing about players is written to storage; the only thing stored is the anonymous health reports above. There are no accounts, analytics or ads, and Worker logs are off. A random token in the tab's session storage lets a refreshed tab take its strand back, and it disappears when the tab closes. The page uses the device's own fonts and loads nothing from other sites.

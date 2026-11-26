@@ -53,7 +53,12 @@ function create(opts){
 
   /* ---------- players ---------- */
   function onStrandEvent(p, type, d){
-    if (type === 'burst'){ for (const l of d.letters) if (Math.random() < 0.6) spawnNuc(l.x + rnd(-6, 6), l.y + rnd(-6, 6), l.b); return; }
+    if (type === 'burst'){
+      /* a Cleaver's cut: every letter of the cut structure lands beside the one who cut it, so fighting feeds you */
+      const by = p.cutBy;
+      if (by && by.alive){ const h = by.s.head; for (const l of d.letters){ const a = rnd(0, TAU), r = rnd(30, 90); spawnNuc(h.x + Math.cos(a) * r, h.y + Math.sin(a) * r, l.b, {x:h.x, y:h.y, r:120}); } return; }
+      for (const l of d.letters) if (Math.random() < 0.6) spawnNuc(l.x + rnd(-6, 6), l.y + rnd(-6, 6), l.b); return;
+    }
     if (type === 'seq'){ dirty(p); return; }
     if (d && d.text && type !== 'damaged') tell(p, d.text);
   }
@@ -65,7 +70,9 @@ function create(opts){
   /* a fresh strand with one Mover (a new player, or a human carried into the next round) */
   function birth(p, x, y){
     if (p.s) p.s.remove();
-    Object.assign(p, {alive:true, dead:0, inv:2, tx:x, ty:y, top:0, jcd:0, fling:null, iceT:0, ai:{t:rnd(0, 0.5), mode:'forage', modeT:0}});
+    Object.assign(p, {alive:true, dead:0, inv:2, tx:x, ty:y, top:0, jcd:0, fling:null, iceT:0, ai:{t:rnd(0, 0.5), mode:'forage', modeT:0},
+      /* this round's tallies, for the results screen */
+      stats:{letters:0, folds:0, cuts:0, cutsTaken:0, hits:0, hitsTaken:0, joins:0, deaths:0}});
     p.s = stage.addStrand({seq:'', x, y, heading:rnd(0, TAU), onEvent:(t, d) => onStrandEvent(p, t, d), tint:hooks.tint(p.col, p.isBot)});
     giveMover(p);
   }
@@ -103,6 +110,7 @@ function create(opts){
     if (!p.alive || !p.s.tail) return false;
     /* players may fold a recipe with one wrong letter; bots fold only exact ones */
     const made = p.s.foldTail(p.isBot);
+    p.stats.folds += made.filter(g => g.fn).length;
     const t = p.s.nodes[p.s.nodes.length - 1]; if (t) puff(t.x, t.y, p.col, 30);
     if (!p.isBot){
       dirty(p);
@@ -205,7 +213,7 @@ function create(opts){
   /* ---------- harm ---------- */
   function die(p){
     for (const n of p.s.nodes) if (Math.random() < 0.5) spawnNuc(n.x + rnd(-8, 8), n.y + rnd(-8, 8), 'AUGC'[Math.floor(Math.random() * 4)]);
-    BOTS.onDeath(p);
+    BOTS.onDeath(p); p.stats.deaths++;
     const h = p.s.head; puff(h.x, h.y, 'warn', 60);
     p.s.clear(); p.s.setOpacity(0);
     p.alive = false; p.dead = 2.5;
@@ -245,7 +253,8 @@ function create(opts){
     const n = b.s.nodes[j];
     if (tgt.damaged || (oneHit && !sh)){
       BOTS.onHit(b, by, true);
-      const res = b.s.cutAt(tgt.start);
+      by.stats.cuts++; b.stats.cutsTaken++;
+      b.cutBy = by; const res = b.s.cutAt(tgt.start); b.cutBy = null;
       b.inv = 2.5;
       if (n) puff(n.x, n.y, 'warn', 40);
       if (res && res.tail && res.tailNodes.length){ const p0 = res.tailNodes[0], p1 = res.tailNodes[1] || p0; mkFrag(res.tail, res.tailSegs, p0.x, p0.y, Math.atan2(p0.y - p1.y, p0.x - p1.x), b.id); }
@@ -255,6 +264,7 @@ function create(opts){
       return true;
     }
     BOTS.onHit(b, by, false);
+    by.stats.hits++; b.stats.hitsTaken++;
     b.s.damageAt(tgt.start); b.inv = 1.2;
     if (n) puff(n.x, n.y, 'warn', 22);
     dirty(b); tell(b, sh ? `Your ${sh.fn} took ${by.name}'s hit for your ${st.fn || 'arm'}.` : `${by.name} damaged your ${name}. It stops working until a Repairer mends it. Another hit cuts it off.`);
@@ -296,7 +306,7 @@ function create(opts){
         for (let i = nucs.length - 1; i >= 0; i--){
           const q = nucs[i];
           if (dist(h.x, h.y, q.x, q.y) < reach){
-            p.s.append(q.b); nucs.splice(i, 1); dirty(p);
+            p.s.append(q.b); nucs.splice(i, 1); dirty(p); p.stats.letters++;
             if (p.s.tail.length >= MAXLOOSE) tell(p, 'Your loose tail is full. Fold it or drop letters.');
             break;
           }
@@ -347,7 +357,7 @@ function create(opts){
       if (!add) continue;
       /* loose letters behind the Joiner fall away, so what it grabs attaches right behind it */
       const loose = p.s.tail.length; if (loose) p.s.shedFrom(p.s.length - loose);
-      p.s.appendFolded(add, addSegs); p.jcd = 4;
+      p.s.appendFolded(add, addSegs); p.jcd = 4; p.stats.joins++;
       puff(t.x, t.y, p.col, 34);
       if (!p.isBot){
         dirty(p);
@@ -410,7 +420,8 @@ function create(opts){
   function uvFlash(r){
     hooks.fx({x:r.x, y:r.y, col:'sun', r:r.r, dur:0.6, flash:true});
     for (const q of nucs) if (dist(q.x, q.y, r.x, r.y) < r.r && Math.random() < 0.5) q.b = pick(RS.BASES.filter(b => b !== q.b));
-    for (let k = 0; k < 6; k++){ const a = rnd(0, TAU), d = rnd(0, r.r * 0.8); spawnNuc(r.x + Math.cos(a) * d, r.y + Math.sin(a) * d, Math.random() < 0.5 ? 'C' : 'U', {x:r.x, y:r.y, r:r.r}); }
+    /* a few new C and U, but not past the soup's usual number of letters (flashes used to flood the shallows) */
+    for (let k = 0; k < 3 && nucs.length < nucTarget + 30; k++){ const a = rnd(0, TAU), d = rnd(0, r.r * 0.8); spawnNuc(r.x + Math.cos(a) * d, r.y + Math.sin(a) * d, Math.random() < 0.5 ? 'C' : 'U', {x:r.x, y:r.y, r:r.r}); }
     for (const p of players){
       if (!p.alive) continue;
       const hit = [], changed = [];

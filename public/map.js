@@ -433,12 +433,19 @@ function buildMinimap(){
   for (let i = 0; i < grid.length; i++){ const t = grid[i], mt = CELLS[t].mini ? K[CELLS[t].mini] : t, [r, gg, b] = rgb[mt], o = i * 4; img.data[o] = Math.min(255, r * 1.6 + 8); img.data[o + 1] = Math.min(255, gg * 1.6 + 8); img.data[o + 2] = Math.min(255, b * 1.6 + 10); img.data[o + 3] = 255; }
   g.putImageData(img, 0, 0); mini.c = c; mini.dirty = false;
 }
+/* the part of the map the minimap shows: the lobby's pool and a margin, or the whole world */
+function miniView(){
+  if (!lobby) return {x:0, y:0, w:W, h:H};
+  const mw = (LOBBY.a + 350) * 2, mh = mw * H / W;
+  return {x:LOBBY.x - mw / 2, y:LOBBY.y - mh / 2, w:mw, h:mh};
+}
 function drawMinimap(g, x, y, w){
   if (mini.dirty) buildMinimap();
-  g.imageSmoothingEnabled = true; g.drawImage(mini.c, x, y, w, w * H / W);
-  for (const s of smokers){ g.fillStyle = '#ff6a3a'; g.fillRect(x + s.x / W * w - 1, y + s.y / H * w * H / W - 1, 2.5, 2.5); }
-  for (const r of rafts){ g.fillStyle = '#c9bfa6'; g.beginPath(); g.arc(x + r.x / W * w, y + r.y / H * w * H / W, 2, 0, TAU); g.fill(); }
-  for (const m of meteors){ g.strokeStyle = '#ff9a5a'; g.beginPath(); g.arc(x + m.x / W * w, y + m.y / H * w * H / W, 4, 0, TAU); g.stroke(); }
+  const v = miniView(), k = w / v.w, px = X => x + (X - v.x) * k, py = Y => y + (Y - v.y) * k;
+  g.imageSmoothingEnabled = true; g.drawImage(mini.c, v.x / CELL, v.y / CELL, v.w / CELL, v.h / CELL, x, y, w, v.h * k);
+  for (const s of smokers){ g.fillStyle = '#ff6a3a'; g.fillRect(px(s.x) - 1, py(s.y) - 1, 2.5, 2.5); }
+  for (const r of rafts){ g.fillStyle = '#c9bfa6'; g.beginPath(); g.arc(px(r.x), py(r.y), 2, 0, TAU); g.fill(); }
+  for (const m of meteors){ g.strokeStyle = '#ff9a5a'; g.beginPath(); g.arc(px(m.x), py(m.y), 4, 0, TAU); g.stroke(); }
 }
 
 /* ---------- network: a server room sends its live map state; a client mirrors it ----------
@@ -498,7 +505,7 @@ function randomOf(types){
 }
 
 return {W, H, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
-  spawnSpot, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
+  spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
   get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }};

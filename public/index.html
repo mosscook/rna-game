@@ -116,6 +116,8 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .lobbybar b{color:var(--ink)}
 .lobbybar .btn{height:32px}
 .lobbybar.wait{padding-right:14px}
+.lobbybar .auto{display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;white-space:nowrap}
+.lobbybar .auto input{accent-color:var(--stain);margin:0}
 @media (max-width:760px){ .lobbybar{top:52px} }
 /* spectating: a bar at the bottom middle with whose view this is */
 .watch{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:4px;border-radius:99px;max-width:calc(100% - 20px);
@@ -159,6 +161,8 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .board .n{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .rank small.style{display:block;font:400 11px var(--font-body);color:var(--muted)}
 .mine{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:12px}
+.brk{display:grid;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.brk h3{margin:0;font:700 12px var(--font-body);text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .seg{padding:2px 7px;border:1.5px solid var(--stain);border-radius:99px;font-weight:600;white-space:nowrap}
 .seg.core{background:var(--stain);color:var(--surface)}
 .seg.dmg{border-style:dashed;color:var(--muted);text-decoration:line-through}
@@ -236,7 +240,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
   </div>
 
-  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><button class="btn go" type="button" id="bStart">Start game</button></div>
+  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><button class="btn go" type="button" id="bStart">Start game</button></div>
   <aside class="dev" id="dev" aria-label="Developer tools" hidden></aside>
   <div class="watch" id="watchBar" role="group" aria-label="Spectating" hidden>
     <button class="btn sm" type="button" id="wPrev" aria-label="Previous strand" title="Previous (←)">&#9664;</button>
@@ -374,13 +378,44 @@ function step(dt){
     if (net.me && me !== net.me){ me = net.me; uiDirty = true; }
   } else {
     if (sim.state === 'play') aimPlayer();
-    const t0 = DEV ? performance.now() : 0;
+    const t0 = performance.now();
     for (let k = 0; k < devFast; k++) sim.step(dt);
-    if (DEV) stepMs += (performance.now() - t0 - stepMs) * 0.05;
+    stepMs += (performance.now() - t0 - stepMs) * 0.05;
   }
   for (let i = fx.length - 1; i >= 0; i--){ fx[i].t += dt; if (fx[i].t > fx[i].dur) fx.splice(i, 1); }
 }
 const doFold = p => world.fold(p), doDrop = p => world.drop(p);
+
+/* ---------- health reports: anonymous notes when something goes wrong on a player's machine ----------
+   A JavaScript error (at most 5 per page load), or a frame rate averaging under 20 over a minute of play (once).
+   Sent: the error and where, frame rate and timings, screen size, whether it is a Chromebook, low detail, single-player
+   or room, and the version. Never names, codons, room names or anything else about the player. */
+const HEALTH = /^https?:$/.test(location.protocol);
+let errorsSent = 0, slowSent = false, playSecs = 0, frameN = 0, frameT = 0, worstFps = 999;
+const sentErrors = new Set();
+const sysInfo = () => ({v:VERSION || 'dev', mode:net ? (watchOnly ? 'watch' : 'room') : 'solo', screen:`${innerWidth}x${innerHeight}`, dpr:window.devicePixelRatio || 1,
+  cros:/CrOS/.test(navigator.userAgent), low:RS.S.goo === 'off', px:Math.round(cw * dpr) * Math.round(ch * dpr), secs:Math.round(playSecs)});
+function sendReport(r){
+  if (!HEALTH) return;
+  const body = JSON.stringify(Object.assign(sysInfo(), r));
+  try { if (navigator.sendBeacon && navigator.sendBeacon('/report', new Blob([body], {type:'application/json'}))) return; } catch(e){}
+  try { fetch('/report', {method:'POST', body, keepalive:true}); } catch(e){}
+}
+function reportError(msg, where){
+  const key = msg + '|' + where; if (errorsSent >= 5 || sentErrors.has(key)) return;
+  sentErrors.add(key); errorsSent++; sendReport({kind:'error', msg:String(msg).slice(0, 300), where:String(where || '').replace(/^.*\//, '').slice(0, 120)});
+}
+window.addEventListener('error', e => reportError(e.message || 'error', e.filename ? `${e.filename}:${e.lineno}:${e.colno}` : ''));
+window.addEventListener('unhandledrejection', e => reportError('Unhandled: ' + ((e.reason && e.reason.message) || e.reason), (e.reason && e.reason.stack || '').split('\n')[1] || ''));
+/* frame rate while actually playing (round on, tab visible, not paused), checked once a minute of play */
+function trackHealth(dt){
+  if (!HEALTH || slowSent || document.hidden || paused || world.state !== 'play') return;
+  playSecs += dt; frameN++; frameT += dt;
+  if (frameT >= 10) worstFps = Math.min(worstFps, frameN / frameT);
+  if (frameT >= 10){ healthFrames += frameN; healthSecs += frameT; frameN = 0; frameT = 0;
+    if (healthSecs >= 60){ const avg = healthFrames / healthSecs; if (avg < 20){ slowSent = true; sendReport({kind:'slow', fps:avg, fpsLow:worstFps, stepMs, drawMs, strands:L.players.length}); } healthFrames = 0; healthSecs = 0; } }
+}
+let healthFrames = 0, healthSecs = 0;
 
 /* ---------- ?dev: frame and step times, what is under the pointer, a ground-type map, and (single-player) test buttons ---------- */
 const DEV = new URLSearchParams(location.search).has('dev');
@@ -458,12 +493,26 @@ const PLACE_LINES = new Set(Object.values(window.SoupBiomes.ZONES).map(z => z.in
 function say(text){
   if (smallScreen.matches && PLACE_LINES.has(text)) return;
   const t = $('toast'); t.textContent = text; t.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => t.classList.remove('on'), 4600); }
+/* the results screen's account of your round: where each point came from, and what you did */
+function breakdown(rows){
+  const mine = rows.find(r => r.p === me), st = (mine && mine.stats) || me.stats || null, seen = new Set(), parts = [];
+  for (const f of me.s.functions){
+    if (f.damaged){ parts.push(`<span class="seg dmg">${f.fn} 0<span class="st">damaged</span></span>`); continue; }
+    parts.push(`<span class="seg">${f.fn} ${seen.has(f.fn) ? '+1' : '+3'}</span>`); seen.add(f.fn);
+    if (f.bonus) parts.push(`<span class="seg">${f.fn} fused +${f.bonus}</span>`);
+    if (SEG.strength(f) > 1) parts.push(`<span class="seg lucky">${f.fn} lucky +1</span>`);
+  }
+  const did = st ? [plural(st.letters, 'letter') + ' collected', plural(st.folds, 'fold'), st.joins ? plural(st.joins, 'fragment') + ' joined' : '',
+    `${plural(st.cuts, 'cut')} and ${plural(st.hits, 'hit')} made`, `${plural(st.cutsTaken, 'cut')} and ${plural(st.hitsTaken, 'hit')} taken`,
+    st.deaths ? `broken apart ${st.deaths === 1 ? 'once' : st.deaths + ' times'}` : ''].filter(Boolean).join(' · ') : '';
+  return `<div class="brk"><h3>Your points</h3><div class="mine">${parts.join('') || '<span class="fine">No working segments at the end.</span>'}</div>`
+    + (did ? `<p class="fine">${did}</p>` : '') + `<p class="fine">A new kind scores 3, a repeat 1; a fused Joiner and a lucky mistake add 1; damaged segments score nothing.</p></div>`;
+}
 function showEnd(rows){
   const place = me ? rows.findIndex(r => r.p === me) + 1 : 0;
-  const kinds = me ? new Set(working(me).map(f => f.fn)).size : 0;
   $('sheet').innerHTML = `<h2>${!me ? 'Round over' : place === 1 ? 'Most complex strand in the soup' : 'Time. You placed ' + place + ' of ' + rows.length}</h2>`
     + `<ol class="rank">${rows.map(r => `<li class="${r.p === me ? 'me' : ''}"><span class="dot" style="--c:var(--${r.p.col})"></span><span>${r.p.name}${r.p.isBot ? `<small class="style">${BOTS.describe(r.p)}</small>` : ''}</span><span>${r.score}</span></li>`).join('')}</ol>`
-    + (me ? `<p class="fine">You finished with ${plural(me.s.length, 'letter')} and ${plural(kinds, 'working kind')} of function. A new kind scores 3, a repeat 1, a fused Joiner adds 1.</p>` : '')
+    + (me ? breakdown(rows) : '')
     + (net ? `<p class="fine">Back to the lobby in a few seconds. ${net.isHost ? 'You start the next round.' : 'The host starts the next round.'}</p>` : `<button class="btn go" type="button" id="again">Play again</button>`);
   $('overlay').hidden = false;
   if (!net){ $('again').addEventListener('click', () => reset()); $('again').focus(); }
@@ -653,12 +702,15 @@ function draw(t){
     }
   }
   /* on narrow screens the minimap sits above the action buttons */
-  const mw = cw < 520 ? 110 : 170, mhh = mw * H / W, mx = cw - mw - 10, my = ch - mhh - 10 - (cw < 520 ? 50 : 0), k = mw / W;
+  /* the minimap shows the area in play: the lobby's pool, or the whole world */
+  const mv = MAP.miniView(), mw = cw < 520 ? 110 : 170, k = mw / mv.w, mhh = mv.h * k, mx = cw - mw - 10, my = ch - mhh - 10 - (cw < 520 ? 50 : 0);
+  const MX = X => mx + (X - mv.x) * k, MY = Y => my + (Y - mv.y) * k;
   tx.globalAlpha = 0.95; MAP.drawMinimap(tx, mx, my, mw); tx.globalAlpha = 1;
   tx.lineWidth = 1; tx.strokeStyle = T.line; tx.strokeRect(mx, my, mw, mhh);
-  for (const f of L.frags){ tx.fillStyle = T.muted; tx.fillRect(mx + f.s.head.x * k - 1.5, my + f.s.head.y * k - 1.5, 3, 3); }
-  for (const p of L.players){ const px = p === me || p.mx == null ? p.s.head.x : p.mx, py = p === me || p.my == null ? p.s.head.y : p.my; if (!p.alive && p.mx == null) continue; tx.fillStyle = T[p.col]; tx.beginPath(); tx.arc(mx + px * k, my + py * k, p === fp ? 4.5 : p === me ? 4 : 2.8, 0, TAU); tx.fill(); if (p === fp && fp !== me){ tx.lineWidth = 1.5; tx.strokeStyle = T.ink; tx.stroke(); } }
-  tx.strokeStyle = T.ink; tx.strokeRect(mx + camX * k, my + camY * k, Math.min(vw, W) * k, Math.min(vh, H) * k);
+  for (const f of L.frags){ tx.fillStyle = T.muted; tx.fillRect(MX(f.s.head.x) - 1.5, MY(f.s.head.y) - 1.5, 3, 3); }
+  for (const p of L.players){ const px = p === me || p.mx == null ? p.s.head.x : p.mx, py = p === me || p.my == null ? p.s.head.y : p.my; if (!p.alive && p.mx == null) continue; tx.fillStyle = T[p.col]; tx.beginPath(); tx.arc(MX(px), MY(py), p === fp ? 4.5 : p === me ? 4 : 2.8, 0, TAU); tx.fill(); if (p === fp && fp !== me){ tx.lineWidth = 1.5; tx.strokeStyle = T.ink; tx.stroke(); } }
+  tx.save(); tx.beginPath(); tx.rect(mx, my, mw, mhh); tx.clip();
+  tx.strokeStyle = T.ink; tx.strokeRect(MX(camX), MY(camY), Math.min(vw, mv.w) * k, Math.min(vh, mv.h) * k); tx.restore();
   drawStick();
 }
 
@@ -753,9 +805,11 @@ function renderLobby(){
   const on = !!(net && net.lobby && world.state === 'play'), bar = $('lobbyBar');
   bar.hidden = !on; if (!on) return;
   const n = L.players.filter(p => !p.isBot && net.inRoster(p.id)).length;
-  const here = `${n} ${n === 1 ? 'player' : 'players'} here`;
-  $('lobbyText').innerHTML = net.isHost ? `<b>Lobby</b> · ${here} · practise, then start when everyone is ready` : `<b>Lobby</b> · ${here} · waiting for <b>${net.hostName}</b> to start`;
-  $('bStart').hidden = !net.isHost; bar.classList.toggle('wait', !net.isHost);
+  const here = `${n} ${n === 1 ? 'player' : 'players'} here`, left = Math.ceil(net.autoIn);
+  $('lobbyText').innerHTML = left ? `<b>Lobby</b> · ${here} · next round starts in <b>${left}</b>`
+    : net.isHost ? `<b>Lobby</b> · ${here} · practise, then start when everyone is ready` : `<b>Lobby</b> · ${here} · waiting for <b>${net.hostName}</b> to start`;
+  $('bStart').hidden = !net.isHost; $('autoWrap').hidden = !net.isHost; $('autoBox').checked = net.auto;
+  bar.classList.toggle('wait', !net.isHost);
 }
 function renderClock(){
   const s = Math.ceil(world.timeLeft);
@@ -779,10 +833,20 @@ function renderClock(){
    A mouse steers toward the pointer, as before. */
 const STICK_DEAD = 10, STICK_MAX = 70;
 let stick = null, touchMode = false;
+/* keyboard: arrow keys or WASD steer (a trackpad can be tiring); two at once go diagonally; letting go eases to a stop.
+   Whichever was used last, keys, mouse or touch, steers. */
+const KEY_DIR = {ArrowUp:[0, -1], ArrowDown:[0, 1], ArrowLeft:[-1, 0], ArrowRight:[1, 0], w:[0, -1], s:[0, 1], a:[-1, 0], d:[1, 0]};
+const keysDown = new Set(); let keyMode = false;
+const keyOf = e => KEY_DIR[e.key] ? e.key : KEY_DIR[e.key.toLowerCase()] ? e.key.toLowerCase() : null;
 /* where the player is steering, in the world, or null for nowhere yet */
 function aimAt(){
   if (!me) return null;
   const h = me.s.head;
+  if (keyMode){
+    let dx = 0, dy = 0; for (const k of keysDown){ dx += KEY_DIR[k][0]; dy += KEY_DIR[k][1]; }
+    const len = Math.hypot(dx, dy); if (!len) return {x:h.x, y:h.y};
+    return {x:clamp(h.x + dx / len * 400, 5, W - 5), y:clamp(h.y + dy / len * 400, 5, H - 5)};
+  }
   if (touchMode){
     if (!stick) return {x:h.x, y:h.y};
     const dx = stick.x - stick.ox, dy = stick.y - stick.oy, len = Math.hypot(dx, dy);
@@ -801,6 +865,7 @@ function aimPlayer(){
 const local = e => { const r = tc.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
 function setPointer(e){ pointer = local(e); }
 tc.addEventListener('pointerdown', e => {
+  keyMode = false;
   if (e.pointerType === 'mouse'){ touchMode = false; setPointer(e); return; }
   touchMode = true;
   if (stick) return;   /* one finger steers; others are ignored */
@@ -808,7 +873,7 @@ tc.addEventListener('pointerdown', e => {
   try { tc.setPointerCapture(e.pointerId); } catch(err){}
 });
 tc.addEventListener('pointermove', e => {
-  if (e.pointerType === 'mouse'){ setPointer(e); return; }
+  if (e.pointerType === 'mouse'){ if (keyMode && pointer){ const at = local(e); if (Math.hypot(at.x - pointer.x, at.y - pointer.y) < 6) return; } keyMode = false; touchMode = false; setPointer(e); return; }
   if (stick && e.pointerId === stick.id){ const at = local(e); stick.x = at.x; stick.y = at.y; }
 });
 ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(n => tc.addEventListener(n, e => { if (stick && e.pointerId === stick.id) stick = null; }));
@@ -832,6 +897,7 @@ $('bLow').addEventListener('click', () => {
 });
 $('bRec').addEventListener('click', () => openPanel(true));
 $('bStart').addEventListener('click', () => { if (net && net.isHost) net.start(); });
+$('autoBox').addEventListener('change', e => { if (net && net.isHost) net.setAuto(e.target.checked); });
 $('bWatch').addEventListener('click', () => { if (watchId == null) cycle(1); else stopWatching(); });
 $('wPrev').addEventListener('click', () => { setTour(false); cycle(-1); });
 $('wNext').addEventListener('click', () => { setTour(false); cycle(1); });
@@ -841,8 +907,17 @@ $('trk').addEventListener('click', () => openPanel(true));
 $('bClose').addEventListener('click', () => openPanel(false));
 $('bFold').addEventListener('click', () => { if (world.state === 'play' && me && !doFold(me)) say('Nothing to fold yet.'); });
 $('bDrop').addEventListener('click', () => { if (world.state === 'play' && me) doDrop(me); });
+document.addEventListener('keyup', e => { const k = keyOf(e); if (k) keysDown.delete(k); });
+window.addEventListener('blur', () => keysDown.clear());
 document.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target instanceof HTMLInputElement) return;   /* typing a room name */
+  const sk = keyOf(e), watchingNow = watchId != null || watchOnly;
+  if (sk && !(watchingNow && sk.startsWith('Arrow'))){
+    e.preventDefault();
+    if (watchingNow) return;
+    keysDown.add(sk); keyMode = true; touchMode = false; return;
+  }
   const onButton = e.target instanceof HTMLButtonElement;
   if (e.key === ' ' || e.key === 'f' || e.key === 'F'){
     if (e.key === ' ' && onButton && e.target.id !== 'bFold') return;
@@ -887,9 +962,10 @@ function start(){
     if (me || (watchOnly && watchId != null && focusP())){
       if (uiDirty){ uiDirty = false; renderUI(); }
       clockT += dt; if (clockT > 0.25){ clockT = 0; renderClock(); renderDev(); }
-      const d0 = DEV ? performance.now() : 0;
+      const d0 = performance.now();
       draw(now / 1000);
-      if (DEV) drawMs += (performance.now() - d0 - drawMs) * 0.05;
+      drawMs += (performance.now() - d0 - drawMs) * 0.05;
+      trackHealth(dt);
     }
     requestAnimationFrame(frame);
   })(last);
