@@ -34,7 +34,7 @@ function blur(a, GX, GY, r){
 }
 
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
-const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:8, rin:190, rim:56, door:90, channel:300, spread:60, pockets:4, rosettes:26, gap:40, slope:90, dither:1.2, outer:['island', 'chimneys', 'ice', 'ridge']};
+const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, outer:['island', 'chimneys', 'ice', 'ridge']};
 
 function generate(o){
   const p = Object.assign({}, DEFAULTS, o), {W, H, RES} = p, GX = Math.round(W / RES), GY = Math.round(H / RES), N = GX * GY;
