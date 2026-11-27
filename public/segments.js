@@ -13,7 +13,8 @@
                 circle   a circle split by the spine
                 jaws     a mouth at the tail end. Armed while it is the last structure; when something joins
                          right behind it, it fuses around that and gives it +1
-                ring     leaves the strand as a ring, cuts off the structure ahead of it, both burst into letters
+                ring     leaves the strand as a ring, cuts out the nearest damaged structure ahead of it (else the one right
+                         ahead), both burst into letters
                 helpers  leaves the strand as two helpers that travel up it once, mending damage
               A new segment can reuse any of these. A new shape needs code in rna-strand.js.
      does, tag, sci   the recipe card: what it does, how real it is, the science behind it
@@ -103,19 +104,22 @@ const LIST = [
    }},
 
   {fn:'Self-cutter', core:'UAG', body:'ring',
-   does:'One use. Leaves as a ring, cuts off the structure ahead of it, and both burst into letters you can collect again.',
+   does:'One use. Leaves as a ring, cuts out the nearest damaged structure ahead of it (or else the one right ahead), and both burst into letters you can collect again.',
    tag:'Real science', sci:'Most natural ribozymes, like the hammerhead, cut their own backbone at one exact spot.',
    likedBy:[],
    plan(c){
-     /* it cuts the last structure before it. Worth it when that is broken (damaged, or a junk fold), to recycle
-        it into letters and lose its dead weight, and there is no Repairer to mend it instead */
+     /* it cuts out the nearest damaged structure (else the last one). Worth it when something is broken (damaged, or a
+        junk fold last), to recycle it into letters and lose its dead weight, and there is no Repairer to mend it instead.
+        A damaged structure also cuts in one more hit, and everything behind it floats away: cutting it out first keeps that */
      if (c.has('Repairer')) return false;
-     const s = c.p.s, folded = s.length - s.tail.length;
+     const s = c.p.s, folded = s.length - s.tail.length, fl = s.functions;
+     const hurt = fl.filter(f => f.damaged).pop();
      const last = s.segments.filter(g => g.end < folded).pop(); if (!last) return false;
-     const len = last.end - last.start + 1, st = last.fn ? s.functions.find(f => f.start === last.start) : null;
-     const junk = !last.fn && len >= 5, broken = !!(st && st.damaged);
-     if (!junk && !broken) return false;
-     c.gain = 0.6 + 0.05 * len; c.want = 0.3 + 0.5 * c.tr.opportunism + 0.3 * c.tr.greed;
+     const junk = !last.fn && last.end - last.start + 1 >= 5;
+     if (!hurt && !junk) return false;
+     const len = hurt ? hurt.end - hurt.start + 1 : last.end - last.start + 1;
+     const behind = hurt ? fl.filter(f => f.start > hurt.start && !f.damaged).length : 0;
+     c.gain = 0.6 + 0.05 * len + 0.5 * behind; c.want = 0.3 + 0.5 * c.tr.opportunism + 0.3 * c.tr.greed;
    }}
 ];
 
