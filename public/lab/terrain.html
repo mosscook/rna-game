@@ -40,7 +40,8 @@
   <h1>Terrain lab <button type="button" id="shut">Hide</button></h1>
   <div class="body">
     <p>A continuous depth map. Reaction-diffusion (Gray-Scott) shapes each place; open water is a gentle seafloor with bottomless black areas and lanes. Seven bands, flat colours, darker as they get deeper. Your strand swims at one level: the shallower the ground under it, the slower it goes; ground that reaches the surface is a wall.</p>
-    <div class="row"><button type="button" id="bSwim" aria-pressed="false">Swim</button><button type="button" id="bNew">New map</button><button type="button" id="bGrow">Regrow</button>
+    <div class="row"><button type="button" data-mode="world" aria-pressed="true">World (test 1)</button><button type="button" data-mode="patterns" aria-pressed="false">Patterns</button></div>
+    <div class="row" style="margin-top:6px"><button type="button" id="bSwim" aria-pressed="false">Swim</button><button type="button" id="bNew">New map</button><button type="button" id="bGrow">Regrow</button>
       <button type="button" id="bGame">Game zoom</button><button type="button" id="bFit">Whole map</button></div>
     <div class="bar"><i id="prog"></i></div>
     <h2>Depth bands and speed</h2>
@@ -56,8 +57,18 @@
     </div>
     <label class="sl"><span>layer gap</span><input type="range" id="gap" min="0" max="0.1" step="0.002" value="0.05"></label>
     <label class="sl"><span>smoothing</span><input type="range" id="smooth" min="0" max="8" step="1" value="3"></label>
-    <h2>Places</h2>
-    <div id="ters"></div>
+    <div id="worldBox"><h2>World</h2>
+      <p>Zones, deep channels and the lagoon's ring mounds (old crater rims, flooded inside, worn through in doorways). Swim starts in a mound; letters are collectable.</p>
+      <label class="sl"><span>mounds</span><input type="range" data-w="mounds" min="5" max="12" step="1" value="8"></label>
+      <label class="sl"><span>mound size</span><input type="range" data-w="rin" min="130" max="280" step="10" value="190"></label>
+      <label class="sl"><span>rim</span><input type="range" data-w="rim" min="40" max="110" step="2" value="56"></label>
+      <label class="sl"><span>doorway</span><input type="range" data-w="door" min="50" max="140" step="5" value="80"></label>
+      <label class="sl"><span>lagoon</span><input type="range" data-w="lagoon" min="1200" max="2100" step="50" value="1650"></label>
+      <label class="sl"><span>channels</span><input type="range" data-w="channel" min="180" max="440" step="10" value="300"></label>
+      <label class="sl"><span>letters</span><input type="range" data-w="spread" min="0" max="160" step="10" value="60"></label>
+    </div>
+    <div id="placesBox"><h2>Places</h2>
+    <div id="ters"></div></div>
     <h2>Cost</h2>
     <div class="stat" id="stat"></div>
   </div>
@@ -66,6 +77,7 @@
 <script src="../segments.js"></script>
 <script src="../biomes.js"></script>
 <script src="../map.js"></script>
+<script src="worldgen.js"></script>
 <script>
 'use strict';
 (() => {
@@ -107,6 +119,9 @@ const PLACES = [
 const RES = 25, GX = W / RES, GY = H / RES, N = GX * GY;
 const ITER = 3200, PER_FRAME = 80;
 const show = {parallax:true, sides:false, lines:false, speed:false, play:false, old:false};
+/* world (test 1): the new generator; patterns: the earlier lab on the old layout */
+let mode = 'world', world = null, letters = [], got = 0, genMs = 0;
+const WORLD = Object.assign({}, window.WorldGen.DEFAULTS);
 let GAP = 0.05, SMOOTH = 3;
 
 /* ---------- reaction-diffusion ---------- */
@@ -199,6 +214,10 @@ function elevation(){
   }
   /* smoothing: rounds off the small bumps the pattern leaves on band edges (each step is one more 25-px blur) */
   blur(E, 1); for (let k = 0; k < SMOOTH; k++) blur(E, 1);
+  analyse();
+}
+/* everything read from the finished elevation: the fine grid, sealed water, the speed picture */
+function analyse(){
   upsample();
   /* swimmable water you cannot reach from the lagoon: sealed off by the pattern */
   const walk = n => E[n] < T[0], seen = new Uint8Array(N), L = PLACES.findIndex(p => p.id === 'lagoon');
@@ -316,6 +335,7 @@ function draw(){
   ctx.imageSmoothingEnabled = true;
   if (show.speed && speedImg) whole(speedImg, GX, GY);
   if (show.play && playImg){ ctx.imageSmoothingEnabled = false; whole(playImg, GX, GY); }
+  if (mode === 'world') drawLetters();
   if (swim) drawStrand();
 }
 function drawTiles(){
@@ -350,6 +370,7 @@ const keys = new Set(), BASE_SPEED = 230;
 function startSwim(){
   const L = PLACES.findIndex(p => p.id === 'lagoon'), c = centres[L];
   let x = c.x, y = c.y; for (let r = 0; r < 3000 && elev(x, y) >= T[2]; r += 40) x = c.x + r;
+  if (mode === 'world' && world){ x = world.spawns[0].x; y = world.spawns[0].y; letters = world.letters.map(l => ({...l})); got = 0; }
   strand = {x, y, a:0, sp:1, body:Array.from({length:22}, (_, i) => ({x:x - i * 9, y}))};
   cam = {x, y, z:gameZ()}; $('hud').hidden = false; lastT = performance.now(); requestAnimationFrame(swimTick);
 }
@@ -372,7 +393,9 @@ function swimTick(now){
   let p = strand; for (const s of strand.body){ const d = Math.hypot(s.x - p.x, s.y - p.y); if (d > 9){ s.x = p.x + (s.x - p.x) * 9 / d; s.y = p.y + (s.y - p.y) * 9 / d; } p = s; }
   cam.x += (strand.x - cam.x) * Math.min(1, dt * 6); cam.y += (strand.y - cam.y) * Math.min(1, dt * 6);
   const b = bandOf(e);
-  $('hud').textContent = `band ${b}${b === 7 ? ' (bottomless)' : b === 0 ? ' (wall)' : b <= 3 ? ' (shallow)' : ''} · speed ${Math.round(sp * 100)}%`;
+  /* collect letters the head touches (as in the game: reach 19 px) */
+  for (let k = letters.length - 1; k >= 0; k--){ const l = letters[k]; if ((l.x - strand.x) ** 2 + (l.y - strand.y) ** 2 < 19 * 19){ letters.splice(k, 1); got++; } }
+  $('hud').textContent = `band ${b}${b === 7 ? ' (bottomless)' : b === 0 ? ' (wall)' : b <= 3 ? ' (shallow)' : ''} · speed ${Math.round(sp * 100)}%` + (mode === 'world' ? ` · letters ${got}` : '');
   draw(); requestAnimationFrame(swimTick);
 }
 function drawStrand(){
@@ -413,10 +436,38 @@ function grow(){
   };
   requestAnimationFrame(tick);
 }
-function reshape(){ elevation(); renderOverview(); draw(); stats(); }
+function reshape(){ if (mode === 'world') return buildWorld(); elevation(); renderOverview(); draw(); stats(); }
+/* world mode: generate, then the same analysis and drawing as the pattern lab */
+function buildWorld(){
+  const t0 = performance.now();
+  world = window.WorldGen.generate(Object.assign({seed, W, H, RES}, WORLD));
+  genMs = performance.now() - t0;
+  E.set(world.E);
+  wts = PLACES.map(p => { const w = Float32Array.from(world.weights[p.id] || new Float32Array(N)); blur(w, 3); return w; });
+  centres = PLACES.map(p => p.id === 'lagoon' ? {x:world.centre.x, y:world.centre.y} : null);
+  letters = world.letters.map(l => ({...l})); got = 0;
+  analyse(); renderOverview(); draw(); stats();
+}
+const LCOL = {A:'#f0a35e', U:'#5ec4b8', G:'#b48cf0', C:'#f07fa6'};
+function drawLetters(){
+  const z = cam.z, x0 = cam.x - cw / 2 / z - 20, x1 = cam.x + cw / 2 / z + 20, y0 = cam.y - ch / 2 / z - 20, y1 = cam.y + ch / 2 / z + 20;
+  ctx.font = `700 ${Math.max(8, 10 * z)}px ui-monospace, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const l of letters){
+    if (l.x < x0 || l.x > x1 || l.y < y0 || l.y > y1) continue;
+    const sx = cw / 2 + (l.x - cam.x) * z, sy = ch / 2 + (l.y - cam.y) * z, rr = Math.max(1.5, (l.b === 'A' || l.b === 'G' ? 9.5 : 6.6) * z);
+    ctx.fillStyle = LCOL[l.b]; ctx.beginPath(); ctx.arc(sx, sy, rr, 0, Math.PI * 2); ctx.fill();
+    if (z > 0.5){ ctx.fillStyle = '#081210'; ctx.fillText(l.b, sx, sy + 0.5); }
+  }
+}
 function stats(){
   const tm = tileMs.length ? (tileMs.reduce((a, b) => a + b, 0) / tileMs.length).toFixed(0) + ' ms each' : 'zoom in to draw';
   const cells = new Array(8).fill(0); for (let n = 0; n < N; n++) cells[bandOf(E[n])]++;
+  if (mode === 'world' && world){
+    const lag = new Array(8).fill(0); let ln = 0; for (let n = 0; n < N; n++) if (world.zone[n] === 0){ lag[bandOf(E[n])]++; ln++; }
+    const pct = b => Math.round(lag[b] / ln * 100), byWhere = w => world.letters.filter(l => l.where === w).length;
+    $('stat').textContent = `world generated in ${genMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms; close-up tiles: ${tm}\nlagoon by band: ${lag.map((c, b) => `${b}:${pct(b)}%`).join(' ')}\n  (target: mostly 3-6, walls only on mound rims)\nmounds ${world.mounds.length}; letters: ${byWhere('mound')} in mounds, ${byWhere('spread')} spread, ${byWhere('pocket')} in pockets\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
+    return;
+  }
   $('stat').textContent = `pattern: ${GX}×${GY} cells (${RES} px), ${ITER} steps: ${rdMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms\nclose-up tiles (500 px): ${tm}\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
 }
 function buildPanel(){
@@ -443,15 +494,24 @@ document.querySelectorAll('[data-t]').forEach(b => b.addEventListener('click', (
 $('gap').addEventListener('input', e => { GAP = +e.target.value; draw(); });
 $('smooth').addEventListener('change', e => { SMOOTH = +e.target.value; reshape(); });
 $('bSwim').addEventListener('click', () => { swim = !swim; $('bSwim').setAttribute('aria-pressed', swim); $('hud').hidden = !swim; if (swim) startSwim(); else draw(); });
-$('bNew').addEventListener('click', () => { seed = (seed * 48271) % 2147483647; layout(); grow(); });
-$('bGrow').addEventListener('click', grow);
+$('bNew').addEventListener('click', () => { seed = (seed * 48271) % 2147483647; if (mode === 'world') return buildWorld(); layout(); grow(); });
+$('bGrow').addEventListener('click', () => mode === 'world' ? buildWorld() : grow());
+$('worldBox').addEventListener('change', e => { const k = e.target.dataset.w; if (!k) return; WORLD[k] = +e.target.value; buildWorld(); if (swim) startSwim(); });
+function setMode(m){
+  mode = m; document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m));
+  $('worldBox').hidden = m !== 'world'; $('placesBox').hidden = m !== 'patterns'; tileGen++;
+  if (swim) $('bSwim').click();
+  if (m === 'world') buildWorld(); else { layout(); grow(); }
+}
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 $('bFit').addEventListener('click', () => { if (swim) $('bSwim').click(); fit(); });
 $('bGame').addEventListener('click', () => { cam.z = gameZ(); draw(); });
 $('shut').addEventListener('click', () => { const s = $('panel').classList.toggle('shut'); $('shut').textContent = s ? 'Show' : 'Hide'; });
 addEventListener('resize', resize);
 const q = new URLSearchParams(location.search); if (q.get('seed')) seed = +q.get('seed') || 7;
-buildPanel(); resize(); layout(); grow();
-window.__lab = {get stats(){ return {rdMs, renderMs, unreach, iter, tileMs:tileMs.slice()}; }, show, draw, PLACES, grow, get strand(){ return strand; },
+if (q.get('mode') === 'patterns') mode = 'patterns';
+buildPanel(); resize(); setMode(mode);
+window.__lab = {get stats(){ return {rdMs, renderMs, unreach, iter, tileMs:tileMs.slice(), genMs, got, letters:letters.length}; }, get world(){ return world; }, setMode, show, draw, PLACES, grow, get strand(){ return strand; },
   look(id, z){ const c = centres[PLACES.findIndex(p => p.id === id)]; cam = {x:c.x, y:c.y, z}; draw(); }, at(x, y, z){ cam = {x, y, z}; draw(); }, E:(x, y) => elev(x, y)};
 })();
 </script>
