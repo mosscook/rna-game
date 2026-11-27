@@ -51,7 +51,18 @@ To try it, the host ticks **New map (test)** in the lobby, or opens the room wit
 | Big volcanoes | hot springs in the caldera, with a geyser |
 | Bigger streams | currents toward deep water |
 
-The ◯ button in the bottom bar (or the O key, or `?look=outline`) switches the world to an outline look: black ground, with each depth band's edge drawn as a thin line in its place's colour, and walls a very dark tint. The strands stand out more against it. The choice is remembered in that browser.
+The world has two looks, **Filled** and **Lines**, switched with the ◯ button in the bottom bar, the O key, or `?look=lines` / `?look=filled`. Lines starts as thin coloured band edges over a faint fill, so the strands stand out while depth (and so speed) stays readable. Both looks can be adjusted in the dev panel (`?dev`, **Map look**), and each browser remembers its own:
+
+| Setting | What it does |
+|---|---|
+| Fill | How strongly each band is filled with its place's colour (0: the deep colour everywhere) |
+| Depth steps | How much darker each deeper band gets |
+| Outline, Line width | The line where each band starts, and its width |
+| Line fade | How much the lines dim with depth |
+| Wall tint | The least brightness walls keep, so they read as solid |
+| Colours | The deep colour and each place's colour |
+
+Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default.
 
 The server and every browser build the same map from the seed: the generator uses only basic arithmetic. The room also sends a fingerprint of the map, and a browser that grew a different one says so in its console. `node test/world.mjs` plays a round on a world. `node test/room-world.mjs` checks a world room against `wrangler dev`. The reaction-diffusion textures are off in the game for now: they take 2-3 s to grow.
 
@@ -134,7 +145,7 @@ Moving hazards (the tide, geysers, shifting ice, meteorites, UV flashes, rafts) 
 
 ## Dev mode
 
-Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). A panel shows the frame rate and how long each step and frame take, the counts of strands, letters and fragments, the seed and tide, and the ground type, zone, speed and letter richness under the pointer. **Ground map** (or B) tints every cell by its ground type, with a key.
+Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). The panel's sections fold open and closed (remembered per browser): **Map look**, **Microscope effects**, **Test tools** and **Reference**. At the top it shows the frame rate and how long each step and frame take, the counts of strands, letters and fragments, the seed and tide, and the ground type, zone, speed and letter richness under the pointer. **Ground map** (or B) tints every cell by its ground type, with a key.
 
 In single-player the panel also has test buttons: add any segment to your strand; make a fragment, meteorite or UV flash where the pointer is; damage your strand; run time 4× faster; skip a minute; end the round; clear the bots. In rooms it only shows information, so nobody can cheat in a shared game.
 

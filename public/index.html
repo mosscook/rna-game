@@ -213,6 +213,17 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .dev .btn{height:24px;padding:0 8px;font:700 11px var(--font-body)}
 .dev .legend{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
 .dev .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;background:var(--c);vertical-align:-1px}
+.dev{width:320px}
+.dev details.sec{border-top:1px solid var(--line);padding-top:6px}
+.dev details.sec > summary{cursor:pointer;font:800 11px var(--font-body);text-transform:uppercase;letter-spacing:.07em;color:var(--ink);list-style-position:inside}
+.dev details.sec .body{display:grid;gap:6px;margin-top:6px}
+.dev .lk{display:grid;grid-template-columns:84px minmax(90px,1fr) 34px;align-items:center;gap:6px;font-size:11px;width:100%;box-sizing:border-box}
+.dev .lk input{width:100%;margin:0}
+.dev .lk output{font:11px var(--font-mono);text-align:right;color:var(--ink)}
+.dev .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11px}
+.dev .cols label{display:flex;align-items:center;gap:6px}
+.dev .cols input{width:30px;height:20px;padding:0;border:1px solid var(--line);border-radius:4px;background:none}
+.dev .note{font-size:11px;color:var(--muted)}
 .dev h3{margin:2px 0 0;font:700 10px var(--font-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 /* the microscope look (lens.js): layers between the strands and the top canvas */
 .lens,.edgeblur{position:absolute;inset:0;pointer-events:none;overflow:hidden}
@@ -478,22 +489,29 @@ let healthFrames = 0, healthSecs = 0;
 
 /* ---------- ?dev: frame and step times, what is under the pointer, a ground-type map, and (single-player) test buttons ---------- */
 const DEV = new URLSearchParams(location.search).has('dev');
-let devBiomes = false, devFast = 1, stepMs = 0, drawMs = 0;
+let devBiomes = false, devFast = 1, stepMs = 0, drawMs = 0, devOpen = {};
+try { devOpen = JSON.parse(localStorage.getItem('soup2.devOpen') || '{}') || {}; } catch(e){}
 const BIO = window.SoupBiomes;
 const devCol = i => `hsl(${(i * 137.5) % 360} 75% 55%)`;
 function devSetup(){
   if (!DEV) return;
   const solo = !net, seg = SEG.LIST.map(s => `<button class="btn" type="button" data-add="${s.fn}">+${s.fn}</button>`).join('');
+  /* sections fold away; which ones are open is remembered */
+  const sec = (id, title, body, open) => `<details class="sec" data-sec="${id}"${(devOpen[id] ?? open) ? ' open' : ''}><summary>${title}</summary><div class="body">${body}</div></details>`;
+  const lucky = SEG.LIST.map(s => { const out = []; for (let i = 0; i < s.core.length; i++) for (const b of 'AUGC') if (b !== s.core[i] && RS.mutationEffect(s.fn, i, b) > 1) out.push(`${s.core[i]}${i + 3}${b}`); return `${s.fn}: ${out.join(' ') || 'none'}`; }).join('\n');
   $('dev').innerHTML = `<pre id="devStats"></pre>`
-    + `<div class="row"><button class="btn" type="button" id="dBio" aria-pressed="false">Ground map <kbd>B</kbd></button></div>`
-    + `<h3>Microscope look</h3><div class="row">${LENS.ALL.map(k => `<button class="btn" type="button" data-lens="${k}" aria-pressed="${LENS.has(k)}">${k}</button>`).join('')}</div>`
-    + (solo ? `<h3>Add to your strand</h3><div class="row">${seg}</div>`
+    + sec('look', 'Map look', lookPanel(), true)
+    + sec('lens', 'Microscope effects', `<div class="row">${LENS.ALL.map(k => `<button class="btn" type="button" data-lens="${k}" aria-pressed="${LENS.has(k)}">${k}</button>`).join('')}</div>`, false)
+    + (solo ? sec('test', 'Test tools', `<h3>Add to your strand</h3><div class="row">${seg}</div>`
       + `<h3>Make it happen here</h3><div class="row"><button class="btn" type="button" data-do="frag">Fragment</button><button class="btn" type="button" data-do="meteor">Meteorite</button>`
       + `<button class="btn" type="button" data-do="uv">UV flash</button><button class="btn" type="button" data-do="damage">Damage me</button></div>`
       + `<h3>Round</h3><div class="row"><button class="btn" type="button" id="dFast" aria-pressed="false">Speed ×4</button><button class="btn" type="button" data-do="minute">−1 min</button>`
-      + `<button class="btn" type="button" data-do="end">End round</button><button class="btn" type="button" id="dBots" aria-pressed="false">No bots</button></div>` : '')
-    + `<h3>Lucky mistakes (answer key)</h3><pre>${SEG.LIST.map(s => { const out = []; for (let i = 0; i < s.core.length; i++) for (const b of 'AUGC') if (b !== s.core[i] && RS.mutationEffect(s.fn, i, b) > 1) out.push(`${s.core[i]}${i + 3}${b}`); return `${s.fn}: ${out.join(' ') || 'none'}`; }).join('\n')}</pre>`
-    + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`;
+      + `<button class="btn" type="button" data-do="end">End round</button><button class="btn" type="button" id="dBots" aria-pressed="false">No bots</button></div>`, false) : '')
+    + sec('ref', 'Reference', `<div class="row"><button class="btn" type="button" id="dBio" aria-pressed="false">Ground map <kbd>B</kbd></button></div>`
+      + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`
+      + `<h3>Lucky mistakes (answer key)</h3><pre>${lucky}</pre>`, false);
+  $('dev').addEventListener('toggle', e => { const d = e.target.closest('[data-sec]'); if (!d) return; devOpen[d.dataset.sec] = d.open; try { localStorage.setItem('soup2.devOpen', JSON.stringify(devOpen)); } catch(err){} }, true);
+  wireLookPanel();
   $('dev').hidden = false;
   $('dBio').addEventListener('click', toggleBiomes);
   $('dev').addEventListener('click', e => {
@@ -1172,13 +1190,67 @@ $('bLow').addEventListener('click', () => {
   $('bLow').setAttribute('aria-pressed', low);
   try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
 });
-/* the generated world's look: filled bands, or black ground with thin coloured edges (remembered; ?look=outline) */
-function setLook(outline, keep){
-  MAP.setWorldStyle(outline ? 'outline' : 'fill'); $('bLook').setAttribute('aria-pressed', !!outline);
-  if (keep) try { localStorage.setItem('soup2.look', outline ? 'outline' : ''); } catch(e){}
+/* ---------- the generated world's look ----------
+   Two looks, Filled and Lines, each fully adjustable in ?dev (Map look) and remembered in this browser. The ◯ button
+   or O switches between them; ?look=lines or ?look=filled picks one. Presets load starting values into the look being
+   edited. Copy settings puts the current look on the clipboard, to make it everyone's default. */
+const LOOK_PRESETS = {
+  filled:{fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0},
+  'lines + depth':{fill:0.3, depth:1.1, line:0.9, lineW:1, lineFade:0.35, wall:0.22},
+  lines:{fill:0, depth:1, line:1, lineW:1, lineFade:0.5, wall:0.16},
+  'dim fill':{fill:0.5, depth:1.2, line:0, lineW:1, lineFade:0.5, wall:0.3}};
+const LOOK_SLOTS = {filled:'Filled', lines:'Lines'};
+const PLACE_IDS = ['lagoon', 'flats', 'island', 'chimneys', 'ice', 'ridge', 'water'];
+const PLACE_LABEL = {lagoon:'lagoon', flats:'highlands', island:'island', chimneys:'chimneys', ice:'ice', ridge:'ridge', water:'channels', deep:'deep'};
+const freshLooks = () => ({slot:'filled', filled:Object.assign({colours:{}}, LOOK_PRESETS.filled, {deep:[3, 5, 7]}), lines:Object.assign({colours:{}}, LOOK_PRESETS['lines + depth'], {deep:[3, 5, 7]})});
+let looks = freshLooks();
+try {
+  const v = JSON.parse(localStorage.getItem('soup2.looks') || 'null');
+  if (v && v.filled && v.lines) looks = Object.assign(freshLooks(), v);
+  else if (localStorage.getItem('soup2.look') === 'outline') looks.slot = 'lines';
+} catch(e){}
+{ const q = new URLSearchParams(location.search).get('look'); if (q) looks.slot = /^(lines|outline)$/.test(q) ? 'lines' : 'filled'; }
+const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+const unhex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+function applyLook(){
+  MAP.setWorldLook(looks[looks.slot]); $('bLook').setAttribute('aria-pressed', looks.slot === 'lines');
+  try { localStorage.setItem('soup2.looks', JSON.stringify(looks)); } catch(e){}
 }
-const toggleLook = () => { if (MAP.world) setLook(MAP.worldStyle !== 'outline', true); };
+const toggleLook = () => { if (!MAP.world) return; looks.slot = looks.slot === 'filled' ? 'lines' : 'filled'; applyLook(); syncLookPanel(); };
 $('bLook').addEventListener('click', toggleLook);
+const LOOK_SLIDERS = [['fill', 'Fill', 0, 1, 0.05], ['depth', 'Depth steps', 0, 1.5, 0.05], ['line', 'Outline', 0, 1, 0.05], ['lineW', 'Line width', 0.5, 3, 0.25], ['lineFade', 'Line fade', 0, 1, 0.05], ['wall', 'Wall tint', 0, 0.6, 0.02]];
+function lookPanel(){
+  return `<p class="note" id="lkNote" hidden>Only the generated world uses these: add <code>?map=world</code>.</p>`
+    + `<div class="row">${Object.entries(LOOK_SLOTS).map(([k, t]) => `<button class="btn" type="button" data-slot="${k}">${t}</button>`).join('')}<span class="note">editing this look · ◯ / O switches</span></div>`
+    + `<div class="row">${Object.keys(LOOK_PRESETS).map(k => `<button class="btn" type="button" data-preset="${k}">${k}</button>`).join('')}</div>`
+    + LOOK_SLIDERS.map(([k, t, a, b, st]) => `<label class="lk"><span>${t}</span><input type="range" data-look="${k}" min="${a}" max="${b}" step="${st}"><output data-out="${k}"></output></label>`).join('')
+    + `<h3>Colours</h3><div class="cols">${['deep'].concat(PLACE_IDS).map(id => `<label><input type="color" data-col="${id}">${PLACE_LABEL[id]}</label>`).join('')}</div>`
+    + `<div class="row"><button class="btn" type="button" id="lkCopy">Copy settings</button><button class="btn" type="button" id="lkReset">Reset this look</button></div>`;
+}
+function syncLookPanel(){
+  if (!DEV || !$('lkNote')) return;
+  const L = looks[looks.slot], base = window.WorldGen.PLACE_COL;
+  $('lkNote').hidden = !!MAP.world;
+  for (const b of $('dev').querySelectorAll('[data-slot]')) b.setAttribute('aria-pressed', b.dataset.slot === looks.slot);
+  for (const i of $('dev').querySelectorAll('[data-look]')){ i.value = L[i.dataset.look]; $('dev').querySelector(`[data-out="${i.dataset.look}"]`).textContent = (+L[i.dataset.look]).toFixed(2); }
+  for (const i of $('dev').querySelectorAll('[data-col]')){ const id = i.dataset.col; i.value = hex(id === 'deep' ? L.deep : L.colours[id] || base[id] || base.water); }
+}
+function wireLookPanel(){
+  const d = $('dev');
+  d.addEventListener('input', e => {
+    const L = looks[looks.slot], t = e.target;
+    if (t.dataset.look){ L[t.dataset.look] = +t.value; d.querySelector(`[data-out="${t.dataset.look}"]`).textContent = (+t.value).toFixed(2); applyLook(); }
+    else if (t.dataset.col){ if (t.dataset.col === 'deep') L.deep = unhex(t.value); else L.colours = Object.assign({}, L.colours, {[t.dataset.col]:unhex(t.value)}); applyLook(); }
+  });
+  d.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.slot){ looks.slot = b.dataset.slot; applyLook(); syncLookPanel(); }
+    else if (b.dataset.preset){ Object.assign(looks[looks.slot], LOOK_PRESETS[b.dataset.preset]); applyLook(); syncLookPanel(); }
+    else if (b.id === 'lkReset'){ looks[looks.slot] = freshLooks()[looks.slot]; applyLook(); syncLookPanel(); }
+    else if (b.id === 'lkCopy'){ const txt = JSON.stringify({[looks.slot]:looks[looks.slot]}); navigator.clipboard && navigator.clipboard.writeText(txt).then(() => say('Look settings copied.'), () => say(txt)); }
+  });
+  syncLookPanel();
+}
 $('bRec').addEventListener('click', () => openPanel(true));
 $('bStart').addEventListener('click', () => { if (net && net.isHost) net.start(); });
 $('autoBox').addEventListener('change', e => { if (net && net.isHost) net.setAuto(e.target.checked); });
@@ -1229,7 +1301,7 @@ function start(){
   RS.S.glyphSize = 4; RS.S.gooSize = 30; RS.restyle();
   readTokens(); buildList(); devSetup();
   try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); } } catch(e){}
-  { const q = new URLSearchParams(location.search).get('look'); let v = null; try { v = localStorage.getItem('soup2.look'); } catch(e){} if (q) setLook(q === 'outline', true); else if (v) setLook(v === 'outline'); }
+  applyLook();
   if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
   reset(); resize();
   if (LEARN_ROOM != null && !net) startLesson();
@@ -1238,7 +1310,7 @@ function start(){
   let last = performance.now(), fpsT = 0, fpsN = 0, acc = 0;
   (function frame(now){
     const dt = Math.min(0.1, (now - last) / 1000); last = now; W = MAP.W; H = MAP.H;
-    if ($('bLook').hidden === !!MAP.world) $('bLook').hidden = !MAP.world;   /* only the generated world has the outline look */
+    if ($('bLook').hidden === !!MAP.world){ $('bLook').hidden = !MAP.world; syncLookPanel(); }   /* only the generated world has these looks */
     fpsT += dt; fpsN++; if (fpsT >= 1){ window.__fps = fpsN / fpsT; fpsT = 0; fpsN = 0; }
     /* fixed 1/60 s steps, as in the specimen, so swimming feels the same at any frame rate */
     acc += dt; let n = 0;

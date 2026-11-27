@@ -114,10 +114,23 @@ function generate(s, opt){
    shallows, UV on the island's beaches, brine in the ice. Chimney pits are black smokers; big volcanoes' calderas
    hold hot springs with a geyser; the larger streams are currents. */
 let world = null, surf = null, worldHash = 0;
-/* how a generated world is drawn: 'fill' (each band filled with its place's colour) or 'outline' (black, with each
-   band's edge as a thin line in that colour, so the strands stand out more than the ground) */
-let worldStyle = 'fill';
-function setWorldStyle(v){ v = v === 'outline' ? 'outline' : 'fill'; if (v === worldStyle) return; worldStyle = v; chunks.clear(); }
+/* how a generated world is drawn (the page's look settings, editable in ?dev):
+   fill     0..1   how strongly each band is filled with its place's colour (0: the deep colour everywhere)
+   depth    0..1.5 how much darker each deeper band gets (1: the lab's steps; 0: every band equally bright)
+   line     0..1   the outline drawn where each band starts
+   lineW    px     its width, at normal zoom
+   lineFade 0..1   how much the outlines dim with depth (0: every line equally bright)
+   wall     0..1   the least brightness walls keep, so they read as solid even with no fill
+   deep     [r,g,b] the colour of the black depths, and of the ground where fill is 0
+   colours  {place: [r,g,b]} each place's colour (missing ones use worldgen's) */
+const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, deep:[3, 5, 7], colours:{}};
+let look = Object.assign({}, LOOK_BASE);
+function setWorldLook(o){
+  const recol = o && o.colours && JSON.stringify(o.colours) !== JSON.stringify(look.colours);
+  look = Object.assign({}, LOOK_BASE, o || {});
+  if (recol && surf){ surf.recolour(look.colours); mini.dirty = true; }
+  chunks.clear();
+}
 const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
 function generateWorld(s, o){
   const WG = window.WorldGen, size = Math.max(0.4, Math.min(1, o.size || 0.7));
@@ -126,7 +139,7 @@ function generateWorld(s, o){
   melted = new Set(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3; lobby = false; lobbyClumps = []; raftRoute = [];
   world = WG.generate(Object.assign({}, o.settings || {}, {seed:s, W, H, RES:25, scale:size}));
   if (o.texture){ const tx = WG.texture(world, {amp:(o.settings && o.settings.texture) ?? 1, aniso:(o.settings && o.settings.align) ?? 1}); tx.step(o.textureIters || 3000); tx.apply(); }
-  surf = WG.surface(world);
+  surf = WG.surface(world); if (Object.keys(look.colours).length) surf.recolour(look.colours);
   /* a fingerprint of the depth field: the room sends its own, so a browser can tell if it grew a different map */
   worldHash = 0; for (let n = 0; n < world.E.length; n++) worldHash = (worldHash + Math.round(world.E[n] * 1000) * (n % 997 + 1)) % 2147483647;
   const WALL = WG.WALL, G = world.GX, R = world.RES, idAt = (x, y) => world.PIDS[world.pid[Math.min(world.GY - 1, Math.floor(y / R)) * G + Math.min(G - 1, Math.floor(x / R))]];
@@ -344,36 +357,38 @@ function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode
 /* a generated world is drawn from its depth field: each pixel takes its place's colour at its band's brightness, black
    in the depths, with a soft one-pixel edge between bands (the lab's look, without the raised layers) */
 function renderWorldChunk(kx, ky){
-  const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT;
-  /* drawn a little under screen resolution: the bands are smooth curves, so this costs little in look and a lot less to fill */
-  const lines = worldStyle === 'outline', R = softPx && softMode === 'low' ? 0.34 : lines ? CR : 0.6, S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
+  const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT, Lk = look;
+  /* drawn a little under screen resolution when filled (the bands are smooth curves); at full resolution with outlines */
+  const R = softPx && softMode === 'low' ? 0.34 : Lk.line > 0 ? CR : 0.6, S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
   const c = document.createElement('canvas'); c.width = c.height = n;
   const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0];
   const x0 = kx * S - pad, y0 = ky * S - pad, m = n + 1, ev = new Float32Array(m * m);
   for (let py = 0; py < m; py++) for (let px = 0; px < m; px++) ev[py * m + px] = surf.elev(x0 + (px + 0.5) * step, y0 + (py + 0.5) * step);
+  const [d0, d1, d2] = Lk.deep, fill = Lk.fill, sp = Lk.depth, lineA = Lk.line, lw = Math.max(0.3, Lk.lineW) * 0.8, fade = Lk.lineFade, wallB = Lk.wall;
+  const bright = BR.map(v => Math.max(0, 1 - (1 - v) * sp)), lineM = BR.map(v => 1 - fade * (1 - v));
   for (let py = 0; py < n; py++) for (let px = 0; px < n; px++){
     const x = x0 + (px + 0.5) * step, y = y0 + (py + 0.5) * step, o = (py * n + px) * 4;
-    if (x < 0 || y < 0 || x >= W || y >= H){ d[o] = 3; d[o + 1] = 5; d[o + 2] = 7; d[o + 3] = 255; continue; }
+    if (x < 0 || y < 0 || x >= W || y >= H){ d[o] = d0; d[o + 1] = d1; d[o + 2] = d2; d[o + 3] = 255; continue; }
     const i = py * m + px, e = ev[i], ex = ev[i + 1] - e, ey = ev[i + m] - e, grad = Math.sqrt(ex * ex + ey * ey) + 1e-6;
-    let r = 3, gg = 5, b = 7;
-    if (lines){
-      /* outline look: black ground; walls a very dark tint of their place so they still read as solid; a line about a
-         pixel wide where each band starts, brighter for shallower bands */
-      if (e >= T[6] - 2 * grad){
-        surf.colour(x, y, col);
-        const wall = Math.max(0, Math.min(1, (e - T[0]) / grad + 0.5));
-        r += (col[0] * 0.16 - r) * wall; gg += (col[1] * 0.16 - gg) * wall; b += (col[2] * 0.16 - b) * wall;
-        for (let k = 6; k >= 0; k--){
-          const a = 1 - Math.abs(e - T[k]) / (grad * 0.8); if (a <= 0) continue;
-          const m = 0.5 + 0.5 * BR[k];
-          r += (col[0] * m - r) * a; gg += (col[1] * m - gg) * a; b += (col[2] * m - b) * a;
-        }
-      }
-    } else if (e >= T[6] - grad){
+    let r = d0, gg = d1, b = d2;
+    if (e >= T[6] - (lw + 1) * grad){
       surf.colour(x, y, col);
-      for (let k = 6; k >= 0; k--){
+      /* fill: each band from the deep up, its colour at its brightness, blended toward the deep colour by fill */
+      if (fill > 0) for (let k = 6; k >= 0; k--){
         const a = (e - T[k]) / grad + 0.5; if (a <= 0) break;
-        const t = a > 1 ? 1 : a; r += (col[0] * BR[k] - r) * t; gg += (col[1] * BR[k] - gg) * t; b += (col[2] * BR[k] - b) * t;
+        const t = a > 1 ? 1 : a;
+        r += (d0 + (col[0] * bright[k] - d0) * fill - r) * t; gg += (d1 + (col[1] * bright[k] - d1) * fill - gg) * t; b += (d2 + (col[2] * bright[k] - d2) * fill - b) * t;
+      }
+      /* walls keep at least a dim tint of their place, so they still read as solid */
+      if (wallB > 0 && wallB > fill * bright[0]){
+        const a = (e - T[0]) / grad + 0.5;
+        if (a > 0){ const t = a > 1 ? 1 : a; r += (d0 + (col[0] * wallB - d0) - r) * t; gg += (d1 + (col[1] * wallB - d1) - gg) * t; b += (d2 + (col[2] * wallB - d2) - b) * t; }
+      }
+      /* outlines where each band starts */
+      if (lineA > 0) for (let k = 6; k >= 0; k--){
+        const a = (1 - Math.abs(e - T[k]) / (grad * lw)) * lineA; if (a <= 0) continue;
+        const mm = lineM[k], t = a > 1 ? 1 : a;
+        r += (col[0] * mm - r) * t; gg += (col[1] * mm - gg) * t; b += (col[2] * mm - b) * t;
       }
     }
     d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = 255;
@@ -634,7 +649,7 @@ function randomOf(types){
   return null;
 }
 
-return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, get worldStyle(){ return worldStyle; }, setWorldStyle, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
+return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, get worldLook(){ return JSON.parse(JSON.stringify(look)); }, setWorldLook, LOOK_BASE, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
