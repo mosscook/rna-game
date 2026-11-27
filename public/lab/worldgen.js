@@ -34,7 +34,7 @@ function blur(a, GX, GY, r){
 }
 
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
-const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:8, rin:190, rim:56, door:80, channel:300, spread:60, pockets:4, outer:['island', 'chimneys', 'ice', 'ridge']};
+const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:8, rin:190, rim:56, door:90, channel:300, spread:60, pockets:4, rosettes:26, gap:40, slope:90, dither:1.2, outer:['island', 'chimneys', 'ice', 'ridge']};
 
 function generate(o){
   const p = Object.assign({}, DEFAULTS, o), {W, H, RES} = p, GX = Math.round(W / RES), GY = Math.round(H / RES), N = GX * GY;
@@ -65,30 +65,84 @@ function generate(o){
   const segs = []; for (const L of lines) for (let k = 0; k + 1 < L.length; k++) segs.push([L[k], L[k + 1]]);
   const half = p.channel / 2;
 
+  /* ---- every point belongs to exactly one place: discrete zones ----
+     Each place has a smooth weight (zones by distance from the lagoon, outer places by direction). Near a border the
+     weights are close, so a blobby noise per place decides: the two zones interleave in blob-shaped islands ("dither"
+     in discrete blobs) instead of blending. Channels are their own place. */
+  const PIDS = ['lagoon', 'flats'].concat(p.outer).concat(['water']), pid = new Uint8Array(N), L0 = new Float32Array(N), L1 = new Float32Array(N), CH = new Float32Array(N), BK = new Float32Array(N);
+  const blobG = PIDS.map(() => noiseGrid(r));
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
     const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, d = dn(x, y);
-    const n1 = fbm(g[2], x / 1400, y / 1400), n2 = fbm(g[3], x / 600, y / 600);
-    const wL = 1 - smooth(0.9, 1.1, d), wO = smooth(1.62, 1.9, d), wM = Math.max(0, 1 - wL - wO);
-    /* rolling middle depths in the lagoon (bands 3-6), more relief in the middle ring, raised and rough outside */
-    const eL = 0.39 + 0.34 * n1 + 0.1 * n2, eM = 0.47 + 0.32 * n1 + 0.15 * n2;
+    const wL = 1 - smooth(0.74, 1.26, d), wO = smooth(1.45, 2.05, d), wM = Math.max(0, 1 - wL - wO);
     let ux = (x - cx) / RX, uy = (y - cy) / RY; const ul = Math.sqrt(ux * ux + uy * uy) || 1; ux /= ul; uy /= ul;
-    let best = 0, bd = -2; for (let k = 0; k < K; k++){ const dd = ux * sites[k].ux + uy * sites[k].uy; if (dd > bd){ bd = dd; best = k; } }
-    const OUTER_BASE = {island:0.62, chimneys:0.6, ice:0.62, ridge:0.55}, eO = (OUTER_BASE[sites[best].id] || 0.6) + 0.28 * n1 + 0.15 * n2;
-    let e = wL * eL + wM * eM + wO * eO;
-    /* channels: carved to black, with a slight bank either side */
+    let bd = -2; const dots = sites.map(s0 => { const v = ux * s0.ux + uy * s0.uy; if (v > bd) bd = v; return v; });
+    let st = 0; const sw = dots.map(v => { const q = Math.max(0, 1 - (bd - v) / 0.45); st += q; return q; });
+    const score = [wL, wM].concat(sw.map(q => wO * q / st));
+    let best = 0, bs = -9;
+    for (let k = 0; k < score.length; k++){
+      const blob = fbm(blobG[k], x / 520, y / 520) * 0.5 + fbm(blobG[k], x / 230 + 40, y / 230) * 0.5;
+      const v = score[k] + p.dither * blob; if (v > bs){ bs = v; best = k; }
+    }
     let cd = Infinity; for (const [A, B] of segs){ const v = segDist(x, y, A, B); if (v < cd) cd = v; }
-    const c = 1 - smooth(half * 0.55, half, cd), bank = smooth(half * 0.9, half * 1.15, cd) * (1 - smooth(half * 1.15, half * 1.6, cd));
-    e = e * (1 - c) + 0.03 * c + 0.05 * bank * (1 - c);
-    E[n] = e; zone[n] = d < 1 ? 0 : d < 1.75 ? 1 : 2;
-    w.lagoon[n] = wL * (1 - c); w.flats[n] = wM * (1 - c); w[sites[best].id][n] = wO * (1 - c); w.water[n] = c;
+    CH[n] = 1 - smooth(half * 0.55, half, cd); BK[n] = smooth(half * 0.9, half * 1.15, cd) * (1 - smooth(half * 1.15, half * 1.6, cd));
+    pid[n] = CH[n] > 0.5 ? PIDS.length - 1 : best;
+    L0[n] = fbm(g[2], x / 1400, y / 1400); L1[n] = fbm(g[3], x / 600, y / 600);
+  }
+  /* distance to the nearest border between two land places (two-pass chamfer, in px); channels don't count */
+  const WATER = PIDS.length - 1, BIG = 1e9, dist = new Float32Array(N).fill(BIG);
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
+    const n = j * GX + i, a = pid[n]; if (a === WATER) continue;
+    const nb = [i > 0 ? n - 1 : -1, i < GX - 1 ? n + 1 : -1, j > 0 ? n - GX : -1, j < GY - 1 ? n + GX : -1];
+    if (nb.some(m => m >= 0 && pid[m] !== a && pid[m] !== WATER)) dist[n] = RES / 2;
+  }
+  const D1 = RES, D2 = RES * 1.4142135623730951;
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const n = j * GX + i; let v = dist[n];
+    if (i > 0) v = Math.min(v, dist[n - 1] + D1); if (j > 0){ v = Math.min(v, dist[n - GX] + D1); if (i > 0) v = Math.min(v, dist[n - GX - 1] + D2); if (i < GX - 1) v = Math.min(v, dist[n - GX + 1] + D2); } dist[n] = v; }
+  for (let j = GY - 1; j >= 0; j--) for (let i = GX - 1; i >= 0; i--){ const n = j * GX + i; let v = dist[n];
+    if (i < GX - 1) v = Math.min(v, dist[n + 1] + D1); if (j < GY - 1){ v = Math.min(v, dist[n + GX] + D1); if (i < GX - 1) v = Math.min(v, dist[n + GX + 1] + D2); if (i > 0) v = Math.min(v, dist[n + GX - 1] + D2); } dist[n] = v; }
+
+  /* ---- elevation, each place by its own rule; every border drops to black, then rises gently ---- */
+  const OUTER_BASE = {island:0.62, chimneys:0.6, ice:0.62, ridge:0.55};
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
+    const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, id = PIDS[pid[n]], n1 = L0[n], n2 = L1[n];
+    let e = id === 'lagoon' ? 0.39 + 0.34 * n1 + 0.1 * n2 : id === 'flats' ? 0.47 + 0.32 * n1 + 0.15 * n2 : id === 'water' ? 0.03 : (OUTER_BASE[id] || 0.6) + 0.28 * n1 + 0.15 * n2;
+    if (id !== 'water'){
+      const gapHalf = p.gap * (0.6 + 0.8 * (0.5 + 0.5 * fbm(g[5], x / 500, y / 500)));
+      e *= smooth(gapHalf, gapHalf + p.slope, dist[n]);
+      e = e * (1 - CH[n]) + 0.03 * CH[n] + 0.05 * BK[n] * (1 - CH[n]);
+    }
+    E[n] = e; zone[n] = id === 'lagoon' ? 0 : id === 'flats' ? 1 : id === 'water' ? 3 : 2;
+    w[id][n] = 1;
   }
   blur(E, GX, GY, 1);
 
-  /* ---- player scale: ring mounds in the lagoon, old crater rims flooded inside, worn through in 2-3 doorways ---- */
+  /* ---- player scale: rings. Lumpy, warped, of uneven thickness, so they read as leopard-print rosettes rather than
+     circles. Where a rim thins it also drops: low saddles you can cross slowly. Mounds force 2-3 such doorways and
+     reach the surface elsewhere; the smaller rosettes are low ridges (slow, never walls) that break up on their own */
+  function stampRing(m){
+    const reach = (m.rin + m.t) * 1.45 + m.slopeOut + m.warp, i0 = Math.max(0, Math.floor((m.x - reach) / RES)), i1 = Math.min(GX - 1, Math.floor((m.x + reach) / RES));
+    const j0 = Math.max(0, Math.floor((m.y - reach) / RES)), j1 = Math.min(GY - 1, Math.floor((m.y + reach) / RES));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++){
+      const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES;
+      if (zone[n] !== 0) continue;
+      const wx = x - m.x + m.warp * fbm(g[5], x / 170 + m.k * 3.1, y / 170), wy = y - m.y + m.warp * fbm(g[5], x / 170 + 9.7, y / 170 + m.k * 1.3);
+      const rr = Math.sqrt(wx * wx + wy * wy); if (rr > reach) continue;
+      const ux = rr > 0 ? wx / rr : 1, uy = rr > 0 ? wy / rr : 0;
+      const rin = m.rin * (1 + 0.22 * fbm(g[4], ux * 1.2 + m.k * 7.1, uy * 1.2));
+      let thick = m.t * (0.35 + 1.2 * Math.max(0, Math.min(1, 0.5 + 1.5 * fbm(g[1], ux * 1.6 + m.k * 3.3, uy * 1.6 + 5))));
+      for (const dv of m.doors){ const ex = ux - dv.x, ey = uy - dv.y, arc = Math.sqrt(ex * ex + ey * ey) * (rin + m.t / 2); thick *= 1 - 0.85 * (1 - smooth(m.door * 0.35, m.door * 1.2, arc)); }
+      const s0 = rr - rin, rim = smooth(-m.slopeIn, 0, s0) * (1 - smooth(thick, thick + m.slopeOut, s0));
+      const top = m.floor + (m.top - m.floor) * smooth(0.3 * m.t, 0.8 * m.t, thick);
+      let e = E[n];
+      const bowl = 1 - smooth(-m.slopeIn * 1.6, -m.slopeIn * 0.4, s0);
+      e = e + (m.inside(e) - e) * bowl;
+      E[n] = e + (top - e) * rim;
+    }
+  }
   const mounds = [], letters = [], spawns = [], BASES = ['A', 'U', 'G', 'C'];
   for (let k = 0; k < p.mounds; k++){
-    const a = a0 + TAU * k / p.mounds + (r() - 0.5) * 0.3, pos = at(a, 0.58 * (1 + (r() - 0.5) * 0.12));
-    mounds.push({x:pos.x, y:pos.y, a, rin:p.rin * (0.9 + r() * 0.2), t:p.rim, doors:[], k});
+    const a = a0 + TAU * k / p.mounds + (r() - 0.5) * 0.3, pos = at(a, 0.56 * (1 + (r() - 0.5) * 0.12)), rin = p.rin * (0.85 + r() * 0.3);
+    mounds.push({x:pos.x, y:pos.y, a, rin, t:p.rim, doors:[], k, door:p.door, warp:rin * 0.28, slopeIn:80, slopeOut:110, top:0.96, floor:0.56, inside:() => 0.08});
   }
   const unit = (x, y) => { const l = Math.sqrt(x * x + y * y) || 1; return {x:x / l, y:y / l}; };
   const turn = (u, th) => { const c = dcos(th), s = dsin(th); return {x:u.x * c - u.y * s, y:u.x * s + u.y * c}; };
@@ -98,30 +152,23 @@ function generate(o){
     m.doors.push(unit(nb.x - m.x, nb.y - m.y));
     if (r() < 0.5) m.doors.push(turn(unit(cx - m.x, cy - m.y), (r() - 0.5) * 1.2));
   });
-  const DOOR_FLOOR = 0.56, INSIDE = 0.1, RIM_TOP = 1.12;
+  /* rosettes first (low), then the mounds over them */
+  const rosettes = [];
+  for (let tries = 0; rosettes.length < p.rosettes && tries < p.rosettes * 60; tries++){
+    const x = cx + (r() * 2 - 1) * RX * 0.95, y = cy + (r() * 2 - 1) * RY * 0.95, rin = 45 + r() * 55;
+    if (dn(x, y) > 0.86) continue;
+    if (mounds.some(m => Math.sqrt((x - m.x) * (x - m.x) + (y - m.y) * (y - m.y)) < m.rin + m.t + rin + 90)) continue;
+    if (rosettes.some(q => Math.sqrt((x - q.x) * (x - q.x) + (y - q.y) * (y - q.y)) < (q.rin + rin) * 1.25 + 40)) continue;
+    const top = 0.62 + r() * 0.1;
+    rosettes.push({x, y, rin, t:22 + r() * 18, doors:[], k:100 + rosettes.length, door:0, warp:rin * 0.35, slopeIn:45, slopeOut:60, top, floor:0.5, inside:e => e - 0.1});
+  }
+  rosettes.forEach(stampRing);
+  mounds.forEach(stampRing);
   for (const m of mounds){
-    const reach = m.rin + m.t + 60, i0 = Math.max(0, Math.floor((m.x - reach) / RES)), i1 = Math.min(GX - 1, Math.floor((m.x + reach) / RES));
-    const j0 = Math.max(0, Math.floor((m.y - reach) / RES)), j1 = Math.min(GY - 1, Math.floor((m.y + reach) / RES));
-    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++){
-      const n = j * GX + i, dx = (i + 0.5) * RES - m.x, dy = (j + 0.5) * RES - m.y, rr = Math.sqrt(dx * dx + dy * dy);
-      if (rr > reach) continue;
-      const u = rr > 0 ? {x:dx / rr, y:dy / rr} : {x:1, y:0};
-      const rin = m.rin * (1 + 0.08 * fbm(g[4], u.x * 1.3 + m.k * 7.1, u.y * 1.3));
-      let e = E[n];
-      const inside = 1 - smooth(rin - 55, rin - 5, rr);
-      e = e + (INSIDE - e) * inside;
-      let rim = smooth(rin - 15, rin + 10, rr) * (1 - smooth(rin + m.t - 10, rin + m.t + 45, rr));
-      /* doorways: where the rim faces a door direction, it's worn down to a step (bands 3-4) */
-      let gap = 0; for (const dv of m.doors){ const ex = u.x - dv.x, ey = u.y - dv.y, arc = Math.sqrt(ex * ex + ey * ey) * (rin + m.t / 2); gap = Math.max(gap, 1 - smooth(p.door * 0.35, p.door * 0.5, arc)); }
-      const band = smooth(rin - 12, rin + 4, rr) * (1 - smooth(rin + m.t, rin + m.t + 30, rr));
-      e = e + (DOOR_FLOOR - e) * gap * band;
-      rim *= 1 - gap;
-      E[n] = e + (RIM_TOP - e) * rim;
-    }
     spawns.push({x:m.x, y:m.y});
     /* a varied handful inside, not renewed: every base at least once, never enough for a whole recipe */
     const hand = BASES.concat([BASES[Math.floor(r() * 4)], BASES[Math.floor(r() * 4)]]);
-    for (const b of hand){ let x, y, tries = 0; do { x = m.x + (r() * 2 - 1) * m.rin * 0.72; y = m.y + (r() * 2 - 1) * m.rin * 0.72; } while ((x - m.x) * (x - m.x) + (y - m.y) * (y - m.y) > m.rin * m.rin * 0.5 && ++tries < 20); letters.push({x, y, b, where:'mound'}); }
+    for (const b of hand){ let x, y, tries = 0; do { x = m.x + (r() * 2 - 1) * m.rin * 0.6; y = m.y + (r() * 2 - 1) * m.rin * 0.6; } while ((x - m.x) * (x - m.x) + (y - m.y) * (y - m.y) > m.rin * m.rin * 0.36 && ++tries < 20); letters.push({x, y, b, where:'mound'}); }
   }
   const inMound = (x, y, pad) => mounds.some(m => (x - m.x) * (x - m.x) + (y - m.y) * (y - m.y) < (m.rin + m.t + pad) * (m.rin + m.t + pad));
   const eAt = (x, y) => E[Math.min(GY - 1, Math.max(0, Math.floor(y / RES))) * GX + Math.min(GX - 1, Math.max(0, Math.floor(x / RES)))];
@@ -139,7 +186,7 @@ function generate(o){
     pockets.push({x:px, y:py});
     for (let q = 0, tries = 0; q < 10 && tries < 200; tries++){ const x = px + (r() * 2 - 1) * 110, y = py + (r() * 2 - 1) * 110; if (inMound(x, y, 15) || eAt(x, y) >= WALL - 0.1) continue; letters.push({x, y, b:BASES[Math.floor(r() * 4)], where:'pocket'}); q++; }
   }
-  return {E, zone, weights:w, letters, spawns, mounds, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY};
+  return {E, zone, weights:w, letters, spawns, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY};
 }
 return {generate, DEFAULTS, WALL, dsin, dcos};
 })();

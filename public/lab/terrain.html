@@ -62,9 +62,13 @@
       <label class="sl"><span>mounds</span><input type="range" data-w="mounds" min="5" max="12" step="1" value="8"></label>
       <label class="sl"><span>mound size</span><input type="range" data-w="rin" min="130" max="280" step="10" value="190"></label>
       <label class="sl"><span>rim</span><input type="range" data-w="rim" min="40" max="110" step="2" value="56"></label>
-      <label class="sl"><span>doorway</span><input type="range" data-w="door" min="50" max="140" step="5" value="80"></label>
+      <label class="sl"><span>doorway</span><input type="range" data-w="door" min="50" max="160" step="5" value="90"></label>
       <label class="sl"><span>lagoon</span><input type="range" data-w="lagoon" min="1200" max="2100" step="50" value="1650"></label>
       <label class="sl"><span>channels</span><input type="range" data-w="channel" min="180" max="440" step="10" value="300"></label>
+      <label class="sl"><span>rosettes</span><input type="range" data-w="rosettes" min="0" max="60" step="2" value="26"></label>
+      <label class="sl"><span>border gap</span><input type="range" data-w="gap" min="0" max="120" step="5" value="40"></label>
+      <label class="sl"><span>border slope</span><input type="range" data-w="slope" min="30" max="240" step="10" value="90"></label>
+      <label class="sl"><span>border blobs</span><input type="range" data-w="dither" min="0" max="2.4" step="0.1" value="1.2"></label>
       <label class="sl"><span>letters</span><input type="range" data-w="spread" min="0" max="160" step="10" value="60"></label>
     </div>
     <div id="placesBox"><h2>Places</h2>
@@ -351,7 +355,9 @@ function drawTiles(){
     else if (!t || t.gen !== tileGen){ missing++; continue; }
     tiles.delete(key); tiles.set(key, t); vis.push([tx, ty, t]);
   }
-  while (tiles.size > 48) tiles.delete(tiles.keys().next().value);
+  /* keep at least every tile in view (zoomed out it is ~70): a smaller cap evicts tiles still on screen, which then
+     show the overview through and leave straight seams */
+  while (tiles.size > Math.max(48, vis.length + missing + 8)) tiles.delete(tiles.keys().next().value);
   if (missing) whole(overview, IW, IH);
   const at = (h, tx, ty) => { const z = cam.z * (1 + h * P); return [cw / 2 + (tx * TILE - cam.x) * z, ch / 2 + (ty * TILE - cam.y) * z, TILE * z + 0.6]; };
   for (const [tx, ty, t] of vis){ const [sx, sy, sz] = at(0, tx, ty); ctx.drawImage(t.floor, sx, sy, sz, sz); }
@@ -443,7 +449,7 @@ function buildWorld(){
   world = window.WorldGen.generate(Object.assign({seed, W, H, RES}, WORLD));
   genMs = performance.now() - t0;
   E.set(world.E);
-  wts = PLACES.map(p => { const w = Float32Array.from(world.weights[p.id] || new Float32Array(N)); blur(w, 3); return w; });
+  wts = PLACES.map(p => { const w = Float32Array.from(world.weights[p.id] || new Float32Array(N)); blur(w, 1); return w; });
   centres = PLACES.map(p => p.id === 'lagoon' ? {x:world.centre.x, y:world.centre.y} : null);
   letters = world.letters.map(l => ({...l})); got = 0;
   analyse(); renderOverview(); draw(); stats();
