@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Terrain lab · RNA Strand Soup</title>
 <style>
-  :root{--ink:#e8efe9;--muted:#9fb0a6;--glass:rgb(12 20 18 / .86);--edge:rgb(255 255 255 / .12);--stain:#a78bfa;
+  :root{--ink:#e8efe9;--muted:#9fb0a6;--glass:rgb(12 20 18 / .88);--edge:rgb(255 255 255 / .12);--stain:#a78bfa;
     --font:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#020306;color:var(--ink);font:14px/1.4 var(--font);overflow:hidden}
@@ -19,14 +19,19 @@
   .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   button{font:inherit;font-size:13px;color:var(--ink);background:rgb(255 255 255 / .06);border:1px solid var(--edge);border-radius:8px;padding:5px 9px;cursor:pointer}
   button[aria-pressed="true"]{background:var(--stain);color:#14101f;border-color:var(--stain)}
-  .ter{display:grid;grid-template-columns:12px 1fr auto;gap:2px 8px;align-items:center;margin:6px 0;font-size:13px}
+  .ter{display:grid;grid-template-columns:12px 1fr auto;gap:2px 8px;align-items:center;margin:8px 0;font-size:13px}
   .ter .sw{width:12px;height:12px;border-radius:3px}
   .ter select{font:inherit;font-size:12px;background:#0d1715;color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:2px 4px}
-  .ter label{grid-column:2 / 4;display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--muted)}
-  .ter input[type=range]{flex:1;accent-color:var(--stain)}
+  label.sl{display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--muted)}
+  .ter label.sl{grid-column:2 / 4}
+  label.sl span{width:52px}
+  label.sl input{flex:1;accent-color:var(--stain)}
   .stat{font:12px/1.5 var(--mono);color:var(--muted);white-space:pre-wrap}
   .bar{height:4px;background:rgb(255 255 255 / .1);border-radius:3px;overflow:hidden;margin-top:6px}
   .bar i{display:block;height:100%;width:0;background:var(--stain)}
+  .key{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;margin-top:4px;font:10.5px/1.2 var(--mono);text-align:center}
+  .key div{padding:3px 0;border-radius:3px;color:#fff}
+  .hud{position:fixed;right:10px;bottom:10px;padding:8px 12px;border-radius:10px;background:var(--glass);border:1px solid var(--edge);font:13px/1.4 var(--mono)}
 </style>
 </head>
 <body>
@@ -34,24 +39,29 @@
 <div class="panel" id="panel">
   <h1>Terrain lab <button type="button" id="shut">Hide</button></h1>
   <div class="body">
-    <p>The real map's layout, reshaped by reaction-diffusion (Gray-Scott). Each place grows its own pattern; the settings blend across borders, and open water kills the pattern so it thins out into the sea. Height becomes stacked terraces with parallax. Drag to pan, pinch or scroll to zoom.</p>
-    <div class="row"><button type="button" id="bNew">New map</button><button type="button" id="bGrow">Regrow</button>
+    <p>A continuous depth map. Reaction-diffusion (Gray-Scott) shapes each place; open water is a gentle seafloor with bottomless black areas and lanes. Seven bands, flat colours, darker as they get deeper. Your strand swims at one level: the shallower the ground under it, the slower it goes; ground that reaches the surface is a wall.</p>
+    <div class="row"><button type="button" id="bSwim" aria-pressed="false">Swim</button><button type="button" id="bNew">New map</button><button type="button" id="bGrow">Regrow</button>
       <button type="button" id="bGame">Game zoom</button><button type="button" id="bFit">Whole map</button></div>
     <div class="bar"><i id="prog"></i></div>
+    <h2>Depth bands and speed</h2>
+    <div class="key" id="key"></div>
     <h2>Show</h2>
     <div class="row">
       <button type="button" data-t="parallax" aria-pressed="true">Parallax</button>
-      <button type="button" data-t="lines" aria-pressed="true">Contour lines</button>
-      <button type="button" data-t="shadow" aria-pressed="true">Shadows</button>
-      <button type="button" data-t="play" aria-pressed="false">Walls &amp; pockets</button>
+      <button type="button" data-t="sides" aria-pressed="true">Wall sides</button>
+      <button type="button" data-t="lines" aria-pressed="true">Outlines</button>
+      <button type="button" data-t="speed" aria-pressed="false">Swim speed</button>
+      <button type="button" data-t="play" aria-pressed="false">Sealed water</button>
       <button type="button" data-t="old" aria-pressed="false">Current map</button>
     </div>
+    <label class="sl"><span>layer gap</span><input type="range" id="gap" min="0" max="0.05" step="0.002" value="0.016"></label>
     <h2>Places</h2>
     <div id="ters"></div>
     <h2>Cost</h2>
     <div class="stat" id="stat"></div>
   </div>
 </div>
+<div class="hud" id="hud" hidden></div>
 <script src="../segments.js"></script>
 <script src="../biomes.js"></script>
 <script src="../map.js"></script>
@@ -61,68 +71,95 @@
 const $ = id => document.getElementById(id);
 const MAP = window.SoupMap, W = MAP.W, H = MAP.H;
 
+/* ---------- the depth bands ----------
+   Elevation E runs 0 (bottomless) to 1 (the surface). Band 0 reaches the surface: a wall. Bands 1-3 are flats and
+   shallows; 4-6 open water, barely slowed; 7 is the black depth. T[b] is the bottom edge of band b */
+const T = [0.86, 0.74, 0.62, 0.5, 0.38, 0.26, 0.14];
+const BRIGHT = [1, 0.84, 0.7, 0.57, 0.45, 0.34, 0.24, 0];
+const DEEP = [3, 5, 7];
+/* swim speed at each band's middle (band 6 is today's normal speed); speed eases between them */
+const SPEED = [0, 0.45, 0.6, 0.75, 0.9, 0.95, 1, 1.1];
+const MID = [0.93, 0.8, 0.68, 0.56, 0.44, 0.32, 0.2, 0.07];
+const bandOf = e => { for (let b = 0; b < T.length; b++) if (e >= T[b]) return b; return 7; };
+function speedAt(e){
+  if (e >= T[0]) return 0;
+  if (e >= MID[1]) return SPEED[1];
+  if (e <= MID[7]) return SPEED[7];
+  for (let b = 1; b < 7; b++) if (e <= MID[b] && e >= MID[b + 1]){ const t = (e - MID[b + 1]) / (MID[b] - MID[b + 1]); return SPEED[b + 1] + (SPEED[b] - SPEED[b + 1]) * t; }
+  return 1;
+}
+
 /* ---------- places and their patterns ----------
-   Gray-Scott presets (feed F, kill k) from Pearson's classification, as Karl Sims names them.
-   s scales diffusion, which scales the pattern's size; gain and base turn the pattern into height */
+   Gray-Scott presets (feed F, kill k). s scales diffusion and so the pattern's size. low is the elevation where a
+   place's pattern is absent, high where it is fully present */
 const PRESETS = {
-  spots:{F:0.03, k:0.062, hint:'islets'},
-  mitosis:{F:0.0367, k:0.0649, hint:'islets that split'},
-  coral:{F:0.0545, k:0.062, hint:'branching reef'},
-  holes:{F:0.039, k:0.058, hint:'rock riddled with pores'},
-  maze:{F:0.029, k:0.057, hint:'channels'},
-  worms:{F:0.078, k:0.061, hint:'ridges'},
-  bubbles:{F:0.098, k:0.0555, hint:'rock with round pools'},
-  none:{F:0.02, k:0.075, hint:'flat, open water'}};
+  spots:{F:0.03, k:0.062}, mitosis:{F:0.0367, k:0.0649}, coral:{F:0.0545, k:0.062}, holes:{F:0.039, k:0.058},
+  maze:{F:0.029, k:0.057}, worms:{F:0.078, k:0.061}, bubbles:{F:0.098, k:0.0555}, none:{F:0.02, k:0.075}};
 const PLACES = [
-  {id:'water', name:'Open water', keys:['DEEP', 'OCEAN'], preset:'none', s:1, gain:0, elev:0, col:[18, 40, 44]},
-  {id:'lagoon', name:'Tide-pool lagoon', keys:['LAGOON', 'FLATS'], preset:'spots', s:0.5, gain:0.8, elev:0.15, col:[64, 120, 96]},
-  {id:'island', name:'Volcanic island', keys:['SPRING', 'CLAY', 'UV', 'ROCK'], preset:'coral', s:0.45, gain:0.9, elev:0.8, col:[132, 96, 74]},
-  {id:'chimneys', name:'White chimneys', keys:['CHIMNEY', 'PORE', 'POCKET'], preset:'holes', s:0.4, gain:0.9, elev:0.6, col:[196, 186, 160]},
-  {id:'ice', name:'Ice veins', keys:['ICE', 'BRINE'], preset:'maze', s:0.35, gain:0.9, elev:0.55, col:[150, 200, 222]},
-  {id:'ridge', name:'Ocean ridge', keys:['RIDGE'], preset:'worms', s:0.4, gain:0.85, elev:0.3, col:[84, 92, 86]}];
-const WATER = [7, 17, 15];
-/* terraces: height thresholds. Below LV[1] you can swim (LV[0] is a shallow shelf); LV[1] and up are walls */
-const LV = [0.17, 0.27, 0.39, 0.51, 0.63, 0.75, 0.87];
+  {id:'water', name:'Open water', keys:['DEEP', 'OCEAN'], preset:'none', s:1, base:0, top:0, col:[60, 110, 120]},
+  {id:'lagoon', name:'Tide-pool lagoon', keys:['LAGOON'], preset:'spots', s:0.5, base:0.46, top:0.8, col:[80, 160, 125]},
+  {id:'flats', name:'Clay and tidal flats', keys:['FLATS', 'CLAY'], preset:'holes', s:0.45, base:0.6, top:0.8, col:[170, 130, 92]},
+  {id:'island', name:'Volcanic island', keys:['SPRING', 'UV', 'ROCK'], preset:'coral', s:0.45, base:0.4, top:1, col:[150, 100, 80]},
+  {id:'chimneys', name:'White chimneys', keys:['CHIMNEY', 'PORE', 'POCKET'], preset:'holes', s:0.4, base:0.3, top:1, col:[215, 205, 180]},
+  {id:'ice', name:'Ice veins', keys:['ICE', 'BRINE'], preset:'maze', s:0.35, base:0.35, top:1, col:[160, 210, 235]},
+  {id:'ridge', name:'Ocean ridge', keys:['RIDGE'], preset:'worms', s:0.4, base:0.2, top:0.95, col:[110, 120, 112]}];
 const RES = 25, GX = W / RES, GY = H / RES, N = GX * GY;
 const ITER = 3200, PER_FRAME = 80;
-const show = {parallax:true, lines:true, shadow:true, play:false, old:false};
+const show = {parallax:true, sides:true, lines:true, speed:false, play:false, old:false};
+let GAP = 0.016;
 
-/* ---------- reaction-diffusion state ---------- */
-let seed = 7, place = new Uint8Array(N), wts = [], domes = [], F = new Float32Array(N), Kk = new Float32Array(N), S = new Float32Array(N), G = new Float32Array(N), E = new Float32Array(N);
-let U = new Float32Array(N), V = new Float32Array(N), U2 = new Float32Array(N), V2 = new Float32Array(N), hgt = new Float32Array(N);
-let iter = 0, rdMs = 0, renderMs = 0, growing = false, layers = [], floorImg = null, playImg = null, oldImg = null, unreach = 0;
+/* ---------- reaction-diffusion ---------- */
+let seed = 7, place = new Uint8Array(N), wts = [], F = new Float32Array(N), Kk = new Float32Array(N), S = new Float32Array(N);
+let U = new Float32Array(N), V = new Float32Array(N), U2 = new Float32Array(N), V2 = new Float32Array(N), E = new Float32Array(N), floorE = new Float32Array(N);
+let iter = 0, rdMs = 0, renderMs = 0, growing = false, overview = null, playImg = null, speedImg = null, oldImg = null, unreach = 0, centres = [];
 
 let rs = seed; const rnd = () => (rs = (rs * 16807) % 2147483647) / 2147483647;
-function layout(){
-  MAP.generate(seed);
-  const idx = {}; PLACES.forEach((p, i) => p.keys.forEach(k => idx[k] = i));
-  /* where each place is, read through a noise warp (up to ~300 px) so the old straight edges become coastlines */
-  rs = seed % 2147483647 || 1; const nz = [noise(), noise()];
-  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
-    const x = (i + 0.5) * RES, y = (j + 0.5) * RES, wx = x + 300 * fbm(nz[0], x / 1100, y / 1100), wy = y + 300 * fbm(nz[1], x / 1100, y / 1100);
-    const k = MAP.cellAt(Math.max(1, Math.min(W - 1, wx)), Math.max(1, Math.min(H - 1, wy))).key; place[j * GX + i] = idx[k] ?? 0;
-  }
-  /* each place's weight, blurred so settings blend over about 400 px at the borders; and a wide dome per place
-     (about 1,000 px) that lifts its walls in tiers toward its middle */
-  wts = PLACES.map((_, c) => { const w = new Float32Array(N); for (let n = 0; n < N; n++) w[n] = place[n] === c ? 1 : 0; blur(w, 8); blur(w, 8); return w; });
-  domes = PLACES.map((_, c) => { const d = Float32Array.from(wts[c]); for (let k = 0; k < 3; k++) blur(d, 12); let m = 0; for (const v of d) m = Math.max(m, v); for (let n = 0; n < N; n++) d[n] /= m || 1; return d; });
-  oldImg = drawOld();
-}
 function noise(){ const g = new Float32Array(32 * 32); for (let i = 0; i < g.length; i++) g[i] = rnd() * 2 - 1; return g; }
 function vnoise(g, x, y){ const i = Math.floor(x), j = Math.floor(y), tx = x - i, ty = y - j, a = (u, v) => g[((v & 31) * 32) + (u & 31)], s = t => t * t * (3 - 2 * t);
   return (a(i, j) * (1 - s(tx)) + a(i + 1, j) * s(tx)) * (1 - s(ty)) + (a(i, j + 1) * (1 - s(tx)) + a(i + 1, j + 1) * s(tx)) * s(ty); }
 const fbm = (g, x, y) => vnoise(g, x, y) * 0.6 + vnoise(g, x * 2.1 + 5, y * 2.1) * 0.3 + vnoise(g, x * 4.3, y * 4.3 + 9) * 0.1;
+const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function blur(a, r){
   const t = new Float32Array(N);
   for (let j = 0; j < GY; j++){ let s = 0, c = 0; for (let i = -r; i < GX + r; i++){ if (i + r < GX){ s += a[j * GX + i + r]; c++; } if (i - r - 1 >= 0){ s -= a[j * GX + i - r - 1]; c--; } if (i >= 0 && i < GX) t[j * GX + i] = s / c; } }
   for (let i = 0; i < GX; i++){ let s = 0, c = 0; for (let j = -r; j < GY + r; j++){ if (j + r < GY){ s += t[(j + r) * GX + i]; c++; } if (j - r - 1 >= 0){ s -= t[(j - r - 1) * GX + i]; c--; } if (j >= 0 && j < GY) a[j * GX + i] = s / c; } }
 }
+
+function layout(){
+  MAP.generate(seed);
+  const idx = {}; PLACES.forEach((p, i) => p.keys.forEach(k => idx[k] = i));
+  /* where each place is, read through a noise warp so the old straight edges become coastlines */
+  rs = seed % 2147483647 || 1; const nz = [noise(), noise(), noise(), noise()];
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
+    const x = (i + 0.5) * RES, y = (j + 0.5) * RES, wx = x + 300 * fbm(nz[0], x / 1100, y / 1100), wy = y + 300 * fbm(nz[1], x / 1100, y / 1100);
+    place[j * GX + i] = idx[MAP.cellAt(Math.max(1, Math.min(W - 1, wx)), Math.max(1, Math.min(H - 1, wy))).key] ?? 0;
+  }
+  wts = PLACES.map((_, c) => { const w = new Float32Array(N); for (let n = 0; n < N; n++) w[n] = place[n] === c ? 1 : 0; blur(w, 8); blur(w, 8); return w; });
+  centres = PLACES.map((_, c) => { let bx = 0, by = 0, s = 0; for (let n = 0; n < N; n++){ const w = wts[c][n] ** 4; bx += w * (n % GX); by += w * (n / GX | 0); s += w; } return s > 1e-6 ? {x:(bx / s + 0.5) * RES, y:(by / s + 0.5) * RES} : null; });
+  seafloor(nz[2], nz[3]);
+  oldImg = drawOld();
+}
+/* the open sea: broad basins and rises (bands 5-7), large bottomless areas, and black lanes: spokes from the lagoon
+   to every place, and a ring between them in order around it, meandering on noise */
+function seafloor(g1, g2){
+  const L = PLACES.findIndex(p => p.id === 'lagoon'), hub = centres[L];
+  const others = centres.map((c, i) => c && i > 0 && i !== L && PLACES[i].id !== 'flats' ? {...c, a:Math.atan2(c.y - hub.y, c.x - hub.x)} : null).filter(Boolean).sort((a, b) => a.a - b.a);
+  const segs = others.map(c => [hub, c]); others.forEach((c, i) => segs.push([c, others[(i + 1) % others.length]]));
+  const segD = (x, y, [a, b]) => { const dx = b.x - a.x, dy = b.y - a.y, t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy))); return Math.hypot(x - a.x - t * dx, y - a.y - t * dy); };
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
+    const x = (i + 0.5) * RES, y = (j + 0.5) * RES, n = j * GX + i;
+    const f = 0.5 + 0.5 * fbm(g1, x / 2600, y / 2600), e = 0.34 * smooth(0.38, 0.78, f);
+    const mx = x + 260 * fbm(g2, x / 1500, y / 1500), my = y + 260 * fbm(g2, x / 1500 + 7, y / 1500);
+    let d = Infinity; for (const s of segs) d = Math.min(d, segD(mx, my, s));
+    floorE[n] = e * smooth(110, 260, d);
+  }
+}
 function params(){
   for (let n = 0; n < N; n++){
     /* open water's settings count for less near a coast, so the land's pattern frays out into the sea */
-    let f = 0, k = 0, s = 0, g = 0, e = 0, t = 0;
-    PLACES.forEach((p, c) => { const w = wts[c][n] * (c === 0 ? 0.55 : 1); if (!w) return; const pr = PRESETS[p.preset]; f += w * pr.F; k += w * pr.k; s += w * p.s; g += w * p.gain; e += w * p.elev * domes[c][n]; t += w; });
-    F[n] = f / t; Kk[n] = k / t; S[n] = s / t; G[n] = g / t; E[n] = e / t;
+    let f = 0, k = 0, s = 0, t = 0;
+    PLACES.forEach((p, c) => { const w = wts[c][n] * (c === 0 ? 0.55 : 1); if (!w) return; const pr = PRESETS[p.preset]; f += w * pr.F; k += w * pr.k; s += w * p.s; t += w; });
+    F[n] = f / t; Kk[n] = k / t; S[n] = s / t;
   }
 }
 function seedRD(){
@@ -134,15 +171,13 @@ function seedRD(){
   }
   iter = 0; rdMs = 0;
 }
-/* one Gray-Scott step with a nine-point Laplacian (Du 1, Dv 0.5, dt 1), scaled per cell by S */
 function stepRD(times){
   const t0 = performance.now();
   for (let it = 0; it < times; it++){
     for (let j = 0; j < GY; j++){
       const jm = (j > 0 ? j - 1 : j) * GX, j0 = j * GX, jp = (j < GY - 1 ? j + 1 : j) * GX;
       for (let i = 0; i < GX; i++){
-        const im = i > 0 ? i - 1 : i, ip = i < GX - 1 ? i + 1 : i, n = j0 + i;
-        const u = U[n], v = V[n];
+        const im = i > 0 ? i - 1 : i, ip = i < GX - 1 ? i + 1 : i, n = j0 + i, u = U[n], v = V[n];
         const lu = 0.2 * (U[jm + i] + U[jp + i] + U[j0 + im] + U[j0 + ip]) + 0.05 * (U[jm + im] + U[jm + ip] + U[jp + im] + U[jp + ip]) - u;
         const lv = 0.2 * (V[jm + i] + V[jp + i] + V[j0 + im] + V[j0 + ip]) + 0.05 * (V[jm + im] + V[jm + ip] + V[jp + im] + V[jp + ip]) - v;
         const s = S[n], uvv = u * v * v;
@@ -154,31 +189,35 @@ function stepRD(times){
   }
   iter += times; rdMs += performance.now() - t0;
 }
-function heights(){
-  /* the pattern decides what is wall and what is water; the place's dome then lifts its walls in tiers toward its
-     middle (only above the wall line, so it never turns water into wall) */
-  for (let n = 0; n < N; n++){ const p = G[n] * Math.min(1, V[n] / 0.4); hgt[n] = p + E[n] * smooth(LV[1] - 0.02, LV[1] + 0.12, p); }
-  blur(hgt, 1);
-  /* swimmable cells you cannot reach from the lagoon: pockets sealed off by the pattern */
-  const walk = n => hgt[n] < LV[1], seen = new Uint8Array(N), L = PLACES.findIndex(p => p.id === 'lagoon');
+/* elevation: each place goes from low to high where its pattern is present; the open sea is its seafloor */
+function elevation(){
+  for (let n = 0; n < N; n++){
+    const v = smooth(0.08, 0.32, V[n]); let e = 0, t = 0;
+    for (let c = 0; c < PLACES.length; c++){ const w = wts[c][n]; if (!w) continue; const p = PLACES[c]; e += w * (c === 0 ? floorE[n] : p.base + (p.top - p.base) * v); t += w; }
+    E[n] = e / t;
+  }
+  blur(E, 1);
+  /* swimmable water you cannot reach from the lagoon: sealed off by the pattern */
+  const walk = n => E[n] < T[0], seen = new Uint8Array(N), L = PLACES.findIndex(p => p.id === 'lagoon');
   let start = -1, best = 0; for (let n = 0; n < N; n++) if (walk(n) && wts[L][n] > best){ best = wts[L][n]; start = n; }
   const q = [start]; seen[start] = 1;
   while (q.length){ const n = q.pop(), i = n % GX, j = n / GX | 0;
     for (const m of [i > 0 ? n - 1 : -1, i < GX - 1 ? n + 1 : -1, j > 0 ? n - GX : -1, j < GY - 1 ? n + GX : -1]) if (m >= 0 && !seen[m] && walk(m)){ seen[m] = 1; q.push(m); } }
-  let open = 0, lost = 0; const img = new ImageData(GX, GY);
+  let open = 0, lost = 0; const pi = new ImageData(GX, GY), si = new ImageData(GX, GY);
   for (let n = 0; n < N; n++){
-    if (walk(n)){ open++; if (!seen[n]){ lost++; img.data.set([255, 40, 200, 170], n * 4); } }
-    else img.data.set([255, 70, 50, 90], n * 4);
+    if (walk(n)){ open++; if (!seen[n]){ lost++; pi.data.set([255, 40, 200, 190], n * 4); } }
+    const sp = speedAt(E[n]);
+    si.data.set(sp === 0 ? [120, 20, 30, 210] : sp < 0.8 ? [255, 120 + 120 * (sp - 0.45) / 0.35, 40, 160] : sp < 1.01 ? [80, 210, 120, 110 * (1 - (sp - 0.8) / 0.2)] : [70, 150, 255, 120], n * 4);
   }
-  unreach = lost / open;
-  playImg = toCanvas(img);
+  unreach = lost / open; playImg = toCanvas(pi); speedImg = toCanvas(si);
 }
 
-/* ---------- drawing the terraces ----------
-   Each terrace is its own picture (1 px = 5 world px): its outline from the height field, smoothed by sampling it
-   bilinearly, coloured by the blend of places under it, brighter the higher it is, with a dark contour line on its rim.
-   The lower terraces fade toward the water so the stack reads as depth */
-const RSC = 6, IW = Math.round(W / RSC), IH = H / RSC;
+/* ---------- drawing ----------
+   A pixel's colour: the blend of places under it, at its band's brightness; black in band 7. Bands meet in a crisp,
+   one-pixel antialiased edge with a thin darker outline. Close up, the floor (bands 3-7) is one picture per tile and
+   each raised layer (band 2, band 1, walls) is its own picture, drawn higher for parallax. A layer's 'sides' picture
+   is the same shape in a darker colour, stacked in thin slices between the layer below and this one: up close, walls
+   show their faces, more toward the screen edges */
 function sample(a, x, y){
   const fx = Math.max(0, Math.min(GX - 1.001, x / RES - 0.5)), fy = Math.max(0, Math.min(GY - 1.001, y / RES - 0.5));
   const i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j, n = j * GX + i;
@@ -186,97 +225,86 @@ function sample(a, x, y){
 }
 const COL = [new Float32Array(N), new Float32Array(N), new Float32Array(N)];
 function colours(){ for (let n = 0; n < N; n++) for (let k = 0; k < 3; k++){ let v = 0; for (let c = 0; c < PLACES.length; c++) v += wts[c][n] * PLACES[c].col[k]; COL[k][n] = v; } }
-const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-function render(){
-  const t0 = performance.now(); tileGen++; colours();
-  const imgs = LV.map(() => new ImageData(IW, IH)), fl = new ImageData(IW, IH);
-  const e = 0.012, ln = 0.022;
-  for (let py = 0; py < IH; py++) for (let px = 0; px < IW; px++){
-    const x = (px + 0.5) * RSC, y = (py + 0.5) * RSC, h = sample(hgt, x, y), o = (py * IW + px) * 4;
-    let r = 0, g = 0, b = 0; for (let c = 0; c < PLACES.length; c++){ const w = sample(wts[c], x, y); r += w * PLACES[c].col[0]; g += w * PLACES[c].col[1]; b += w * PLACES[c].col[2]; }
-    /* the floor: water tinted a little by the place it is in, with faint depth rings below the first terrace */
-    const ring = show.lines ? 0.5 + 0.5 * Math.cos(h / 0.05 * Math.PI * 2) : 0, dark = 0.18 + 0.06 * ring * Math.min(1, h / 0.1);
-    fl.data[o] = WATER[0] + r * dark; fl.data[o + 1] = WATER[1] + g * dark; fl.data[o + 2] = WATER[2] + b * dark; fl.data[o + 3] = 255;
-    for (let l = 0; l < LV.length; l++){
-      const a = smooth(LV[l] - e, LV[l] + e, h); if (a <= 0) break;
-      const lift = 0.4 + 0.11 * l, rim = show.lines ? 1 - smooth(LV[l] + e, LV[l] + e + ln, h) : 0, k = lift * (1 - 0.45 * rim);
-      const d = imgs[l].data; d[o] = r * k; d[o + 1] = g * k; d[o + 2] = b * k; d[o + 3] = 255 * a * Math.min(1, 0.7 + 0.06 * l);
-    }
+const bandCol = (r, g, b, k) => k === 7 ? DEEP : [r * BRIGHT[k], g * BRIGHT[k], b * BRIGHT[k]];
+/* the colour of everything from band 'from' down, with outlines; px is the pixel size in world px */
+function floorPx(out, o, r, g, b, e, grad, px, from){
+  const c = DEEP.slice();
+  for (let k = 6; k >= from; k--){
+    const a = Math.max(0, Math.min(1, (e - T[k]) / (grad * px) + 0.5)); if (a <= 0) continue;
+    const bc = bandCol(r, g, b, k); c[0] += (bc[0] - c[0]) * a; c[1] += (bc[1] - c[1]) * a; c[2] += (bc[2] - c[2]) * a;
+    if (show.lines){ const d = Math.abs(e - T[k]) / grad, l = 1 - smooth(0.6 * px, 1.6 * px, d); if (l > 0){ const m = 0.45 * l; c[0] *= 1 - m; c[1] *= 1 - m; c[2] *= 1 - m; } }
   }
-  floorImg = toCanvas(fl);
-  layers = imgs.map(im => { const c = toCanvas(im), sh = document.createElement('canvas'); sh.width = IW / 2; sh.height = IH / 2;
-    const g = sh.getContext('2d'); g.filter = 'brightness(0) blur(3px)'; g.drawImage(c, 0, 0, IW / 2, IH / 2); return {c, sh}; });
-  renderMs = performance.now() - t0;
+  out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; out[o + 3] = 255;
 }
-/* ---------- close up: tiles drawn at full resolution, like the game's ground chunks ----------
-   Each 500-px tile has a floor picture and one picture per terrace it reaches. Shadows are baked in: a pixel is
-   darkened if the terrace above it, looked up a little toward the light, covers it. Nothing extra is drawn per frame */
-const TILE = 500, TR = 0.7, TP = Math.round(TILE * TR), LIGHT = {x:-9, y:-12};
+const RSC = 6, IW = Math.round(W / RSC), IH = H / RSC;
+function renderOverview(){
+  const t0 = performance.now(); colours();
+  const img = new ImageData(IW, IH);
+  for (let py = 0; py < IH; py++) for (let px = 0; px < IW; px++){
+    const x = (px + 0.5) * RSC, y = (py + 0.5) * RSC, e = sample(E, x, y), grad = Math.max(1e-5, Math.hypot(sample(E, x + 4, y) - e, sample(E, x, y + 4) - e) / 4);
+    floorPx(img.data, (py * IW + px) * 4, sample(COL[0], x, y), sample(COL[1], x, y), sample(COL[2], x, y), e, grad, RSC, 0);
+  }
+  overview = toCanvas(img); renderMs = performance.now() - t0; tileGen++;
+}
+const TILE = 500, TR = 0.75, TP = Math.round(TILE * TR), RAISED = [2, 1, 0], HEIGHT = [1, 2, 3.5];
 const tiles = new Map(); let tileMs = [], tileGen = 0;
 function renderTile(tx, ty){
-  const t0 = performance.now(), fl = new ImageData(TP, TP), lv = LV.map(() => null), e = 0.012, ln = 0.022;
-  for (let py = 0; py < TP; py++) for (let px = 0; px < TP; px++){
-    const x = tx * TILE + (px + 0.5) / TR, y = ty * TILE + (py + 0.5) / TR, o = (py * TP + px) * 4;
-    const h = sample(hgt, x, y), r = sample(COL[0], x, y), g = sample(COL[1], x, y), b = sample(COL[2], x, y);
-    /* the terrace above, toward the light: how much of this pixel it shades. Each step up casts a longer shadow */
-    const hs = sample(hgt, x + LIGHT.x, y + LIGHT.y), hs2 = sample(hgt, x + LIGHT.x * 2, y + LIGHT.y * 2);
-    const ring = show.lines ? 0.5 + 0.5 * Math.cos(h / 0.05 * Math.PI * 2) : 0, dark = 0.18 + 0.06 * ring * Math.min(1, h / 0.1);
-    const shF = show.shadow ? 0.55 * Math.max(smooth(LV[0] - 0.03, LV[0] + 0.05, hs), 0.6 * smooth(LV[1] - 0.03, LV[1] + 0.05, hs2)) * (1 - smooth(LV[0] - e, LV[0] + e, h)) : 0;
-    fl.data[o] = (WATER[0] + r * dark) * (1 - shF); fl.data[o + 1] = (WATER[1] + g * dark) * (1 - shF); fl.data[o + 2] = (WATER[2] + b * dark) * (1 - shF); fl.data[o + 3] = 255;
-    for (let l = 0; l < LV.length; l++){
-      const a = smooth(LV[l] - e, LV[l] + e, h); if (a <= 0) break;
-      if (!lv[l]) lv[l] = new ImageData(TP, TP);
-      const up = l + 1 < LV.length && show.shadow ? 0.4 * smooth(LV[l + 1] - 0.03, LV[l + 1] + 0.05, hs) * (1 - smooth(LV[l + 1] - e, LV[l + 1] + e, h)) : 0;
-      const lift = 0.4 + 0.11 * l, rim = show.lines ? 1 - smooth(LV[l] + e, LV[l] + e + ln, h) : 0, k = lift * (1 - 0.45 * rim) * (1 - up);
-      const d = lv[l].data; d[o] = r * k; d[o + 1] = g * k; d[o + 2] = b * k; d[o + 3] = 255 * a * Math.min(1, 0.7 + 0.06 * l);
+  const t0 = performance.now(), fl = new ImageData(TP, TP), fills = RAISED.map(() => null), sides = RAISED.map(() => null), px = 1 / TR;
+  for (let py = 0; py < TP; py++) for (let qx = 0; qx < TP; qx++){
+    const x = tx * TILE + (qx + 0.5) * px, y = ty * TILE + (py + 0.5) * px, o = (py * TP + qx) * 4;
+    const e = sample(E, x, y), grad = Math.max(1e-5, Math.hypot(sample(E, x + 1, y) - e, sample(E, x, y + 1) - e));
+    const r = sample(COL[0], x, y), g = sample(COL[1], x, y), b = sample(COL[2], x, y);
+    floorPx(fl.data, o, r, g, b, e, grad, px, 3);
+    for (let li = 0; li < RAISED.length; li++){
+      const k = RAISED[li], a = Math.max(0, Math.min(1, (e - T[k]) / (grad * px) + 0.5)); if (a <= 0) break;
+      if (!fills[li]){ fills[li] = new ImageData(TP, TP); sides[li] = new ImageData(TP, TP); }
+      const bc = bandCol(r, g, b, k); let m = 0;
+      if (show.lines){ const d = (e - T[k]) / grad; m = 0.45 * (1 - smooth(0.6 * px, 1.6 * px, d)); }
+      const f = fills[li].data, s = sides[li].data;
+      f[o] = bc[0] * (1 - m); f[o + 1] = bc[1] * (1 - m); f[o + 2] = bc[2] * (1 - m); f[o + 3] = 255 * a;
+      s[o] = bc[0] * 0.5; s[o + 1] = bc[1] * 0.5; s[o + 2] = bc[2] * 0.5; s[o + 3] = 255 * a;
     }
   }
-  const out = {floor:toCanvas(fl), levels:lv.map(im => im && toCanvas(im)), gen:tileGen};
+  const out = {floor:toCanvas(fl), fills:fills.map(im => im && toCanvas(im)), sides:sides.map(im => im && toCanvas(im)), gen:tileGen};
   tileMs.push(performance.now() - t0); if (tileMs.length > 40) tileMs.shift();
   return out;
 }
 function toCanvas(img){ const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; c.getContext('2d').putImageData(img, 0, 0); return c; }
 function drawOld(){
   const img = new ImageData(GX, GY);
-  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const cell = MAP.cellAt((i + 0.5) * RES, (j + 0.5) * RES), hex = cell.color, n = (j * GX + i) * 4;
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const hex = MAP.cellAt((i + 0.5) * RES, (j + 0.5) * RES).color, n = (j * GX + i) * 4;
     img.data.set([parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), 255], n); }
   return toCanvas(img);
 }
-/* while growing: the raw pattern, coloured by place */
 function growImg(){
   const img = new ImageData(GX, GY);
-  for (let n = 0; n < N; n++){ const c = PLACES[place[n]].col, v = Math.min(1, V[n] / 0.4); img.data.set([WATER[0] + c[0] * v, WATER[1] + c[1] * v, WATER[2] + c[2] * v, 255], n * 4); }
+  for (let n = 0; n < N; n++){ const c = PLACES[place[n]].col, v = Math.min(1, V[n] / 0.4); img.data.set([DEEP[0] + c[0] * v, DEEP[1] + c[1] * v, DEEP[2] + c[2] * v, 255], n * 4); }
   return toCanvas(img);
 }
 
 /* ---------- view ---------- */
 const cv = $('cv'), ctx = cv.getContext('2d');
 let cw = 0, ch = 0, dpr = 1, cam = {x:W / 2, y:H / 2, z:0.1}, preview = null;
-function resize(){ dpr = Math.min(2, devicePixelRatio || 1); cw = innerWidth; ch = innerHeight; cv.width = cw * dpr; cv.height = ch * dpr; fit(); }
+const gameZ = () => Math.max(0.75, Math.min(1.15, Math.min(cw, ch) / 620));
+function resize(){ dpr = Math.min(2, devicePixelRatio || 1); cw = innerWidth; ch = innerHeight; cv.width = cw * dpr; cv.height = ch * dpr; if (!swim) fit(); }
 function fit(){ cam = {x:W / 2, y:H / 2, z:Math.min(cw / W, ch / H) * 0.96}; draw(); }
+function whole(img, sw, sh){ const z = cam.z; ctx.drawImage(img, 0, 0, sw, sh, cw / 2 - cam.x * z, ch / 2 - cam.y * z, W * z, H * z); }
 function draw(){
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#020306'; ctx.fillRect(0, 0, cw, ch);
   ctx.imageSmoothingEnabled = true;
-  /* a world rectangle drawn so that terrace l sits 'higher': scaled about the screen centre by 1 + l*P */
-  const put = (img, l, sx, sy, sw, sh, off) => {
-    /* a camera higher up (zoomed out) sees less depth, so the separation shrinks with zoom */
-    const z = cam.z * (show.parallax ? 1 + l * 0.018 * Math.min(1, cam.z) : 1), o = off || 0;
-    ctx.drawImage(img, sx, sy, sw, sh, cw / 2 + (0 - cam.x) * z + o, ch / 2 + (0 - cam.y) * z + o, W * z, H * z);
-  };
-  if (show.old){ ctx.imageSmoothingEnabled = false; put(oldImg, 0, 0, 0, GX, GY); return; }
-  if (growing && preview){ ctx.imageSmoothingEnabled = false; put(preview, 0, 0, 0, GX, GY); return; }
-  if (!floorImg) return;
-  if (cam.z >= 0.3) return drawTiles();
-  put(floorImg, 0, 0, 0, IW, IH);
-  layers.forEach((L, l) => {
-    if (show.shadow){ ctx.globalAlpha = 0.45; put(L.sh, l, 0, 0, IW / 2, IH / 2, (3 + l * 1.5) * Math.max(0.4, cam.z * 4)); ctx.globalAlpha = 1; }
-    put(L.c, l + 1, 0, 0, IW, IH);
-  });
-  if (show.play && playImg){ ctx.imageSmoothingEnabled = false; put(playImg, 1, 0, 0, GX, GY); }
+  if (show.old){ ctx.imageSmoothingEnabled = false; whole(oldImg, GX, GY); return; }
+  if (growing && preview){ ctx.imageSmoothingEnabled = false; whole(preview, GX, GY); return; }
+  if (!overview) return;
+  if (cam.z >= 0.3) drawTiles(); else whole(overview, IW, IH);
+  ctx.imageSmoothingEnabled = true;
+  if (show.speed && speedImg) whole(speedImg, GX, GY);
+  if (show.play && playImg){ ctx.imageSmoothingEnabled = false; whole(playImg, GX, GY); }
+  if (swim) drawStrand();
 }
-
 function drawTiles(){
-  const P = show.parallax ? 0.018 * Math.min(1, cam.z) : 0;
+  /* a layer at height h is drawn scaled about the screen centre by 1 + h*GAP: closer to the eye, so it moves faster
+     and is displaced outward, more so near the edges. A camera further away (zoomed out) sees less of it */
+  const P = show.parallax ? GAP * Math.min(1, cam.z) : 0;
   const x0 = cam.x - cw / 2 / cam.z, y0 = cam.y - ch / 2 / cam.z, x1 = cam.x + cw / 2 / cam.z, y1 = cam.y + ch / 2 / cam.z;
   const tx0 = Math.max(0, Math.floor(x0 / TILE) - 1), ty0 = Math.max(0, Math.floor(y0 / TILE) - 1), tx1 = Math.min(Math.ceil(W / TILE) - 1, Math.floor(x1 / TILE) + 1), ty1 = Math.min(Math.ceil(H / TILE) - 1, Math.floor(y1 / TILE) + 1);
   let made = 0, missing = 0; const vis = [];
@@ -286,77 +314,127 @@ function drawTiles(){
     else if (!t || t.gen !== tileGen){ missing++; continue; }
     tiles.delete(key); tiles.set(key, t); vis.push([tx, ty, t]);
   }
-  while (tiles.size > 40) tiles.delete(tiles.keys().next().value);
-  /* tiles still being drawn: the whole-map picture shows underneath until they arrive */
-  if (missing){ const z = cam.z; ctx.drawImage(floorImg, cw / 2 - cam.x * z, ch / 2 - cam.y * z, W * z, H * z);
-    layers.forEach((L, l) => { const zl = cam.z * (1 + (l + 1) * P); ctx.drawImage(L.c, cw / 2 - cam.x * zl, ch / 2 - cam.y * zl, W * zl, H * zl); }); }
-  const at = (l, tx, ty) => { const z = cam.z * (1 + l * P); return [cw / 2 + (tx * TILE - cam.x) * z, ch / 2 + (ty * TILE - cam.y) * z, TILE * z + 0.5]; };
+  while (tiles.size > 48) tiles.delete(tiles.keys().next().value);
+  if (missing) whole(overview, IW, IH);
+  const at = (h, tx, ty) => { const z = cam.z * (1 + h * P); return [cw / 2 + (tx * TILE - cam.x) * z, ch / 2 + (ty * TILE - cam.y) * z, TILE * z + 0.6]; };
   for (const [tx, ty, t] of vis){ const [sx, sy, sz] = at(0, tx, ty); ctx.drawImage(t.floor, sx, sy, sz, sz); }
-  for (let l = 0; l < LV.length; l++) for (const [tx, ty, t] of vis){ const c = t.levels[l]; if (!c) continue; const [sx, sy, sz] = at(l + 1, tx, ty); ctx.drawImage(c, sx, sy, sz, sz); }
-  if (show.play && playImg){ ctx.imageSmoothingEnabled = false; const z = cam.z; ctx.drawImage(playImg, cw / 2 - cam.x * z, ch / 2 - cam.y * z, W * z, H * z); }
+  RAISED.forEach((k, li) => {
+    const h1 = HEIGHT[li], h0 = li ? HEIGHT[li - 1] : 0;
+    if (P && show.sides){ const n = Math.max(1, Math.round((h1 - h0) * 4)); for (let s = 0; s < n; s++){ const h = h0 + (h1 - h0) * s / n;
+      for (const [tx, ty, t] of vis){ const c = t.sides[li]; if (!c) continue; const [sx, sy, sz] = at(h, tx, ty); ctx.drawImage(c, sx, sy, sz, sz); } } }
+    for (const [tx, ty, t] of vis){ const c = t.fills[li]; if (!c) continue; const [sx, sy, sz] = at(P ? h1 : 0, tx, ty); ctx.drawImage(c, sx, sy, sz, sz); }
+  });
   if (missing) requestAnimationFrame(draw);
-  stats();
 }
 
-/* pan and zoom: drag, wheel, pinch */
+/* ---------- swim: a test strand that feels the depth ---------- */
+let swim = false, strand = null, steer = null, lastT = 0;
+const keys = new Set(), BASE_SPEED = 230;
+function startSwim(){
+  const L = PLACES.findIndex(p => p.id === 'lagoon'), c = centres[L];
+  let x = c.x, y = c.y; for (let r = 0; r < 3000 && sample(E, x, y) >= T[2]; r += 40) x = c.x + r;
+  strand = {x, y, a:0, sp:1, body:Array.from({length:22}, (_, i) => ({x:x - i * 9, y}))};
+  cam = {x, y, z:gameZ()}; $('hud').hidden = false; lastT = performance.now(); requestAnimationFrame(swimTick);
+}
+function swimTick(now){
+  if (!swim) return;
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  let dx = 0, dy = 0;
+  if (keys.has('ArrowLeft') || keys.has('a')) dx--; if (keys.has('ArrowRight') || keys.has('d')) dx++;
+  if (keys.has('ArrowUp') || keys.has('w')) dy--; if (keys.has('ArrowDown') || keys.has('s')) dy++;
+  if (steer && steer.dx * steer.dx + steer.dy * steer.dy > 100){ dx = steer.dx; dy = steer.dy; }
+  const e = sample(E, strand.x, strand.y), sp = speedAt(e);
+  strand.sp += (Math.max(0.2, sp) - strand.sp) * Math.min(1, dt * 5);
+  if (dx || dy){
+    const want = Math.atan2(dy, dx); let d = want - strand.a; d = Math.atan2(Math.sin(d), Math.cos(d)); strand.a += Math.max(-4 * dt, Math.min(4 * dt, d));
+    const v = BASE_SPEED * strand.sp * dt, nx = strand.x + Math.cos(strand.a) * v, ny = strand.y + Math.sin(strand.a) * v;
+    /* walls: slide along them rather than stop */
+    const free = (x, y) => sample(E, x, y) < T[0];
+    if (free(nx, ny)){ strand.x = nx; strand.y = ny; } else if (free(nx, strand.y)) strand.x = nx; else if (free(strand.x, ny)) strand.y = ny;
+  }
+  let p = strand; for (const s of strand.body){ const d = Math.hypot(s.x - p.x, s.y - p.y); if (d > 9){ s.x = p.x + (s.x - p.x) * 9 / d; s.y = p.y + (s.y - p.y) * 9 / d; } p = s; }
+  cam.x += (strand.x - cam.x) * Math.min(1, dt * 6); cam.y += (strand.y - cam.y) * Math.min(1, dt * 6);
+  const b = bandOf(e);
+  $('hud').textContent = `band ${b}${b === 7 ? ' (bottomless)' : b === 0 ? ' (wall)' : b <= 3 ? ' (shallow)' : ''} · speed ${Math.round(sp * 100)}%`;
+  draw(); requestAnimationFrame(swimTick);
+}
+function drawStrand(){
+  const z = cam.z, sx = x => cw / 2 + (x - cam.x) * z, sy = y => ch / 2 + (y - cam.y) * z;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#a78bfa'; ctx.lineWidth = 7 * z;
+  ctx.beginPath(); ctx.moveTo(sx(strand.x), sy(strand.y)); for (const s of strand.body) ctx.lineTo(sx(s.x), sy(s.y)); ctx.stroke();
+  ctx.fillStyle = '#ece6ff'; ctx.beginPath(); ctx.arc(sx(strand.x), sy(strand.y), 7 * z, 0, Math.PI * 2); ctx.fill();
+}
+addEventListener('keydown', e => { if (swim && /^Arrow|^[wasd]$/.test(e.key)){ keys.add(e.key); e.preventDefault(); } });
+addEventListener('keyup', e => keys.delete(e.key));
+
+/* pan and zoom (or steer, while swimming): drag, wheel, pinch */
 const pts = new Map(); let pinch = null;
-cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, {x:e.clientX, y:e.clientY}); if (pts.size === 2){ const [a, b] = [...pts.values()]; pinch = {d:Math.hypot(a.x - b.x, a.y - b.y), z:cam.z}; } });
+const clampZ = z => Math.max(0.04, Math.min(2.5, z));
+cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, {x:e.clientX, y:e.clientY, x0:e.clientX, y0:e.clientY});
+  if (pts.size === 2){ const [a, b] = [...pts.values()]; pinch = {d:Math.hypot(a.x - b.x, a.y - b.y), z:cam.z}; steer = null; }
+  else if (swim) steer = {dx:0, dy:0}; });
 cv.addEventListener('pointermove', e => {
   const p = pts.get(e.pointerId); if (!p) return;
-  if (pts.size === 1){ cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; }
+  if (pts.size === 1 && swim && steer){ steer.dx = e.clientX - p.x0; steer.dy = e.clientY - p.y0; }
+  else if (pts.size === 1){ cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; }
   p.x = e.clientX; p.y = e.clientY;
   if (pts.size === 2 && pinch){ const [a, b] = [...pts.values()]; cam.z = clampZ(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d); }
-  draw();
+  if (!swim) draw();
 });
-const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; };
+const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!pts.size) steer = null; };
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
 cv.addEventListener('wheel', e => { e.preventDefault(); const z0 = cam.z, z1 = clampZ(z0 * Math.exp(-e.deltaY * 0.0015));
-  const wx = cam.x + (e.clientX - cw / 2) / z0, wy = cam.y + (e.clientY - ch / 2) / z0; cam.z = z1; cam.x = wx - (e.clientX - cw / 2) / z1; cam.y = wy - (e.clientY - ch / 2) / z1; draw(); }, {passive:false});
-const clampZ = z => Math.max(0.04, Math.min(2, z));
+  const wx = cam.x + (e.clientX - cw / 2) / z0, wy = cam.y + (e.clientY - ch / 2) / z0; cam.z = z1; if (!swim){ cam.x = wx - (e.clientX - cw / 2) / z1; cam.y = wy - (e.clientY - ch / 2) / z1; } draw(); }, {passive:false});
 
-/* ---------- grow: run the reaction a few dozen steps a frame so you can watch it form ---------- */
+/* ---------- grow, and the panel ---------- */
 function grow(){
   growing = true; params(); seedRD();
   const tick = () => {
     stepRD(PER_FRAME); preview = growImg(); $('prog').style.width = (iter / ITER * 100) + '%'; draw();
     if (iter < ITER) requestAnimationFrame(tick);
-    else { heights(); render(); growing = false; draw(); stats(); }
+    else { growing = false; reshape(); }
   };
   requestAnimationFrame(tick);
 }
+function reshape(){ elevation(); renderOverview(); draw(); stats(); }
 function stats(){
-  const cells = (N / 1000).toFixed(0);
   const tm = tileMs.length ? (tileMs.reduce((a, b) => a + b, 0) / tileMs.length).toFixed(0) + ' ms each' : 'zoom in to draw';
-  $('stat').textContent = `pattern: ${GX}×${GY} cells (${RES} px each), ${ITER} steps\n  ${rdMs.toFixed(0)} ms on this device (${(rdMs / ITER).toFixed(2)} ms a step)\nwhole-map terraces: ${renderMs.toFixed(0)} ms, once\nclose-up tiles (500 px): ${tm}\nswimmable water you can't reach: ${(unreach * 100).toFixed(1)}%`;
+  const cells = new Array(8).fill(0); for (let n = 0; n < N; n++) cells[bandOf(E[n])]++;
+  $('stat').textContent = `pattern: ${GX}×${GY} cells (${RES} px), ${ITER} steps: ${rdMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms\nclose-up tiles (500 px): ${tm}\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
 }
 function buildPanel(){
+  $('key').innerHTML = BRIGHT.map((_, b) => { const c = bandCol(90, 150, 130, b); return `<div style="background:rgb(${c.map(Math.round)})">${b}<br>${b ? Math.round(SPEED[b] * 100) + '%' : 'wall'}</div>`; }).join('');
   $('ters').innerHTML = PLACES.map((p, c) => `<div class="ter"><span class="sw" style="background:rgb(${p.col})"></span><span>${p.name}</span>
-    <select data-c="${c}">${Object.keys(PRESETS).map(k => `<option value="${k}" ${k === p.preset ? 'selected' : ''}>${k}</option>`).join('')}</select>
-    <label>size <input type="range" min="0.2" max="1" step="0.05" value="${p.s}" data-s="${c}"></label>
-    <label>height <input type="range" min="0" max="1.2" step="0.05" value="${p.elev}" data-g="${c}"></label></div>`).join('');
+    ${c ? `<select data-c="${c}">${Object.keys(PRESETS).map(k => `<option value="${k}" ${k === p.preset ? 'selected' : ''}>${k}</option>`).join('')}</select>
+    <label class="sl"><span>size</span><input type="range" min="0.2" max="1" step="0.05" value="${p.s}" data-s="${c}"></label>
+    <label class="sl"><span>low</span><input type="range" min="0" max="1" step="0.02" value="${p.base}" data-b="${c}"></label>
+    <label class="sl"><span>high</span><input type="range" min="0" max="1" step="0.02" value="${p.top}" data-h="${c}"></label>` : '<span></span>'}</div>`).join('');
   $('ters').addEventListener('change', e => {
     const t = e.target;
+    if (t.dataset.b){ PLACES[t.dataset.b].base = +t.value; return reshape(); }
+    if (t.dataset.h){ PLACES[t.dataset.h].top = +t.value; return reshape(); }
     if (t.dataset.c) PLACES[t.dataset.c].preset = t.value;
     if (t.dataset.s) PLACES[t.dataset.s].s = +t.value;
-    if (t.dataset.g){ PLACES[t.dataset.g].elev = +t.value; params(); heights(); render(); draw(); stats(); return; }
     grow();
   });
 }
 document.querySelectorAll('[data-t]').forEach(b => b.addEventListener('click', () => {
   const k = b.dataset.t; show[k] = !show[k]; b.setAttribute('aria-pressed', show[k]);
-  if (k === 'lines' && !growing){ render(); stats(); }
+  if (k === 'lines' && !growing) renderOverview();
   draw();
 }));
+$('gap').addEventListener('input', e => { GAP = +e.target.value; draw(); });
+$('bSwim').addEventListener('click', () => { swim = !swim; $('bSwim').setAttribute('aria-pressed', swim); $('hud').hidden = !swim; if (swim) startSwim(); else draw(); });
 $('bNew').addEventListener('click', () => { seed = (seed * 48271) % 2147483647; layout(); grow(); });
 $('bGrow').addEventListener('click', grow);
-$('bFit').addEventListener('click', fit);
-/* the game's own zoom, wherever you are looking */
-$('bGame').addEventListener('click', () => { cam.z = Math.max(0.75, Math.min(1.15, Math.min(cw, ch) / 620)); draw(); });
+$('bFit').addEventListener('click', () => { if (swim) $('bSwim').click(); fit(); });
+$('bGame').addEventListener('click', () => { cam.z = gameZ(); draw(); });
 $('shut').addEventListener('click', () => { const s = $('panel').classList.toggle('shut'); $('shut').textContent = s ? 'Show' : 'Hide'; });
 addEventListener('resize', resize);
 const q = new URLSearchParams(location.search); if (q.get('seed')) seed = +q.get('seed') || 7;
 buildPanel(); resize(); layout(); grow();
-window.__lab = {get stats(){ return {rdMs, renderMs, unreach, iter, tileMs:tileMs.slice()}; }, show, draw, PLACES, grow, look(id, z){ const c = PLACES.findIndex(p => p.id === id); let bx = 0, by = 0, s = 0; for (let n = 0; n < N; n++){ const w = wts[c][n] ** 4; bx += w * (n % GX); by += w * (n / GX | 0); s += w; } cam = {x:bx / s * RES, y:by / s * RES, z}; draw(); }};
+window.__lab = {get stats(){ return {rdMs, renderMs, unreach, iter, tileMs:tileMs.slice()}; }, show, draw, PLACES, grow, get strand(){ return strand; },
+  look(id, z){ const c = centres[PLACES.findIndex(p => p.id === id)]; cam = {x:c.x, y:c.y, z}; draw(); }, at(x, y, z){ cam = {x, y, z}; draw(); }, E:(x, y) => sample(E, x, y)};
 })();
 </script>
 </body>
