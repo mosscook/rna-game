@@ -17,16 +17,30 @@ Room names can use letters, numbers and dashes, up to 32 characters. They aren't
 
 A mouse steers toward the pointer. Arrow keys or WASD steer too (two at once go diagonally; letting go stops), and whichever was used last is in charge; while you are watching, the arrow keys switch strands instead. On touch screens, wherever a finger lands becomes a joystick: drag away from that spot to steer (a short drag swims slowly, about 70 px is full speed), and lift to stop. A faint ring shows while a finger is down. On small screens the lines of science about each place are skipped, since they cover too much of the soup.
 
+## Start screen and Learn
+
+The first screen offers **Play**, **Spectate** and **Learn**. On the home page Play starts a round against bots and Spectate tours the bots; in a room (`rna.game/period3`) Play picks a codon name and joins, and Spectate watches with no strand (for a projector). Until someone finishes the lesson on that device, Learn is marked "New? Start here".
+
+**Learn** is a guided first round in the practice pool, about two minutes, with no bots. Each step finishes when you do it:
+
+1. **Swim**: point, drag or use the arrow keys (the pool has no letters yet, so nothing gets in the way).
+2. **Pick a recipe**: open Recipes and pick Cleaver. Letters start drifting in.
+3. **Collect**: swim through the Cleaver's letters in order. The next letter needed is always kept within reach, and a letter that breaks your progress gets a tip to Drop it.
+4. **Fold**: the Cleaver forms. If the recipe comes apart first, the lesson goes back to Collect.
+5. **Cut**: a strand labelled Practice appears; hit it twice with the spikes. Its letters land beside you.
+
+A last card covers what the lesson didn't show: scoring, the other segments, bots and places. Learn from a room opens `rna.game/?learn=<room>` and ends (or skips) back in that room. The lesson's sim uses the lobby map with `{lobby:true, cuts:true, nucs:0}`.
+
 ## Lobby
 
-A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a "Just watch" tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
+A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
 
 ## Watching
 
 Press **Watch** (or V) to follow other strands: ◀ ▶ (or the arrow keys) move between them, **Tour** moves on every 15 seconds, and × (or Esc) goes back to your own strand. While you watch, your strand waits where it is and can still be hit. The bar shows each strand's score, its place, and what a bot is thinking.
 
-- **Single-player:** "Or just watch the bots" on the start screen starts a round and tours the bots.
-- **Rooms:** "Just watch" on the join screen connects with no strand. Watchers aren't counted as players and don't take a seat from a bot, so it suits a projector at the front of the class. Up to 6 watchers per room. The server sends each watcher what is around the strand they follow.
+- **Single-player:** Spectate on the start screen starts a round and tours the bots.
+- **Rooms:** Spectate on the start screen connects with no strand. Watchers aren't counted as players and don't take a seat from a bot, so it suits a projector at the front of the class. Up to 6 watchers per room. The server sends each watcher what is around the strand they follow.
 
 ## How it works
 

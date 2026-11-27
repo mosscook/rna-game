@@ -202,6 +202,31 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .dev .legend{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
 .dev .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;background:var(--c);vertical-align:-1px}
 .dev h3{margin:2px 0 0;font:700 10px var(--font-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+/* the start screen: three ways in */
+.modes{display:grid;gap:8px}
+.mode{display:grid;gap:2px;text-align:left;padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:var(--field);color:var(--ink);cursor:pointer;font:inherit;position:relative}
+.mode b{font:800 17px/1.2 var(--font-display)}
+.mode small{font-size:12.5px;color:var(--muted)}
+.mode:hover{border-color:var(--ink)}
+.mode.go{background:var(--stain);border-color:var(--stain);color:var(--surface)}
+.mode.go small{color:color-mix(in srgb,var(--surface) 82%,transparent)}
+.mode .tag{display:inline-block;margin-left:8px;vertical-align:2px;font:700 11px/1 var(--font-body);padding:4px 8px;border-radius:99px;background:var(--stain-soft);color:var(--ink)}
+.sheet details{font-size:13.5px}
+.sheet details summary{cursor:pointer;color:var(--muted);font-size:13px}
+.sheet details ol.steps{margin-top:8px}
+/* Learn: the coach card at the top middle, one step at a time */
+.coach{position:absolute;left:50%;top:10px;transform:translateX(-50%);width:min(440px,calc(100% - 20px));display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:start;
+  padding:10px 12px;border-radius:12px;z-index:4;background:var(--glass);border:1px solid var(--edge);box-shadow:0 2px 10px rgb(0 0 0 / .18);font-size:13.5px}
+.coach .n{font:700 11px/1 var(--font-mono);color:var(--muted);padding-top:3px;white-space:nowrap}
+.coach b{font:800 15px/1.2 var(--font-display)}
+.coach p{margin:2px 0 0}
+.coach .note{font-size:12px;color:var(--muted)}
+.coach .tip{font-size:12.5px;color:var(--warn);font-weight:700}
+.coach .alt{background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:12px}
+.coach.pop{animation:pop .45s ease-out}
+@keyframes pop{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--stain) 60%,transparent)}100%{box-shadow:0 0 0 12px transparent}}
+.hint{animation:pulse 1.2s ease-in-out infinite;border-color:var(--stain)!important}
+@media (max-width:760px){ .coach{top:52px} }
 @media (max-width:760px){ .watch{bottom:56px} }
 @media (max-width:640px){
   .hud{gap:8px;padding:4px 10px;max-width:calc(100% - 130px)}
@@ -209,7 +234,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
   kbd{display:none}
   .sl,.chip{width:16px;height:20px;font-size:11px;line-height:18px}
 }
-@media (prefers-reduced-motion:reduce){ .toast{transition:none} .btn.go.pulse{animation:none} .sl.next{animation:none} }
+@media (prefers-reduced-motion:reduce){ .toast{transition:none} .btn.go.pulse{animation:none} .sl.next{animation:none} .hint,.coach.pop{animation:none} }
 </style>
 </head>
 <body>
@@ -241,6 +266,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
   </div>
 
   <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><button class="btn go" type="button" id="bStart">Start game</button></div>
+  <div class="coach" id="coach" role="status" aria-live="polite" hidden><span class="n" id="coachN"></span><div><b id="coachT"></b><p id="coachX"></p><p class="note" id="coachNote"></p><p class="tip" id="coachTip" hidden></p></div><button class="alt" type="button" id="coachSkip">Skip</button></div>
   <aside class="dev" id="dev" aria-label="Developer tools" hidden></aside>
   <div class="watch" id="watchBar" role="group" aria-label="Spectating" hidden>
     <button class="btn sm" type="button" id="wPrev" aria-label="Previous strand" title="Previous (←)">&#9664;</button>
@@ -293,7 +319,7 @@ const sim = window.SoupSim.create({MAP, BOTS, stage, minStrands:10, hooks:{
   fx:e => fx.push(Object.assign({t:0}, e)),
   dirty:p => { if (p === me) uiDirty = true; },
   end:rows => showEnd(rows),
-  tint:(col, bot) => bot ? {spine:T[col], goo:T[col]} : null}});
+  tint:col => col === 'stain' ? null : {spine:T[col], goo:T[col]}}});
 /* multiplayer: a page at rna.game/<room> joins that room on the server; the home page is single-player against bots */
 const ROOM = (n => n && !['ws', 'r', 'api', 'privacy', 'about', 'index', 'favicon', 'robots', 'version', 'lab', 'names'].includes(n) ? n : null)(
   ((location.pathname.match(/^\/(?:r\/)?([a-z0-9][a-z0-9-]{0,31})\/?$/i) || [])[1] || '').toLowerCase());
@@ -362,13 +388,13 @@ function renderWatch(){
 }
 
 function reset(){
-  if (net){ showJoin(); return; }
+  if (net){ showStart(); return; }
   if (!me) me = sim.addHuman('You', 'stain');
   sim.reset();
   fx = []; camT = null; paused = false; pointer = null;
   $('bPause').setAttribute('aria-pressed', 'false');
   uiDirty = true;
-  showIntro(true);
+  showStart();
 }
 function step(dt){
   if (net){
@@ -377,7 +403,7 @@ function step(dt){
     net.update(dt, aim);
     if (net.me && me !== net.me){ me = net.me; uiDirty = true; }
   } else {
-    if (sim.state === 'play') aimPlayer();
+    if (sim.state === 'play'){ aimPlayer(); if (lesson && !paused) lessonTick(dt); }
     const t0 = performance.now();
     for (let k = 0; k < devFast; k++) sim.step(dt);
     stepMs += (performance.now() - t0 - stepMs) * 0.05;
@@ -517,29 +543,180 @@ function showEnd(rows){
   $('overlay').hidden = false;
   if (!net){ $('again').addEventListener('click', () => reset()); $('again').focus(); }
 }
-function showIntro(show){
-  $('overlay').hidden = !show;
-  if (!show) return;
-  $('sheet').innerHTML = `<h2>Five minutes in the soup</h2>
+/* the start screen: Play, Spectate or Learn. In a room, Play picks a name and joins, Spectate watches without a strand,
+   and Learn runs the lesson on the home page, which ends by sending you back here */
+let learned = false;
+try { learned = !!localStorage.getItem('soup.learned'); } catch(e){}
+const HOW = `<details><summary>How to play, in 20 seconds</summary><ol class="steps">
+    <li>Point, drag or use the arrow keys to swim. Your head collects the letters it touches.</li>
+    <li>Open Recipes and pick one. Collect its letters in order, then Fold.</li>
+    <li>Wrong letter? Drop it before you fold.</li>
+    <li>Each new kind of segment scores 3. The most complex strand after five minutes wins.</li>
+    <li>The lagoon, the chimneys, the ice and the volcanic island each have their own letters and dangers.</li></ol></details>`;
+function modeButtons(play, watchText, learnText){
+  return `<div class="modes">
+    <button class="mode go" type="button" id="mPlay"><b>Play</b><small>${play}</small></button>
+    <button class="mode" type="button" id="mWatch"><b>Spectate</b><small>${watchText}</small></button>
+    <button class="mode" type="button" id="mLearn"><b>Learn${learned ? '' : '<span class="tag">New? Start here</span>'}</b><small>${learnText}</small></button>
+  </div>`;
+}
+function showStart(){
+  $('overlay').hidden = false;
+  if (net){
+    $('sheet').innerHTML = `<h2>Room ${ROOM}</h2>
+      <p>Everyone who opens <b>${location.host}/${ROOM}</b> plays in the same soup.</p>
+      ${modeButtons('Pick a codon name and join the room', 'No strand, not counted as a player. Good for a projector', 'About two minutes on your own, then back here to join')}
+      ${HOW}`;
+    $('mPlay').addEventListener('click', showJoin);
+    $('mWatch').addEventListener('click', watchRoom);
+    $('mLearn').addEventListener('click', () => { location.href = '/?learn=' + ROOM; });
+  } else {
+    $('sheet').innerHTML = `<h2>RNA Strand Soup</h2>
+      <p>Before DNA and proteins, strands of RNA may have done everything. Grow the most complex strand in five minutes.</p>
+      ${modeButtons('A five-minute round against nine bots', 'Watch the bots build, and see what they are thinking', 'About two minutes, one step at a time')}
+      <form class="room" id="roomForm"><label for="roomName">Play together:</label><span class="host">${location.host}/</span><input id="roomName" placeholder="period3" maxlength="32" autocomplete="off" spellcheck="false" aria-label="Room name"><button class="btn" type="submit">Join room</button></form>
+      ${HOW}
+      <p class="fine">The RNA world is a leading hypothesis, not settled fact. Base pairing, ribozymes and magnesium are real; swimming and the exact shapes are invented for the game.</p>`;
+    $('mPlay').addEventListener('click', begin);
+    $('mWatch').addEventListener('click', () => { begin(); cycle(1); setTour(true); });
+    $('mLearn').addEventListener('click', () => startLesson());
+    $('roomForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const name = $('roomName').value.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+/, '').slice(0, 32);
+      if (name) location.href = '/' + name; else $('roomName').focus();
+    });
+  }
+  (learned ? $('mPlay') : $('mLearn')).focus();
+}
+/* ---------- Learn: a guided first round in the small practice pool ----------
+   Five steps, each finished by doing it: swim, pick a recipe, collect its letters, fold, cut. The pool starts empty so
+   stray letters do not get in the way of the first recipe; once the recipe is picked, letters fill in and the next one
+   needed is always kept within reach. Then a card with the rules the lesson did not show. */
+const LEARN_ROOM = (() => { const q = new URLSearchParams(location.search); return q.has('learn') ? (q.get('learn') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32) : null; })();
+let lesson = null;   /* {i, moved, last, target, supplyT} while the lesson runs */
+const touchy = () => touchMode || matchMedia('(pointer: coarse)').matches;
+const LESSON = [
+  {title:'Swim', text:() => touchy() ? 'Put a finger down anywhere and drag the way you want to go. Drag further to swim faster.' : 'Point where you want to go. The arrow keys or WASD work too.',
+    note:'Your strand already has one segment, a Mover, so it can swim.', done:L => L.moved > 600},
+  {title:'Pick a recipe', text:() => `Every segment is folded from a recipe of letters. Open Recipes${touchy() ? '' : ' (R)'} and pick Cleaver.`,
+    note:'Letters are drifting in: A, U, G and C, the four bases of RNA.', enter:() => { sim.nucTarget = 45; }, done:() => pinned === 'Cleaver'},
+  {title:'Collect', text:() => 'Swim through the letters on the Cleaver card, in order. Your head picks them up. The next one you need is circled in the water.',
+    note:'The first two can be any letters. The last two pair with them, A with U and G with C, closing the fold.', done:() => cleaverReady() || has(me, 'Cleaver')},
+  {title:'Fold', text:() => `All ten letters. ${touchy() ? 'Tap Fold' : 'Press Space or Fold'} to fold them into a Cleaver.`,
+    note:'A new kind of segment scores 3 points.', done:() => has(me, 'Cleaver')},
+  {title:'Cut', text:() => 'Cleaver spikes damage what they touch. Swim close past the strand labelled Practice: one hit damages a segment, a second cuts it off.',
+    note:'The letters of what you cut land beside you.', enter:() => { pinned = null; addTarget(); }, done:() => me.stats.cuts > 0}];
+const cleaverReady = () => RS.parseRecipes(me.s.tail).some(g => g.fn === 'Cleaver');   /* read as a player's Fold reads it */
+function startLesson(){
+  if (net) return;
+  lesson = {i:-1, moved:0, last:null, target:null, supplyT:0};
+  if (watchId != null) stopWatching();
+  sim.setMinStrands(0);
+  sim.reset(null, {lobby:true, cuts:true, nucs:0});
+  sim.start();
+  pinned = null; fx = []; camT = null; paused = false;
+  $('overlay').hidden = true; $('bWatch').hidden = true;
+  nextStep();
+}
+function nextStep(){
+  const L = lesson; L.i++;
+  if (L.i > 0){ const h = me.s.head; fx.push({t:0, x:h.x, y:h.y, col:'stain', r:44, dur:0.6}); }
+  for (const el of document.querySelectorAll('.hint')) el.classList.remove('hint');
+  if (L.i >= LESSON.length){
+    /* a moment to see the cut letters land beside you before the last card */
+    $('coachN').textContent = ''; $('coachT').textContent = 'Nice cut'; $('coachX').textContent = 'Its letters landed beside you. In a round, they are yours to collect.';
+    $('coachNote').textContent = ''; $('coachTip').hidden = true;
+    setTimeout(() => { if (lesson) finishLesson(); }, 2200); return;
+  }
+  const st = LESSON[L.i]; if (st.enter) st.enter();
+  const c = $('coach'); c.hidden = false;
+  $('coachN').textContent = `${L.i + 1}/${LESSON.length}`; $('coachT').textContent = st.title;
+  $('coachX').textContent = st.text(); $('coachNote').textContent = st.note || '';
+  $('coachTip').hidden = true;
+  c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
+}
+/* the practice strand: a second strand with a Detector behind its Mover, sitting still a little way off */
+function addTarget(){
+  const h = me.s.head; let spot = null;
+  for (let r = 300; r >= 160 && !spot; r -= 40) for (let k = 0; k < 12 && !spot; k++){
+    const a = me.s.heading + k * TAU / 12, x = h.x + Math.cos(a) * r, y = h.y + Math.sin(a) * r;
+    if (x > 200 && x < W - 200 && y > 200 && y < H - 200 && !MAP.solidAt(x, y) && !MAP.solidAt(x + 60, y) && !MAP.solidAt(x - 60, y)) spot = {x, y};
+  }
+  const t = sim.addHuman('Practice', 'muted');
+  if (spot) t.s.place(spot.x, spot.y, rnd(0, TAU));
+  const d = RS.recipeSeq('Detector'); t.s.appendFolded(d, [{fn:'Detector', start:0, end:d.length - 1}]);
+  t.inv = 0.5; lesson.target = t;
+}
+/* a light hand while you collect: a letter that does not fit gets a tip, and the next letter needed is never far */
+function lessonTick(dt){
+  const L = lesson; if (!L || L.i < 0 || L.i >= LESSON.length || !me) return;
+  const h = me.s.head;
+  if (L.last) L.moved += Math.hypot(h.x - L.last.x, h.y - L.last.y);
+  L.last = {x:h.x, y:h.y};
+  if (L.target){ L.target.tx = L.target.s.head.x; L.target.ty = L.target.s.head.y; }
+  const step = LESSON[L.i];
+  if (L.i === 1){ $('bRec').classList.toggle('hint', !panelOpen); document.querySelector('.rec[data-f="Cleaver"]').classList.add('hint'); }
+  if (L.i === 1 || L.i === 2){
+    /* the furthest you have got through the Cleaver: a letter that drops you back from it did not fit.
+       Letters picked up before the recipe was chosen just fold into junk, so they get no tip */
+    const tail = me.s.tail, pr = RS.recipeProgress(tail, 'Cleaver'), tip = $('coachTip');
+    L.best = Math.min(Math.max(L.best || 0, pr.k), tail.length);
+    const off = pr.k < L.best;
+    tip.hidden = !off;
+    if (off) tip.textContent = `That letter does not fit the Cleaver. ${touchy() ? 'Drop' : 'Drop (X)'} takes it back off.`;
+    if (L.i === 2 && pinned !== 'Cleaver') pinned = 'Cleaver';
+  }
+  if (L.i === 2){
+    L.supplyT -= dt;
+    if (L.supplyT <= 0){
+      L.supplyT = 0.5;
+      const pr = RS.recipeProgress(me.s.tail, 'Cleaver'), need = RS.recipeNeed(pr.t, 'Cleaver', pr.k) || pick(BASES);
+      if (!sim.nucs.some(q => q.b === need && dist(q.x, q.y, h.x, h.y) < 380)) for (let k = 0; k < 20; k++){
+        const a = me.s.heading + rnd(-1.4, 1.4), r = rnd(140, 280), x = h.x + Math.cos(a) * r, y = h.y + Math.sin(a) * r;
+        if (x > 60 && x < W - 60 && y > 60 && y < H - 60 && !MAP.solidAt(x, y)){ sim.spawnNuc(x, y, need, {x, y, r:60}); break; }
+      }
+    }
+  }
+  /* the Cleaver came apart before folding (more letters, a drop, or a fold of something else): back to collecting */
+  if (L.i === 3 && !has(me, 'Cleaver') && !cleaverReady()){ L.i = 1; nextStep(); return; }
+  if (step.done(L)) nextStep();
+}
+function finishLesson(){
+  $('coach').hidden = true;
+  try { localStorage.setItem('soup.learned', '1'); } catch(e){}
+  learned = true;
+  const room = LEARN_ROOM;
+  $('sheet').innerHTML = `<h2>You're ready</h2>
     <ol class="steps">
-      <li>Point, or touch and drag, to swim. Your head collects the letters it touches.</li>
-      <li>Open Recipes and pick one. Collect its letters in order, then Fold.</li>
-      <li>Wrong letter? Drop it before you fold.</li>
-      <li>Explore: the lagoon, the chimneys west, the ice north and the volcanic island east each have their own letters and dangers.</li>
-      <li>Nine bots share the soup, each with its own personality. Press T to hide what they are thinking.</li>
+      <li>Your score is your strand's complexity: each new kind of segment scores 3, a repeat 1. The most complex strand after five minutes wins.</li>
+      <li>Seven kinds to build. Recipes says what each one does: a Membrane shields the segments beside it, a Joiner takes in drifting fragments, a Repairer mends damage.</li>
+      <li>Others can cut you too. Bots each have a personality; press T to see what they are thinking.</li>
+      <li>The lagoon, the chimneys, the ice and the volcanic island each have their own letters and dangers. Explore.</li>
     </ol>
-    <p class="fine">The RNA world is a leading hypothesis, not settled fact. Base pairing, ribozymes and magnesium are real; swimming and the exact shapes are invented for the game.</p>
-    <button class="btn go" type="button" id="begin">Start the round</button>
-    <button class="alt" type="button" id="watchBots">Or just watch the bots</button>
-    <form class="room" id="roomForm"><label for="roomName">Or play together:</label><span class="host">${location.host}/</span><input id="roomName" placeholder="period3" maxlength="32" autocomplete="off" spellcheck="false" aria-label="Room name"><button class="btn" type="submit">Join room</button></form>
-    <p class="fine">Everyone who opens the same room name plays in the same soup. Any name works.</p>`;
-  $('begin').addEventListener('click', begin);
-  $('watchBots').addEventListener('click', () => { begin(); cycle(1); setTour(true); });
-  $('roomForm').addEventListener('submit', e => {
-    e.preventDefault();
-    const name = $('roomName').value.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+/, '').slice(0, 32);
-    if (name) location.href = '/' + name; else $('roomName').focus();
-  });
+    <button class="btn go" type="button" id="lPlay">${room ? 'Join room ' + room : 'Play a round'}</button>
+    ${room ? '' : '<button class="alt" type="button" id="lWatch">Or watch the bots first</button>'}`;
+  $('overlay').hidden = false; $('lPlay').focus();
+  $('lPlay').addEventListener('click', () => { if (room){ location.href = '/' + room; return; } endLesson(); begin(); });
+  if (!room) $('lWatch').addEventListener('click', () => { endLesson(); begin(); cycle(1); setTour(true); });
+}
+/* back to a normal round: the practice strand goes, the bots come back */
+function endLesson(){
+  if (!lesson) return;
+  if (lesson.target) sim.leave(lesson.target);
+  lesson = null; pinned = null;
+  for (const el of document.querySelectorAll('.hint')) el.classList.remove('hint');
+  $('coach').hidden = true; $('bWatch').hidden = false;
+  if (LEARN_ROOM != null) history.replaceState(null, '', '/');
+  sim.setMinStrands(10);
+  reset();
+}
+/* skipping a lesson that came from a room goes back to that room */
+$('coachSkip').addEventListener('click', () => { if (LEARN_ROOM) location.href = '/' + LEARN_ROOM; else endLesson(); });
+function watchRoom(){
+  watchOnly = true; setTour(true);
+  for (const id of ['bFold', 'bDrop', 'bWatch', 'bRec', 'wStop']) $(id).hidden = true;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  net.connect(`${proto}//${location.host}/ws/${ROOM}`, null, {watch:true});
 }
 function begin(){ if (net) return joinRoom(); if (sim.state !== 'ready') return; sim.start(); $('overlay').hidden = true; }
 /* joining a room: pick a three-letter codon name (no accounts; it is remembered on this device only) */
@@ -554,7 +731,7 @@ async function askNames(){
   try {
     const r = await fetch(`/names/${ROOM}`, {cache:'no-store'}); if (!r.ok) return;
     taken = new Set((await r.json()).taken || []);
-    if (taken.has(codon)){ codon = freeCodon(); if (!$('overlay').hidden && $('justWatch')) showJoin(); }
+    if (taken.has(codon)){ codon = freeCodon(); if (!$('overlay').hidden && $('dice')) showJoin(); }
   } catch(e){}
 }
 function showJoin(){
@@ -566,7 +743,7 @@ function showJoin(){
       <button type="button" class="cd dice" id="dice" aria-label="Random codon">&#8635;</button></div>
     <p class="fine" id="nameNote">${taken.has(codon) ? `Someone in this room is already ${codon}. Pick another so people can tell you apart.` : taken.size ? `${taken.size} ${taken.size === 1 ? 'name is' : 'names are'} taken here; ${codon} is free.` : ''}</p>
     <button class="btn go" type="button" id="begin">Join</button>
-    <button class="alt" type="button" id="justWatch">Just watch (for a projector: no strand, not counted as a player)</button>
+    <button class="alt" type="button" id="joinBack">Back</button>
     <p class="fine" id="netStatus"></p>`;
   $('sheet').querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => {
     const i = +b.dataset.i, nx = 'AUGC'['AUGC'.indexOf(codon[i]) + 1] || 'A';
@@ -574,12 +751,7 @@ function showJoin(){
   }));
   $('dice').addEventListener('click', () => { codon = freeCodon(); showJoin(); });
   $('begin').addEventListener('click', begin); $('begin').focus();
-  $('justWatch').addEventListener('click', () => {
-    watchOnly = true; setTour(true);
-    for (const id of ['bFold', 'bDrop', 'bWatch', 'bRec', 'wStop']) $(id).hidden = true;
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    net.connect(`${proto}//${location.host}/ws/${ROOM}`, null, {watch:true});
-  });
+  $('joinBack').addEventListener('click', showStart);
 }
 function joinRoom(){
   try { localStorage.setItem('soup.codon', codon); } catch(e){}
@@ -813,11 +985,11 @@ function renderLobby(){
 }
 function renderClock(){
   const s = Math.ceil(world.timeLeft);
-  $('time').textContent = net && net.lobby ? 'Lobby' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  $('time').textContent = world.lobby ? (lesson ? 'Learn' : 'Lobby') : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   renderLobby();
   const fp = focusP();
   $('score').textContent = complexity(fp);
-  const z = fp.alive && !(net && net.lobby) ? (ZONE_TEXT[zoneAt(fp.s.head.x, fp.s.head.y)] || '') : '';
+  const z = fp.alive && !world.lobby ? (ZONE_TEXT[zoneAt(fp.s.head.x, fp.s.head.y)] || '') : '';
   $('zone').textContent = z.split(':')[0];
   $('zone').title = z;
   const rows = world.standings();
@@ -929,7 +1101,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'p' || e.key === 'P') togglePause();
   else if (e.key === 'r' || e.key === 'R') openPanel();
   else if (e.key === 'Escape' && panelOpen) openPanel(false);
-  else if (e.key === 'v' || e.key === 'V'){ if (watchId == null) cycle(1); else stopWatching(); }
+  else if ((e.key === 'v' || e.key === 'V') && !lesson){ if (watchId == null) cycle(1); else stopWatching(); }
   else if ((e.key === 'ArrowRight' || e.key === ']') && (watchId != null || watchOnly)){ e.preventDefault(); setTour(false); cycle(1); }
   else if ((e.key === 'ArrowLeft' || e.key === '[') && (watchId != null || watchOnly)){ e.preventDefault(); setTour(false); cycle(-1); }
   else if (e.key === 'Escape' && watchId != null) stopWatching();
@@ -945,6 +1117,7 @@ function start(){
   try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); } } catch(e){}
   if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
   reset(); resize();
+  if (LEARN_ROOM != null && !net) startLesson();
   window.addEventListener('resize', resize);
   if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
   let last = performance.now(), fpsT = 0, fpsN = 0, acc = 0;
@@ -971,6 +1144,7 @@ function start(){
   })(last);
   window.__game = {step, begin, doFold, doDrop, reset, sim, net, world, strike:sim.strike, uvFlash:sim.uvFlash, impact:sim.impact, geyserBurst:sim.geyserBurst,
     complexity, spawnFrag:sim.spawnFrag, track, get mapEv(){ return sim.mapEv; },
+    get cam(){ return {x:camX, y:camY, scale}; }, get lesson(){ return lesson && {i:lesson.i, target:lesson.target}; },
     get me(){ return me; }, get players(){ return sim.players; }, get frags(){ return sim.frags; }, get nucs(){ return sim.nucs; },
     get timeLeft(){ return sim.timeLeft; }, get over(){ return sim.state === 'over'; }, get fps(){ return window.__fps; }, RS, stage};
 }
