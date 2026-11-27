@@ -36,7 +36,19 @@ function blur(a, GX, GY, r){
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
 const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, texture:1, align:1, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
 
+/* generate = build, check, and regrow from the next seed if a check fails that can't be fixed in place (at most 4
+   tries; then the best try). Deterministic: the same settings and seed always end on the same map */
 function generate(o){
+  let best = null;
+  for (let t = 0; t < 4; t++){
+    const w = build(Object.assign({}, o, {seed:(o.seed || 1) + t * 1000}));
+    w.checks.tries = t + 1; w.checks.seed = o.seed || 1;
+    if (w.checks.ok) return w;
+    if (!best || w.checks.score > best.checks.score) best = w;
+  }
+  return best;
+}
+function build(o){
   const p = Object.assign({}, DEFAULTS, o), {W, H, RES} = p, GX = Math.round(W / RES), GY = Math.round(H / RES), N = GX * GY;
   const r = rng(p.seed * 2654435761);
   const g = Array.from({length:6}, () => noiseGrid(r));
@@ -439,10 +451,75 @@ function generate(o){
     for (let q = 0, tries = 0; q < 10 && tries < 200; tries++){ const x = px + (r() * 2 - 1) * 110, y = py + (r() * 2 - 1) * 110; if (inMound(x, y, 15) || eAt(x, y) >= WALL - 0.1) continue; letters.push({x, y, b:BASES[Math.floor(r() * 4)], where:'pocket'}); q++; }
   }
   for (const l of letters2) letters.push(l);
+  /* ---- checks: fix what can be fixed in place, measure the rest ----
+     1. Sealed water: every swimmable cell must connect (4-neighbour, like the lab's check) to the main water. A tiny
+        pocket is filled in; a bigger one gets a passage carved to the nearest main water through the fewest wall
+        cells (0-1 BFS), three cells wide, down to band 2 so it reads as a worn gap, not a canal.
+     2. Fair starts: mound spacing around the lagoon; every mound must have opened out (1 covers this).
+     3. Every outer place present must touch a deep channel through open water.
+     4. The lagoon's band mix: mostly swimmable middle depths (bands 3-6).
+     Letters stranded in walls are dropped. */
+  const checks = {filled:0, carved:0, carvedCells:0};
+  {
+    const open = n => E[n] < WALL, comp = new Int32Array(N).fill(-1), sizes = [];
+    for (let n0 = 0; n0 < N; n0++){ if (!open(n0) || comp[n0] >= 0) continue;
+      const c = sizes.length; let sz = 0; const q = [n0]; comp[n0] = c;
+      while (q.length){ const n = q.pop(); sz++; const i = n % GX, j = (n - i) / GX;
+        if (i > 0 && comp[n - 1] < 0 && open(n - 1)){ comp[n - 1] = c; q.push(n - 1); }
+        if (i < GX - 1 && comp[n + 1] < 0 && open(n + 1)){ comp[n + 1] = c; q.push(n + 1); }
+        if (j > 0 && comp[n - GX] < 0 && open(n - GX)){ comp[n - GX] = c; q.push(n - GX); }
+        if (j < GY - 1 && comp[n + GX] < 0 && open(n + GX)){ comp[n + GX] = c; q.push(n + GX); } }
+      sizes.push(sz); }
+    let main = 0; for (let c = 1; c < sizes.length; c++) if (sizes[c] > sizes[main]) main = c;
+    const isMain = new Uint8Array(N); for (let n = 0; n < N; n++) if (comp[n] === main) isMain[n] = 1;
+    const members = sizes.map(() => []); for (let n = 0; n < N; n++) if (comp[n] >= 0 && comp[n] !== main) members[comp[n]].push(n);
+    const cost = new Int32Array(N), prev = new Int32Array(N);
+    for (let c = 0; c < sizes.length; c++){
+      if (c === main || isMain[members[c][0]]) continue;
+      if (sizes[c] < 6){ for (const n of members[c]) E[n] = WALL + 0.02; checks.filled++; continue; }
+      cost.fill(1e9); prev.fill(-1); const dq = new Int32Array(N * 2); let h = N, tl = N;
+      for (const n of members[c]){ cost[n] = 0; dq[tl++] = n; }
+      let hit = -1;
+      while (h < tl){ const n = dq[h++]; if (isMain[n]){ hit = n; break; }
+        const i = n % GX, j = (n - i) / GX;
+        for (const m of [i > 0 ? n - 1 : -1, i < GX - 1 ? n + 1 : -1, j > 0 ? n - GX : -1, j < GY - 1 ? n + GX : -1]){
+          if (m < 0) continue; const w0 = open(m) ? 0 : 1; if (cost[n] + w0 >= cost[m]) continue;
+          cost[m] = cost[n] + w0; prev[m] = n; if (w0){ dq[tl++] = m; } else { dq[--h] = m; } } }
+      if (hit < 0) continue;
+      for (let n = hit; n >= 0; n = prev[n]){
+        const i = n % GX, j = (n - i) / GX;
+        for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++){ const ii = i + a, jj = j + b; if (ii < 0 || jj < 0 || ii >= GX || jj >= GY) continue;
+          const m = jj * GX + ii; if (E[m] > 0.66){ E[m] = 0.66; checks.carvedCells++; } }
+      }
+      for (const n of members[c]) isMain[n] = 1;
+      checks.carved++;
+    }
+    for (let k = letters.length - 1; k >= 0; k--){ const l = letters[k], n = Math.min(GY - 1, Math.max(0, Math.floor(l.y / RES))) * GX + Math.min(GX - 1, Math.max(0, Math.floor(l.x / RES))); if (E[n] >= WALL) letters.splice(k, 1); }
+  }
+  {
+    /* fair starts: gaps between neighbouring mounds, by angle around the lagoon */
+    const ang = spawns.map(sp => { const dx = sp.x - cx, dy = sp.y - cy; return {sp, a:Math.atan2(dy, dx)}; }).sort((a, b) => a.a - b.a);
+    const gaps = ang.map((q, k) => { const nx = ang[(k + 1) % ang.length].sp; return Math.sqrt((nx.x - q.sp.x) ** 2 + (nx.y - q.sp.y) ** 2); });
+    const mean = gaps.reduce((a, b) => a + b, 0) / (gaps.length || 1);
+    checks.spawnSpread = gaps.length > 1 ? (Math.max(...gaps) - Math.min(...gaps)) / mean : 0;
+    /* places linked: an open cell of the place next to a deep channel */
+    checks.unlinked = [];
+    for (const id of p.outer){ const k = PIDS.indexOf(id); let cells = 0, linked = false;
+      for (let n = 0; n < N && !linked; n++){ if (pid[n] !== k) continue; cells++;
+        if (E[n] < WALL){ const i = n % GX, j = (n - i) / GX;
+          for (let b = -3; b <= 3 && !linked; b++) for (let a = -3; a <= 3; a++){ const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < GX && jj < GY && CH[jj * GX + ii] > 0.5){ linked = true; break; } } } }
+      if (cells > 200 && !linked) checks.unlinked.push(id); }
+    /* lagoon mix */
+    let lag = 0, mid = 0; for (let n = 0; n < N; n++) if (zone[n] === 0){ lag++; if (E[n] >= 0.14 && E[n] < 0.62) mid++; }
+    checks.lagoonMid = lag ? mid / lag : 0;
+    checks.mounds = mounds.length;
+    checks.ok = checks.unlinked.length === 0 && checks.lagoonMid >= 0.35 && checks.spawnSpread < 0.8 && mounds.length === p.mounds;
+    checks.score = (checks.ok ? 10 : 0) - checks.unlinked.length * 2 + checks.lagoonMid - checks.spawnSpread;
+  }
   /* lanes: deep channels, streams and lava channels. Textures fade out over them so travel lanes stay open */
   const lane = new Float32Array(N);
   for (let n = 0; n < N; n++) lane[n] = Math.max(CH[n], Math.min(1, LW[n] * 8), LD[n] < 2 ? 1 - smooth(1, 1.8, LD[n]) : 0);
-  return {E, E0:Float32Array.from(E), zone, pid, PIDS, ramp:F, lane, seed:p.seed, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY, RES};
+  return {E, E0:Float32Array.from(E), checks, zone, pid, PIDS, ramp:F, lane, seed:p.seed, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY, RES};
 }
 
 /* ---- place scale: reaction-diffusion textures, steered by the landforms (lab step 3) ----
