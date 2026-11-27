@@ -35,6 +35,24 @@ A last card covers what the lesson didn't show: scoring, the other segments, bot
 
 A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
 
+## Generated world (test)
+
+A new map is on its way: a world grown from a seed by `public/worldgen.js`, tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a central lagoon with ring mounds and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. It is 0.7 of the classic map across, about half the area.
+
+To try it, the host ticks **New map (test)** in the lobby, or opens the room with `?map=world`. Solo play also takes `?map=world`. The classic map stays the default. The world's places reuse the classic ground types:
+
+| World place | Plays as |
+|---|---|
+| Lagoon | tide-pool lagoon; humans start one per ring mound |
+| Highlands | tidal flats in the shallows (slow at low tide), ridge walls |
+| Volcanic island | UV shallows near the top, clay lower down |
+| Chimneys | nursery pockets and pores; each vent pit is a black smoker |
+| Ice | brine (cold, slow, shelter) between ice walls |
+| Big volcanoes | hot springs in the caldera, with a geyser |
+| Bigger streams | currents toward deep water |
+
+The server and every browser build the same map from the seed: the generator uses only basic arithmetic. The room also sends a fingerprint of the map, and a browser that grew a different one says so in its console. `node test/world.mjs` plays a round on a world. `node test/room-world.mjs` checks a world room against `wrangler dev`. The reaction-diffusion textures are off in the game for now: they take 2-3 s to grow.
+
 ## Letters break down
 
 Free letters don't last forever, as real nucleotides break down in water (hydrolysis). Each lasts 80–150 s, and fades out over its last 2.5 s. A letter with more than 12 others in the 300 px around it ages faster (20% faster for each extra letter), so piles in places nobody visits thin out. Cold brine in the ice veins slows breakdown to 40%. Letters in a fresh meteorite crater aren't hurried by crowding until it cools. The map holds about 280 letters (120 in the lobby). Constants are at the top of `public/sim.js`: `LIFE`, `CROWD_FREE`, `CROWD_RATE`, `COLD_RATE`, `NUC_FADE`.

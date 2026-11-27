@@ -29,7 +29,8 @@ const BOT_COLS = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'];
 const ZONE_FIRST = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).filter(([, z]) => z.intro).map(([k, z]) => [k, z.intro]));
 
 function create(opts){
-  const MAP = opts.MAP, BOTS = opts.BOTS, stage = opts.stage, W = MAP.W, H = MAP.H, MK = MAP.K;
+  const MAP = opts.MAP, BOTS = opts.BOTS, stage = opts.stage, MK = MAP.K;
+  let W = MAP.W, H = MAP.H;   /* a generated world can be smaller: refreshed on every reset */
   const hooks = Object.assign({say(){}, fx(){}, dirty(){}, end(){}, tint(){ return null; }}, opts.hooks || {});
   const ROUND = opts.round || 300, NUC_TARGET = opts.nucTarget || 280, LOBBY_NUCS = 120, MAXLOOSE = 16;
   /* free letters break down in water (hydrolysis): each lasts LIFE seconds, faster where they crowd together
@@ -44,7 +45,7 @@ function create(opts){
   let minStrands = opts.minStrands != null ? opts.minStrands : 10;
 
   let players = [], nucs = [], frags = [], news = [];
-  let timeLeft = ROUND, state = 'idle', seed = 1, spawns = null, nextId = 1;
+  let timeLeft = ROUND, state = 'idle', seed = 1, spawns = null, nextId = 1, worldOpt = null;
   let heatT = 0, spawnT = 0, fragT = FRAG_EVERY;
 
   const working = p => p.s ? p.s.functions.filter(f => !f.damaged) : [];
@@ -89,6 +90,7 @@ function create(opts){
     const k = used.length, sp = spawns ? spawns.bots[Math.floor(k * spawns.bots.length / Math.max(1, minStrands - 1)) % spawns.bots.length] : {x:W / 2, y:H / 2};
     const p = mkPlayer(mind.name, col, sp.x, sp.y, mind); players.push(p); return p;
   }
+  const homeFor = i => spawns.homes && spawns.homes.length ? spawns.homes[i % spawns.homes.length] : spawns.player;
   function removePlayer(p){ const i = players.indexOf(p); if (i < 0) return; p.s.remove(); players.splice(i, 1); }
   /* bots fill the seats humans leave empty, and step aside (the one doing worst) when a human arrives */
   function fillBots(){
@@ -101,7 +103,7 @@ function create(opts){
   }
   function addHuman(name, col){
     let x = W / 2, y = H / 2;
-    if (spawns){ x = spawns.player.x + rnd(-160, 160); y = spawns.player.y + rnd(-160, 160); }
+    if (spawns){ const h = homeFor(humans().length); x = h.x + rnd(-160, 160); y = h.y + rnd(-160, 160); }
     const p = mkPlayer(name, col, x, y, null); players.push(p);
     if (spawns){ const o = MAP.solidAt(p.s.head.x, p.s.head.y) && MAP.nearestOf(OPEN_TYPES, p.s.head.x, p.s.head.y, 800); if (o) p.s.place(o.x, o.y); fillBots(); }
     return p;
@@ -168,10 +170,12 @@ function create(opts){
     for (const f of frags.slice()) removeFrag(f);
     players = [];
     seed = newSeed != null ? newSeed : Math.floor(Math.random() * 1e9);
-    spawns = MAP.generate(seed, lobby ? {lobby:true} : undefined);
+    worldOpt = !lobby && opt && opt.world ? opt.world : null;
+    spawns = MAP.generate(seed, lobby ? {lobby:true} : worldOpt ? {world:worldOpt} : undefined);
+    W = MAP.W; H = MAP.H;
     news = []; nucs = [];
-    /* humans carry over between rounds as fresh strands, keeping who they are */
-    for (const p of keep){ birth(p, spawns.player.x + rnd(-160, 160), spawns.player.y + rnd(-160, 160)); p.seenZone = {}; players.push(p); }
+    /* humans carry over between rounds as fresh strands, keeping who they are (in a generated world, one mound each in turn) */
+    keep.forEach((p, i) => { const h = homeFor(i); birth(p, h.x + rnd(-160, 160), h.y + rnd(-160, 160)); p.seenZone = {}; players.push(p); });
     fillBots();
     for (let i = 0; i < nucTarget; i++) spawnNuc();
     if (!lobby) for (let i = 0; i < 4; i++) spawnFrag();
@@ -507,7 +511,7 @@ function create(opts){
   BOTS.init({MAP, RS, working, has, countFn, complexity, doFold:fold, doDrop:drop, recipeLen, shieldFor, MAXLOOSE,
     get players(){ return players; }, get nucs(){ return nucs; }, get frags(){ return frags; }, get news(){ return news; }, get timeLeft(){ return timeLeft; }});
 
-  return {MAP, BOTS, stage, W, H, ROUND, MAXLOOSE, ZONE_FIRST, FN_NAMES,
+  return {MAP, BOTS, stage, get W(){ return W; }, get H(){ return H; }, get world(){ return worldOpt; }, ROUND, MAXLOOSE, ZONE_FIRST, FN_NAMES,
     reset, start, step, addHuman, leave, fold, drop, spawnFrag, spawnNuc, NUC_FADE, strike, uvFlash, impact, geyserBurst, complexity, standings,
     working, has, countFn, shieldFor, recipeLen,
     setMinStrands(n){ minStrands = n; fillBots(); },

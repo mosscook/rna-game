@@ -498,7 +498,9 @@ function build(o){
   }
   {
     /* fair starts: gaps between neighbouring mounds, by angle around the lagoon */
-    const ang = spawns.map(sp => { const dx = sp.x - cx, dy = sp.y - cy; return {sp, a:Math.atan2(dy, dx)}; }).sort((a, b) => a.a - b.a);
+    /* order by a pseudo-angle (monotonic in the true angle, plain arithmetic only) */
+    const pang = (dx, dy) => { const q = dx / ((dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) || 1); return dy < 0 ? 3 + q : 1 - q; };
+    const ang = spawns.map(sp => ({sp, a:pang(sp.x - cx, sp.y - cy)})).sort((a, b) => a.a - b.a);
     const gaps = ang.map((q, k) => { const nx = ang[(k + 1) % ang.length].sp; return Math.sqrt((nx.x - q.sp.x) ** 2 + (nx.y - q.sp.y) ** 2); });
     const mean = gaps.reduce((a, b) => a + b, 0) / (gaps.length || 1);
     checks.spawnSpread = gaps.length > 1 ? (Math.max(...gaps) - Math.min(...gaps)) / mean : 0;
@@ -592,5 +594,46 @@ function texture(world, o = {}){
   }
   return {step, apply, get iter(){ return iter; }, get V(){ return V; }};
 }
-return {generate, texture, TEXTURES, DEFAULTS, WALL, dsin, dcos};
+/* ---- reading a world, shared by the lab and the game ----
+   surface(world): the depth field read through a grid twice as fine (cubic B-spline), so band edges are smooth curves;
+   each place's colour, blended a little across its edge; the band of a depth, and swim speed (eased between band
+   middles: walls 0, the shallows slow, the black depth a little faster than normal) */
+const T = [0.86, 0.74, 0.62, 0.5, 0.38, 0.26, 0.14], BRIGHT = [1, 0.84, 0.7, 0.57, 0.45, 0.34, 0.24, 0];
+const SPEED = [0, 0.45, 0.6, 0.75, 0.9, 0.95, 1, 1.1], MID = [0.93, 0.8, 0.68, 0.56, 0.44, 0.32, 0.2, 0.07];
+const PLACE_COL = {water:[60, 110, 120], lagoon:[80, 160, 125], flats:[170, 130, 92], island:[150, 100, 80], chimneys:[215, 205, 180], ice:[160, 210, 235], ridge:[110, 120, 112]};
+const bandOf = e => { for (let b = 0; b < T.length; b++) if (e >= T[b]) return b; return 7; };
+function speedOf(e){
+  if (e >= T[0]) return 0;
+  if (e >= MID[1]) return SPEED[1];
+  if (e <= MID[7]) return SPEED[7];
+  for (let b = 1; b < 7; b++) if (e <= MID[b] && e >= MID[b + 1]){ const t = (e - MID[b + 1]) / (MID[b] - MID[b + 1]); return SPEED[b + 1] + (SPEED[b] - SPEED[b + 1]) * t; }
+  return 1;
+}
+function surface(world){
+  const {GX, GY, RES} = world, FX = GX * 2, FY = GY * 2, Ef = new Float32Array(FX * FY), E = world.E;
+  const W0 = [1 / 6, 4 / 6, 1 / 6, 0], W5 = [1 / 48, 23 / 48, 23 / 48, 1 / 48], tmp = new Float32Array(FX * GY), cl = (i, n) => i < 0 ? 0 : i > n - 1 ? n - 1 : i;
+  function refresh(){
+    for (let j = 0; j < GY; j++) for (let o = 0; o < FX; o++){ const k = o >> 1, w = o & 1 ? W5 : W0; let v = 0; for (let a = 0; a < 4; a++) v += w[a] * E[j * GX + cl(k - 1 + a, GX)]; tmp[j * FX + o] = v; }
+    for (let o = 0; o < FY; o++) for (let i = 0; i < FX; i++){ const k = o >> 1, w = o & 1 ? W5 : W0; let v = 0; for (let a = 0; a < 4; a++) v += w[a] * tmp[cl(k - 1 + a, GY) * FX + i]; Ef[o * FX + i] = v; }
+  }
+  refresh();
+  function elev(x, y){
+    let fx = (x / RES - 0.5) * 2, fy = (y / RES - 0.5) * 2; fx = fx < 0 ? 0 : fx > FX - 1.001 ? FX - 1.001 : fx; fy = fy < 0 ? 0 : fy > FY - 1.001 ? FY - 1.001 : fy;
+    const i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j, n = j * FX + i;
+    return (Ef[n] * (1 - tx) + Ef[n + 1] * tx) * (1 - ty) + (Ef[n + FX] * (1 - tx) + Ef[n + FX + 1] * tx) * ty;
+  }
+  /* colour per grid cell from the one-hot place weights, blurred one cell so neighbouring places blend slightly */
+  const N = GX * GY, C = [new Float32Array(N), new Float32Array(N), new Float32Array(N)];
+  for (const id in world.weights){ const w = Float32Array.from(world.weights[id]); blur(w, GX, GY, 1); const col = PLACE_COL[id] || PLACE_COL.water;
+    for (let n = 0; n < N; n++) if (w[n]) for (let k = 0; k < 3; k++) C[k][n] += w[n] * col[k]; }
+  function colour(x, y, out){
+    let fx = x / RES - 0.5, fy = y / RES - 0.5; fx = fx < 0 ? 0 : fx > GX - 1.001 ? GX - 1.001 : fx; fy = fy < 0 ? 0 : fy > GY - 1.001 ? GY - 1.001 : fy;
+    const i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j, n = j * GX + i;
+    for (let k = 0; k < 3; k++){ const a = C[k]; out[k] = (a[n] * (1 - tx) + a[n + 1] * tx) * (1 - ty) + (a[n + GX] * (1 - tx) + a[n + GX + 1] * tx) * ty; }
+    return out;
+  }
+  return {elev, colour, refresh, Ef, FX, FY};
+}
+
+return {generate, texture, surface, TEXTURES, DEFAULTS, WALL, T, BRIGHT, SPEED, PLACE_COL, bandOf, speedOf, dsin, dcos};
 })();

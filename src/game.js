@@ -4,6 +4,7 @@ import {svgStub} from './dom-shim.js';
 import '../public/segments.js';
 import '../public/rna-strand.js';
 import '../public/biomes.js';
+import '../public/worldgen.js';
 import '../public/map.js';
 import '../public/bots.js';
 import '../public/sim.js';

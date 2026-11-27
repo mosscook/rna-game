@@ -277,7 +277,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
   </div>
 
-  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><button class="btn go" type="button" id="bStart">Start game</button></div>
+  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><label class="auto" id="mapWrap" title="Try the new generated world: meteor-made lagoon, highlands, volcanoes, streams. Still being tuned"><input type="checkbox" id="mapBox"> New map (test)</label><button class="btn go" type="button" id="bStart">Start game</button></div>
   <div class="coach" id="coach" role="status" aria-live="polite" hidden><span class="n" id="coachN"></span><div><b id="coachT"></b><p id="coachX"></p><p class="note" id="coachNote"></p><p class="tip" id="coachTip" hidden></p></div><button class="alt" type="button" id="coachSkip">Skip</button></div>
   <aside class="dev" id="dev" aria-label="Developer tools" hidden></aside>
   <div class="watch" id="watchBar" role="group" aria-label="Spectating" hidden>
@@ -294,6 +294,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 <script src="segments.js"></script>
 <script src="rna-strand.js"></script>
 <script src="biomes.js"></script>
+<script src="worldgen.js"></script>
 <script src="map.js"></script>
 <script src="bots.js"></script>
 <script src="sim.js"></script>
@@ -319,7 +320,10 @@ const RECIPES = RS.RECIPES;
 const recipeLen = fn => RECIPES[fn].length + 4;
 
 /* ---------- the game runs in sim.js; this file draws it and handles the page ---------- */
-const MAP = window.SoupMap, W = MAP.W, H = MAP.H, MK = MAP.K, BOTS = window.SoupBots;
+const MAP = window.SoupMap, MK = MAP.K, BOTS = window.SoupBots;
+let W = MAP.W, H = MAP.H;   /* a generated world can be smaller: refreshed every frame */
+/* ?map=world tries the generated world (worldgen.js): in solo play, and for a room's host, who can also pick it in the lobby */
+const WANT_WORLD = new URLSearchParams(location.search).get('map') === 'world';
 const zoneAt = (x, y) => MAP.zoneAt(x, y);
 /* the name of each place, shown at the top left (biomes.js) */
 const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
@@ -406,7 +410,7 @@ function renderWatch(){
 function reset(){
   if (net){ showStart(); return; }
   if (!me) me = sim.addHuman('You', 'stain');
-  sim.reset();
+  sim.reset(null, WANT_WORLD ? {world:{size:0.7}} : undefined);
   fx = []; camT = null; paused = false; pointer = null;
   $('bPause').setAttribute('aria-pressed', 'false');
   uiDirty = true;
@@ -1013,6 +1017,8 @@ function renderLobby(){
   $('lobbyText').innerHTML = left ? `<b>Lobby</b> · ${here} · next round starts in <b>${left}</b>`
     : net.isHost ? `<b>Lobby</b> · ${here} · practise, then start when everyone is ready` : `<b>Lobby</b> · ${here} · waiting for <b>${net.hostName}</b> to start`;
   $('bStart').hidden = !net.isHost; $('autoWrap').hidden = !net.isHost; $('autoBox').checked = net.auto;
+  $('mapWrap').hidden = !net.isHost; $('mapBox').checked = net.mapKind === 'world';
+  if (net.isHost && WANT_WORLD && !renderLobby.asked){ renderLobby.asked = true; if (net.mapKind !== 'world') net.setMap('world'); }
   bar.classList.toggle('wait', !net.isHost);
 }
 function renderClock(){
@@ -1109,6 +1115,7 @@ $('bLow').addEventListener('click', () => {
 $('bRec').addEventListener('click', () => openPanel(true));
 $('bStart').addEventListener('click', () => { if (net && net.isHost) net.start(); });
 $('autoBox').addEventListener('change', e => { if (net && net.isHost) net.setAuto(e.target.checked); });
+$('mapBox').addEventListener('change', e => { if (net && net.isHost) net.setMap(e.target.checked ? 'world' : 'classic'); });
 $('bWatch').addEventListener('click', () => { if (watchId == null) cycle(1); else stopWatching(); });
 $('wPrev').addEventListener('click', () => { setTour(false); cycle(-1); });
 $('wNext').addEventListener('click', () => { setTour(false); cycle(1); });
@@ -1161,7 +1168,7 @@ function start(){
   if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
   let last = performance.now(), fpsT = 0, fpsN = 0, acc = 0;
   (function frame(now){
-    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    const dt = Math.min(0.1, (now - last) / 1000); last = now; W = MAP.W; H = MAP.H;
     fpsT += dt; fpsN++; if (fpsT >= 1){ window.__fps = fpsN / fpsT; fpsT = 0; fpsN = 0; }
     /* fixed 1/60 s steps, as in the specimen, so swimming feels the same at any frame rate */
     acc += dt; let n = 0;

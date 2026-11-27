@@ -25,7 +25,7 @@ function create(o){
   const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}, outdated(){}, host(){}}, o.hooks || {});
   /* o.version: the page's own version, or a function returning it (the page learns it from /version after loading) */
   const pageVersion = () => typeof o.version === 'function' ? o.version() : o.version;
-  let lobby = false, isHost = false, hostName = '', auto = false, autoEnd = 0;   /* the room's lobby before a game, and who can start it */
+  let lobby = false, isHost = false, hostName = '', auto = false, autoEnd = 0, worldSize = 0, mapKind = 'classic';   /* the room's lobby before a game, and who can start it */
   let ws = null, meId = null, seed = null, state = 'connecting', tl = 0, tlAt = 0, offset = null, rtt = 0.08, url = '', name = '', watchOnly = false, watchId = null;
   let lastSend = 0, lastAim = null, retry = 0, closedByUs = false;
   /* a random token for this tab only (gone when the tab closes): lets a refresh or a dropped connection take your strand back */
@@ -82,7 +82,8 @@ function create(o){
         meId = m.id == null ? null : m.id; retry = 0;
         /* the server was redeployed since this page loaded: offer a refresh (the game keeps working meanwhile) */
         { const mine = pageVersion(); if (m.v && mine && m.v !== 'dev' && m.v !== mine) hooks.outdated(m.v); }
-        if (m.seed !== seed || !!m.lb !== lobby){ seed = m.seed; lobby = !!m.lb; clearAll(); MAP.generate(seed, lobby ? {lobby:true} : undefined); }
+        if (m.seed !== seed || !!m.lb !== lobby || (m.wd || 0) !== worldSize){ seed = m.seed; lobby = !!m.lb; worldSize = m.wd || 0; clearAll(); MAP.generate(seed, lobby ? {lobby:true} : worldSize ? {world:{size:worldSize}} : undefined);
+          if (m.wh && MAP.worldHash !== m.wh) console.warn('This browser grew a different map from the room (world fingerprint ' + MAP.worldHash + ' vs ' + m.wh + ')'); }
         else { N.clear(); nucs = []; }   /* rejoining the same map: the server sends the nearby letters again */
         state = STATES[m.st] || m.st; tl = m.tl; tlAt = now();
         if (meId != null) mirror(meId).name = 'You';
@@ -104,7 +105,7 @@ function create(o){
       case 'e': state = 'over'; hooks.end(m.rows.map(([id, nm, col, sc, bot, st]) => ({p:P.get(id) || {id, name:nm, col, isBot:!!bot, s:{length:0}}, score:sc,
         stats:st ? {letters:st[0], folds:st[1], cuts:st[2], cutsTaken:st[3], hits:st[4], hitsTaken:st[5], joins:st[6], deaths:st[7]} : null}))); break;
       case 'pong': rtt = rtt * 0.8 + (now() - m.at) * 0.2; break;
-      case 'h': isHost = !!m.you; hostName = m.name || ''; auto = !!m.auto; autoEnd = m.in ? now() + m.in : 0; hooks.host(); break;
+      case 'h': isHost = !!m.you; hostName = m.name || ''; auto = !!m.auto; mapKind = m.mp || 'classic'; autoEnd = m.in ? now() + m.in : 0; hooks.host(); break;
       case 'full': hooks.status(m.watch ? 'Too many people are watching this room.' : 'This room is full. Try another room name.'); closedByUs = true; break;
     }
   }
@@ -255,6 +256,8 @@ function create(o){
     spectate(id){ watchId = id == null ? null : id; send({t:'v', id:watchId}); },
     start(){ send({t:'start'}); },
     setAuto(on){ send({t:'auto', on:!!on}); },
+    setMap(kind){ send({t:'map', v:kind}); },
+    get mapKind(){ return mapKind; },
     get auto(){ return auto; }, get autoIn(){ return autoEnd ? Math.max(0, autoEnd - now()) : 0; },
     get lobby(){ return lobby; }, get isHost(){ return isHost; }, get hostName(){ return hostName; },
     inRoster:id => roster.has(id),

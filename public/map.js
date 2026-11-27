@@ -12,7 +12,9 @@
 const makeSoupMap = () => {
 'use strict';
 const TAU = Math.PI * 2;
-const W = 9200, H = 6000, CELL = 50, GW = W / CELL, GH = H / CELL, CH = 10, CR = 0.8;
+/* the size is fixed for the classic map; a generated world (worldgen.js) can be smaller, so W/H/GW/GH are reset per map */
+const BASE_W = 9200, BASE_H = 6000, CELL = 50, CH = 10, CR = 0.8;
+let W = BASE_W, H = BASE_H, GW = W / CELL, GH = H / CELL;
 /* ground types, places and regions: biomes.js */
 const BIO = window.SoupBiomes, CELLS = BIO.CELLS, K = BIO.K, MIX = BIO.MIX;
 const SOLID = CELLS.map(c => c.solid ? 1 : 0), COL = CELLS.map(c => c.color);
@@ -46,7 +48,7 @@ const typeAt = (x, y) => typeAtCell(Math.floor(x / CELL), Math.floor(y / CELL));
 /* the lobby: before a room's game starts, players wait in a small walled pool with clumps of letters that keep refilling.
    No hazards, no tide effects, nothing that moves but letters and strands. */
 let lobby = false, lobbyClumps = [];
-const LOBBY = {x:W / 2, y:H / 2, a:1100, b:700};
+const LOBBY = {x:BASE_W / 2, y:BASE_H / 2, a:1100, b:700};
 function generateLobby(){
   grid.fill(K.ROCK);
   const each = (fn) => { for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++) fn(cx, cy, (cx + 0.5) * CELL, (cy + 0.5) * CELL); };
@@ -62,7 +64,9 @@ function generateLobby(){
 }
 /* opt.lobby: build the lobby instead of the world */
 function generate(s, opt){
-  seed = s >>> 0 || 1; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
+  seed = s >>> 0 || 1; world = null; surf = null;
+  if (opt && opt.world){ chunks.clear(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
+  W = BASE_W; H = BASE_H; GW = W / CELL; GH = H / CELL; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
   grid = new Uint8Array(GW * GH).fill(K.OCEAN);
   flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
   melted = new Set(); chunks.clear(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
@@ -104,6 +108,62 @@ function generate(s, opt){
   return {player:open({x:L.x, y:L.y}), bots:ring.map(open)};
 }
 
+/* ---------- a generated world (worldgen.js): depth bands instead of painted regions ----------
+   The world gives a depth field; the game reads walls and swim speed straight from it (smooth, 12.5 px), and keeps
+   its 50 px grid of ground types for everything else: letters, shelters, bots' paths, the tide on the highland
+   shallows, UV on the island's beaches, brine in the ice. Chimney pits are black smokers; big volcanoes' calderas
+   hold hot springs with a geyser; the larger streams are currents. */
+let world = null, surf = null, worldHash = 0;
+const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
+function generateWorld(s, o){
+  const WG = window.WorldGen, size = Math.max(0.4, Math.min(1, o.size || 0.7));
+  W = Math.round(BASE_W * size / 100) * 100; H = Math.round(BASE_H * size / 100) * 100; GW = W / CELL; GH = H / CELL;
+  flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
+  melted = new Set(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3; lobby = false; lobbyClumps = []; raftRoute = [];
+  world = WG.generate(Object.assign({}, o.settings || {}, {seed:s, W, H, RES:25, scale:size}));
+  if (o.texture){ const tx = WG.texture(world, {amp:(o.settings && o.settings.texture) ?? 1, aniso:(o.settings && o.settings.align) ?? 1}); tx.step(o.textureIters || 3000); tx.apply(); }
+  surf = WG.surface(world);
+  /* a fingerprint of the depth field: the room sends its own, so a browser can tell if it grew a different map */
+  worldHash = 0; for (let n = 0; n < world.E.length; n++) worldHash = (worldHash + Math.round(world.E[n] * 1000) * (n % 997 + 1)) % 2147483647;
+  const WALL = WG.WALL, G = world.GX, R = world.RES, idAt = (x, y) => world.PIDS[world.pid[Math.min(world.GY - 1, Math.floor(y / R)) * G + Math.min(G - 1, Math.floor(x / R))]];
+  const calderas = world.vents.filter(v => v.kind === 'caldera');
+  grid = new Uint8Array(GW * GH);
+  for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++){
+    const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL, e = surf.elev(x, y), id = idAt(x, y);
+    let t;
+    if (e >= WALL) t = id === 'ice' ? K.ICE : id === 'chimneys' ? K.CHIMNEY : id === 'flats' ? K.RIDGE : K.ROCK;
+    else if (id === 'lagoon') t = K.LAGOON;
+    else if (calderas.some(v => Math.hypot(x - v.x, y - v.y) < v.R * 0.8)) t = K.SPRING;
+    else if (e < 0.14) t = K.DEEP;
+    else if (id === 'flats') t = e >= 0.5 ? K.FLATS : K.OCEAN;
+    else if (id === 'island') t = e >= 0.62 ? K.UV : e >= 0.38 ? K.CLAY : K.OCEAN;
+    else if (id === 'chimneys') t = e >= 0.62 ? K.POCKET : K.PORE;
+    else if (id === 'ice') t = K.BRINE;
+    else t = K.OCEAN;
+    grid[cy * GW + cx] = t;
+  }
+  for (const v of world.vents) if (v.kind === 'chimney') smokers.push({x:v.x, y:v.y, r:Math.max(40, v.R * 0.3)});
+  for (const v of calderas){ const sp = {x:v.x, y:v.y, r:v.R * 0.55, k:springs.length}; springs.push(sp); geysers.push({x:v.x + v.R * 0.25, y:v.y, r:85, t:rr(2, 10), phase:'wait'}); }
+  for (const c of world.craters) if (c.R > 200) springs.push({x:c.x, y:c.y, r:c.R * 0.4, k:springs.length});
+  if (geysers.length && springs.length < 2) geysers.length = 0;
+  /* the bigger streams run as currents, toward deep water */
+  world.rivers.filter(r => r[r.length - 1].f >= 3).sort((a, b) => b.length - a.length).slice(0, 24).forEach(r => {
+    const pts = r.filter((q, k) => k % 4 === 0 || k === r.length - 1).map(q => ({x:q.x, y:q.y}));
+    if (pts.length > 1) flows.push({pts, w:Math.min(150, 60 + 12 * Math.sqrt(r[r.length - 1].f)), v:55, kind:'melt'});
+  });
+  /* names, at the middle of each place's biggest stretch */
+  const sum = {};
+  for (let n = 0; n < world.pid.length; n += 3){ if (world.ramp[n] < 0.99) continue; const id = world.PIDS[world.pid[n]]; if (!PLACE_NAME[id]) continue; const q = sum[id] || (sum[id] = {x:0, y:0, n:0}); q.x += (n % G + 0.5) * R; q.y += (Math.floor(n / G) + 0.5) * R; q.n++; }
+  for (const id in sum){ const q = sum[id]; if (q.n > 50) LABELS.push({t:PLACE_NAME[id], x:q.x / q.n, y:q.y / q.n}); }
+  byType = CELLS.map(() => []);
+  for (let i = 0; i < grid.length; i++) if (!SOLID[grid[i]]) byType[grid[i]].push(i);
+  buildMinimap();
+  /* humans start in the ring mounds, one per mound in turn; bots fill the mounds after them, then the lagoon */
+  const homes = world.spawns.map(p => ({x:p.x, y:p.y}));
+  const bots = homes.slice(1).concat(homes.slice(0, 1));
+  return {player:homes[0], homes, bots};
+}
+
 /* ---------- queries ---------- */
 function placeRafts(dt){
   const n = raftRoute.length - 1, perim = 2 * Math.PI * Math.sqrt(((1180 + 380) ** 2 + (1380 + 420) ** 2) / 2);
@@ -124,7 +184,7 @@ function raftWallAt(x, y){
   return null;
 }
 const raftInside = (x, y) => rafts.find(r => Math.hypot(x - r.x, y - r.y) < r.r - 18) || null;
-const solidAt = (x, y) => !!SOLID[typeAt(x, y)] || !!raftWallAt(x, y);
+const solidAt = (x, y) => world ? (x < 0 || y < 0 || x >= W || y >= H || surf.elev(x, y) >= window.WorldGen.WALL) : (!!SOLID[typeAt(x, y)] || !!raftWallAt(x, y));
 const lowTide = () => tide < 0.35;
 const poolAt = (x, y) => pools.find(p => Math.hypot(x - p.x, y - p.y) < p.r * 0.9) || null;
 const saltAt = (x, y) => { const p = poolAt(x, y); return !!(p && p.salt && tide < 0.45); };
@@ -132,6 +192,7 @@ const smokerAt = (x, y, pad) => smokers.find(s => Math.hypot(x - s.x, y - s.y) <
 const craterAt = (x, y) => craters.find(c => Math.hypot(x - c.x, y - c.y) < c.r) || null;
 function speedAt(x, y){
   const t = typeAt(x, y);
+  if (world){ const v = window.WorldGen.speedOf(surf.elev(x, y)); return t === K.FLATS ? v * (0.45 + 0.55 * Math.min(1, tide / 0.55)) : v; }
   if (t === K.FLATS) return 0.3 + 0.7 * Math.min(1, tide / 0.55);
   return CELLS[t].speed || 1;
 }
@@ -229,7 +290,7 @@ function update(dt, ev, heads){
   }
   /* ice veins shift: channels widen in places, then those cells freeze back over */
   iceT -= dt;
-  if (iceT <= 0){
+  if (iceT <= 0 && !world){
     iceT = 10;
     const free = (cx, cy) => !heads.some(h => Math.hypot(h.x - (cx + 0.5) * CELL, h.y - (cy + 0.5) * CELL) < 220);
     for (const key of [...melted]){ if (Math.random() < 0.5){ const cx = key % GW, cy = (key - cx) / GW; if (free(cx, cy)){ grid[key] = K.ICE; melted.delete(key); dirty(cx, cy); } } }
@@ -261,7 +322,7 @@ function update(dt, ev, heads){
     const inUV = heads.filter(h => typeAt(h.x, h.y) === K.UV);
     let x, y;
     if (inUV.length && Math.random() < 0.7){ const h = inUV[Math.floor(Math.random() * inUV.length)]; x = h.x + (Math.random() - 0.5) * 500; y = h.y + (Math.random() - 0.5) * 500; }
-    else { const list = byType[K.UV], i = list[Math.floor(Math.random() * list.length)]; x = (i % GW + 0.5) * CELL; y = (Math.floor(i / GW) + 0.5) * CELL; }
+    else { const list = byType[K.UV]; if (!list.length) return; const i = list[Math.floor(Math.random() * list.length)]; x = (i % GW + 0.5) * CELL; y = (Math.floor(i / GW) + 0.5) * CELL; }
     uvFlashes.push({x, y, r:150 + Math.random() * 50, t:3.5});
   }
   for (const u of uvFlashes){ u.t -= dt; if (u.t <= 0) ev.uv && ev.uv(u); }
@@ -276,7 +337,39 @@ const hash = (a, b) => { let h = Math.imul(a, 374761393) + Math.imul(b, 66826526
    It is drawn with a margin first, so neighbouring chunks blur into each other without seams */
 let softPx = 0, softMode = 'low';
 function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode) return; softPx = px; softMode = mode || softMode; chunks.clear(); }
+/* a generated world is drawn from its depth field: each pixel takes its place's colour at its band's brightness, black
+   in the depths, with a soft one-pixel edge between bands (the lab's look, without the raised layers) */
+function renderWorldChunk(kx, ky){
+  const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT;
+  /* drawn a little under screen resolution: the bands are smooth curves, so this costs little in look and a lot less to fill */
+  const R = softPx && softMode === 'low' ? 0.34 : 0.6, S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
+  const c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0];
+  const x0 = kx * S - pad, y0 = ky * S - pad, m = n + 1, ev = new Float32Array(m * m);
+  for (let py = 0; py < m; py++) for (let px = 0; px < m; px++) ev[py * m + px] = surf.elev(x0 + (px + 0.5) * step, y0 + (py + 0.5) * step);
+  for (let py = 0; py < n; py++) for (let px = 0; px < n; px++){
+    const x = x0 + (px + 0.5) * step, y = y0 + (py + 0.5) * step, o = (py * n + px) * 4;
+    if (x < 0 || y < 0 || x >= W || y >= H){ d[o] = 3; d[o + 1] = 5; d[o + 2] = 7; d[o + 3] = 255; continue; }
+    const i = py * m + px, e = ev[i], ex = ev[i + 1] - e, ey = ev[i + m] - e, grad = Math.sqrt(ex * ex + ey * ey) + 1e-6;
+    let r = 3, gg = 5, b = 7;
+    if (e >= T[6] - grad){
+      surf.colour(x, y, col);
+      for (let k = 6; k >= 0; k--){
+        const a = (e - T[k]) / grad + 0.5; if (a <= 0) break;
+        const t = a > 1 ? 1 : a; r += (col[0] * BR[k] - r) * t; gg += (col[1] * BR[k] - gg) * t; b += (col[2] * BR[k] - b) * t;
+      }
+    }
+    d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  if (!pad) return c;
+  const out = document.createElement('canvas'); out.width = out.height = Math.round(S * R);
+  const q = out.getContext('2d'); q.filter = `blur(${(softPx * R * (softMode === 'low' ? 0.5 : 1)).toFixed(2)}px)`;
+  q.drawImage(c, -pad * R, -pad * R);
+  return out;
+}
 function renderChunk(kx, ky){
+  if (world) return renderWorldChunk(kx, ky);
   /* soft ground is drawn at a lower resolution (fewer pixels to fill, and the upscale softens it), then lightly blurred */
   const R = softPx && softMode === 'low' ? 0.34 : CR;
   const S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, px = S * R;
@@ -336,7 +429,7 @@ function drawBase(g, camX, camY, vw, vh, t){
   /* the tide: water floods the flats and drains away again */
   const cx0 = Math.max(0, Math.floor(camX / CELL)), cx1 = Math.min(GW - 1, Math.floor((camX + vw) / CELL)), cy0 = Math.max(0, Math.floor(camY / CELL)), cy1 = Math.min(GH - 1, Math.floor((camY + vh) / CELL));
   const wet = Math.min(1, tide / 0.6);
-  if (wet > 0.02){
+  if (wet > 0.02 && !world){
     g.globalAlpha = wet * 0.92; g.fillStyle = COL[K.LAGOON]; g.beginPath();
     for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) if (grid[cy * GW + cx] === K.FLATS){ const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL; g.moveTo(x + CELL * 0.74, y); g.arc(x, y, CELL * 0.74, 0, TAU); }
     g.fill(); g.globalAlpha = 1;
@@ -441,6 +534,14 @@ function buildMinimap(){
   const c = mini.c || document.createElement('canvas'); c.width = GW; c.height = GH;
   const g = c.getContext && c.getContext('2d'); if (!g){ mini.dirty = false; return; }   /* no canvas (a server room): nothing to draw */
   const img = g.createImageData(GW, GH);
+  if (world){
+    const WG = window.WorldGen, col = [0, 0, 0];
+    for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++){
+      const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL, e = surf.elev(x, y), k = WG.bandOf(e), o = (cy * GW + cx) * 4; surf.colour(x, y, col);
+      const m = k === 7 ? 0 : WG.BRIGHT[k] * 1.25; img.data[o] = Math.min(255, col[0] * m + 6); img.data[o + 1] = Math.min(255, col[1] * m + 8); img.data[o + 2] = Math.min(255, col[2] * m + 10); img.data[o + 3] = 255;
+    }
+    g.putImageData(img, 0, 0); mini.c = c; mini.dirty = false; return;
+  }
   const rgb = COL.map(h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
   for (let i = 0; i < grid.length; i++){ const t = grid[i], mt = CELLS[t].mini ? K[CELLS[t].mini] : t, [r, gg, b] = rgb[mt], o = i * 4; img.data[o] = Math.min(255, r * 1.6 + 8); img.data[o + 1] = Math.min(255, gg * 1.6 + 8); img.data[o + 2] = Math.min(255, b * 1.6 + 10); img.data[o + 3] = 255; }
   g.putImageData(img, 0, 0); mini.c = c; mini.dirty = false;
@@ -516,7 +617,7 @@ function randomOf(types){
   return null;
 }
 
-return {W, H, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
+return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },

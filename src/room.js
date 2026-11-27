@@ -15,6 +15,7 @@ export function versionOf(env){ const m = env && env.CF_VERSION_METADATA; return
 
 const HZ = 30, TICK = 1 / HZ;
 const MIN_STRANDS = 10;          /* bots keep the room at least this busy */
+const WORLD_SIZE = 0.7;         /* a generated world, when the host picks one: 0.7 of the classic map across (about half the area) */
 const MAX_HUMANS = 12;           /* more than this and Chromebooks struggle to draw the room */
 const MAX_WATCHERS = 6;          /* tabs that only watch (a teacher's projector): no strand, not counted as players */
 const ROUND = 300;               /* seconds of play */
@@ -128,7 +129,8 @@ export class GameRoom extends DurableObject {
   startGame(){
     this.lobby = false; this.autoAt = 0;
     this.sim.setMinStrands(MIN_STRANDS);
-    this.sim.reset();
+    /* the host picks the map in the lobby: the classic painted map, or a generated world (worldgen.js) */
+    this.sim.reset(null, this.mapKind === 'world' ? {world:{size:WORLD_SIZE}} : undefined);
     this.sim.start();
     this.resync();
   }
@@ -161,6 +163,7 @@ export class GameRoom extends DurableObject {
       case 'd': if (p && this.sim.state === 'play') this.sim.drop(p); break;
       case 'ping': if (Number.isFinite(m.at)) this.send(c, {t:'pong', at:m.at}); break;
       case 'start': if (this.lobby && c === this.host()) this.startGame(); break;
+      case 'map': if (c === this.host() && this.lobby){ this.mapKind = m.v === 'world' ? 'world' : 'classic'; this.sendHost(true); } break;
       case 'auto': if (c === this.host()){ this.auto = !!m.on; if (!this.auto) this.autoAt = 0; this.sendHost(true); } break;
       case 'v':
         /* spectate: follow another strand (its id), or null to go back to your own. Your own strand waits where it is. */
@@ -218,7 +221,7 @@ export class GameRoom extends DurableObject {
   hostMsg(c){
     const h = this.host();
     return {t:'h', you:c === h ? 1 : 0, name:h ? (h.p ? h.p.name : 'the watcher') : '', lb:this.lobby ? 1 : 0,
-      auto:this.auto ? 1 : 0, in:this.autoAt ? Math.max(0, Math.round((this.autoAt - Date.now()) / 100) / 10) : 0};
+      auto:this.auto ? 1 : 0, mp:this.mapKind === 'world' ? 'world' : 'classic', in:this.autoAt ? Math.max(0, Math.round((this.autoAt - Date.now()) / 100) / 10) : 0};
   }
   humanCount(){ return this.sim.players.filter(p => !p.isBot).length; }
   freeColor(){
@@ -235,7 +238,7 @@ export class GameRoom extends DurableObject {
   welcome(c){
     const sim = this.sim;
     c.known = new Map();
-    this.send(c, {t:'w', v:versionOf(this.env), lb:this.lobby ? 1 : 0, id:c.p ? c.p.id : null, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
+    this.send(c, {t:'w', v:versionOf(this.env), lb:this.lobby ? 1 : 0, wd:sim.world ? sim.world.size : 0, wh:this.game.MAP.worldHash, id:c.p ? c.p.id : null, seed:sim.seed, st:ST[sim.state] || 'i', tl:r1(sim.timeLeft)});
     this.send(c, this.rosterMsg());
     for (const p of sim.players) this.send(c, this.strandMsg(p.s, p.id, false));
     for (const f of sim.frags) this.send(c, this.strandMsg(f.s, f.id, true));
