@@ -58,7 +58,7 @@
     <label class="sl"><span>layer gap</span><input type="range" id="gap" min="0" max="0.1" step="0.002" value="0.05"></label>
     <label class="sl"><span>smoothing</span><input type="range" id="smooth" min="0" max="8" step="1" value="3"></label>
     <div id="worldBox"><h2>World</h2>
-      <p>Zones, deep channels and the lagoon's ring mounds (old crater rims, flooded inside, worn through in doorways). Swim starts in a mound; letters are collectable.</p>
+      <p>Zones, deep channels and the lagoon's ring mounds (old crater rims, flooded inside, worn through in doorways). Further out: impact craters (bowls, central peaks, peak-ring basins), a volcanic island with lava channels, and hydrothermal chimneys. Swim starts in a mound; letters are collectable.</p>
       <label class="sl"><span>mounds</span><input type="range" data-w="mounds" min="5" max="12" step="1" value="7"></label>
       <label class="sl"><span>mound size</span><input type="range" data-w="rin" min="130" max="280" step="10" value="280"></label>
       <label class="sl"><span>rim</span><input type="range" data-w="rim" min="40" max="110" step="2" value="58"></label>
@@ -69,6 +69,10 @@
       <label class="sl"><span>border gap</span><input type="range" data-w="gap" min="0" max="120" step="5" value="10"></label>
       <label class="sl"><span>border slope</span><input type="range" data-w="slope" min="30" max="240" step="10" value="30"></label>
       <label class="sl"><span>border blobs</span><input type="range" data-w="dither" min="0" max="2.4" step="0.1" value="2.3"></label>
+      <label class="sl"><span>craters</span><input type="range" data-w="craters" min="0" max="90" step="2" value="36"></label>
+      <label class="sl"><span>basins</span><input type="range" data-w="basins" min="0" max="3" step="1" value="2"></label>
+      <label class="sl"><span>chimneys</span><input type="range" data-w="chimneys" min="0" max="14" step="1" value="6"></label>
+      <label class="sl"><span>lava channels</span><input type="range" data-w="lava" min="0" max="6" step="1" value="4"></label>
       <label class="sl"><span>letters</span><input type="range" data-w="spread" min="0" max="160" step="10" value="20"></label>
     </div>
     <div id="placesBox"><h2>Places</h2>
@@ -471,7 +475,7 @@ function stats(){
   if (mode === 'world' && world){
     const lag = new Array(8).fill(0); let ln = 0; for (let n = 0; n < N; n++) if (world.zone[n] === 0){ lag[bandOf(E[n])]++; ln++; }
     const pct = b => Math.round(lag[b] / ln * 100), byWhere = w => world.letters.filter(l => l.where === w).length;
-    $('stat').textContent = `world generated in ${genMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms; close-up tiles: ${tm}\nlagoon by band: ${lag.map((c, b) => `${b}:${pct(b)}%`).join(' ')}\n  (target: mostly 3-6, walls only on mound rims)\nmounds ${world.mounds.length}; letters: ${byWhere('mound')} in mounds, ${byWhere('spread')} spread, ${byWhere('pocket')} in pockets\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
+    $('stat').textContent = `world generated in ${genMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms; close-up tiles: ${tm}\nlagoon by band: ${lag.map((c, b) => `${b}:${pct(b)}%`).join(' ')}\n  (target: mostly 3-6, walls only on mound rims)\nmounds ${world.mounds.length}; craters ${world.craters.length} (basins ${world.craters.filter(c => c.basin).length}); vents ${world.vents.length}; lava channels ${world.lavas.length}\nletters: ${byWhere('mound')} in mounds, ${byWhere('spread')} spread, ${byWhere('pocket')} in pockets, ${byWhere('crater')} in craters, ${byWhere('vent')} at vents\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
     return;
   }
   $('stat').textContent = `pattern: ${GX}×${GY} cells (${RES} px), ${ITER} steps: ${rdMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms\nclose-up tiles (500 px): ${tm}\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
