@@ -114,6 +114,10 @@ function generate(s, opt){
    shallows, UV on the island's beaches, brine in the ice. Chimney pits are black smokers; big volcanoes' calderas
    hold hot springs with a geyser; the larger streams are currents. */
 let world = null, surf = null, worldHash = 0;
+/* how a generated world is drawn: 'fill' (each band filled with its place's colour) or 'outline' (black, with each
+   band's edge as a thin line in that colour, so the strands stand out more than the ground) */
+let worldStyle = 'fill';
+function setWorldStyle(v){ v = v === 'outline' ? 'outline' : 'fill'; if (v === worldStyle) return; worldStyle = v; chunks.clear(); }
 const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
 function generateWorld(s, o){
   const WG = window.WorldGen, size = Math.max(0.4, Math.min(1, o.size || 0.7));
@@ -342,7 +346,7 @@ function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode
 function renderWorldChunk(kx, ky){
   const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT;
   /* drawn a little under screen resolution: the bands are smooth curves, so this costs little in look and a lot less to fill */
-  const R = softPx && softMode === 'low' ? 0.34 : 0.6, S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
+  const lines = worldStyle === 'outline', R = softPx && softMode === 'low' ? 0.34 : lines ? CR : 0.6, S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
   const c = document.createElement('canvas'); c.width = c.height = n;
   const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0];
   const x0 = kx * S - pad, y0 = ky * S - pad, m = n + 1, ev = new Float32Array(m * m);
@@ -352,7 +356,20 @@ function renderWorldChunk(kx, ky){
     if (x < 0 || y < 0 || x >= W || y >= H){ d[o] = 3; d[o + 1] = 5; d[o + 2] = 7; d[o + 3] = 255; continue; }
     const i = py * m + px, e = ev[i], ex = ev[i + 1] - e, ey = ev[i + m] - e, grad = Math.sqrt(ex * ex + ey * ey) + 1e-6;
     let r = 3, gg = 5, b = 7;
-    if (e >= T[6] - grad){
+    if (lines){
+      /* outline look: black ground; walls a very dark tint of their place so they still read as solid; a line about a
+         pixel wide where each band starts, brighter for shallower bands */
+      if (e >= T[6] - 2 * grad){
+        surf.colour(x, y, col);
+        const wall = Math.max(0, Math.min(1, (e - T[0]) / grad + 0.5));
+        r += (col[0] * 0.16 - r) * wall; gg += (col[1] * 0.16 - gg) * wall; b += (col[2] * 0.16 - b) * wall;
+        for (let k = 6; k >= 0; k--){
+          const a = 1 - Math.abs(e - T[k]) / (grad * 0.8); if (a <= 0) continue;
+          const m = 0.5 + 0.5 * BR[k];
+          r += (col[0] * m - r) * a; gg += (col[1] * m - gg) * a; b += (col[2] * m - b) * a;
+        }
+      }
+    } else if (e >= T[6] - grad){
       surf.colour(x, y, col);
       for (let k = 6; k >= 0; k--){
         const a = (e - T[k]) / grad + 0.5; if (a <= 0) break;
@@ -617,7 +634,7 @@ function randomOf(types){
   return null;
 }
 
-return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
+return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, get worldStyle(){ return worldStyle; }, setWorldStyle, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },

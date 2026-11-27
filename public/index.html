@@ -286,6 +286,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn" type="button" id="bDrop">Drop<kbd>X</kbd></button>
     <button class="btn" type="button" id="bWatch" aria-pressed="false" title="Watch other strands (V)">Watch<kbd>V</kbd></button>
     <button class="btn sm" type="button" id="bLow" aria-pressed="false" aria-label="Low detail" title="Low detail">Lo</button>
+    <button class="btn sm" type="button" id="bLook" aria-pressed="false" aria-label="Outline map" title="Outline map: black ground with coloured edges, so strands stand out (O)" hidden>&#9711;</button>
     <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
   </div>
 
@@ -1171,6 +1172,13 @@ $('bLow').addEventListener('click', () => {
   $('bLow').setAttribute('aria-pressed', low);
   try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
 });
+/* the generated world's look: filled bands, or black ground with thin coloured edges (remembered; ?look=outline) */
+function setLook(outline, keep){
+  MAP.setWorldStyle(outline ? 'outline' : 'fill'); $('bLook').setAttribute('aria-pressed', !!outline);
+  if (keep) try { localStorage.setItem('soup2.look', outline ? 'outline' : ''); } catch(e){}
+}
+const toggleLook = () => { if (MAP.world) setLook(MAP.worldStyle !== 'outline', true); };
+$('bLook').addEventListener('click', toggleLook);
 $('bRec').addEventListener('click', () => openPanel(true));
 $('bStart').addEventListener('click', () => { if (net && net.isHost) net.start(); });
 $('autoBox').addEventListener('change', e => { if (net && net.isHost) net.setAuto(e.target.checked); });
@@ -1204,6 +1212,7 @@ document.addEventListener('keydown', e => {
     if (world.state === 'play' && me && !paused && !doFold(me)) say('Nothing to fold yet.');
   } else if (e.key === 'x' || e.key === 'X' || e.key === 'Backspace'){ e.preventDefault(); if (world.state === 'play' && me && !paused) doDrop(me); }
   else if (e.key === 'p' || e.key === 'P') togglePause();
+  else if (e.key === 'o' || e.key === 'O') toggleLook();
   else if (e.key === 'r' || e.key === 'R') openPanel();
   else if (e.key === 'Escape' && panelOpen) openPanel(false);
   else if ((e.key === 'v' || e.key === 'V') && !lesson){ if (watchId == null) cycle(1); else stopWatching(); }
@@ -1220,6 +1229,7 @@ function start(){
   RS.S.glyphSize = 4; RS.S.gooSize = 30; RS.restyle();
   readTokens(); buildList(); devSetup();
   try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); } } catch(e){}
+  { const q = new URLSearchParams(location.search).get('look'); let v = null; try { v = localStorage.getItem('soup2.look'); } catch(e){} if (q) setLook(q === 'outline', true); else if (v) setLook(v === 'outline'); }
   if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
   reset(); resize();
   if (LEARN_ROOM != null && !net) startLesson();
@@ -1228,6 +1238,7 @@ function start(){
   let last = performance.now(), fpsT = 0, fpsN = 0, acc = 0;
   (function frame(now){
     const dt = Math.min(0.1, (now - last) / 1000); last = now; W = MAP.W; H = MAP.H;
+    if ($('bLook').hidden === !!MAP.world) $('bLook').hidden = !MAP.world;   /* only the generated world has the outline look */
     fpsT += dt; fpsN++; if (fpsT >= 1){ window.__fps = fpsN / fpsT; fpsT = 0; fpsN = 0; }
     /* fixed 1/60 s steps, as in the specimen, so swimming feels the same at any frame rate */
     acc += dt; let n = 0;

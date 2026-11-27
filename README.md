@@ -51,6 +51,8 @@ To try it, the host ticks **New map (test)** in the lobby, or opens the room wit
 | Big volcanoes | hot springs in the caldera, with a geyser |
 | Bigger streams | currents toward deep water |
 
+The ◯ button in the bottom bar (or the O key, or `?look=outline`) switches the world to an outline look: black ground, with each depth band's edge drawn as a thin line in its place's colour, and walls a very dark tint. The strands stand out more against it. The choice is remembered in that browser.
+
 The server and every browser build the same map from the seed: the generator uses only basic arithmetic. The room also sends a fingerprint of the map, and a browser that grew a different one says so in its console. `node test/world.mjs` plays a round on a world. `node test/room-world.mjs` checks a world room against `wrangler dev`. The reaction-diffusion textures are off in the game for now: they take 2-3 s to grow.
 
 ## Letters break down
