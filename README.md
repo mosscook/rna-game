@@ -35,6 +35,10 @@ A last card covers what the lesson didn't show: scoring, the other segments, bot
 
 A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
 
+## Letters break down
+
+Free letters don't last forever, as real nucleotides break down in water (hydrolysis). Each lasts 80–150 s, and fades out over its last 2.5 s. A letter with more than 12 others in the 300 px around it ages faster (20% faster for each extra letter), so piles in places nobody visits thin out. Cold brine in the ice veins slows breakdown to 40%. Letters in a fresh meteorite crater aren't hurried by crowding until it cools. The map holds about 280 letters (120 in the lobby). Constants are at the top of `public/sim.js`: `LIFE`, `CROWD_FREE`, `CROWD_RATE`, `COLD_RATE`, `NUC_FADE`.
+
 ## Microscope look
 
 `public/lens.js` adds optional effects that make the soup look like a view down a microscope. Only `motes` is on by default; choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.

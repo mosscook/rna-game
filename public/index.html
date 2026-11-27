@@ -803,16 +803,22 @@ function resize(){
   if (cw * ch * dpr * dpr > 1.3e6) dpr = Math.max(0.75, Math.sqrt(1.3e6 / (cw * ch)));
   for (const c of [cv, tc]){ c.width = Math.round(cw * dpr); c.height = Math.round(ch * dpr); }
 }
-/* a free letter drawn like the strand's: a stem, then a two-ring (A, G) big dot or a one-ring (U, C) small dot */
-const PUR = {A:true, G:true, U:false, C:false};
+/* a free letter drawn like the strand's: a stem, then a two-ring (A, G) big dot or a one-ring (U, C) small dot.
+   A letter breaking down fades and shrinks over its last 2.5 s (sim.NUC_FADE): from its age in single player, from
+   when the server said so in a room */
+const PUR = {A:true, G:true, U:false, C:false}, NUC_FADE = 2.5;
 function nucGlyph(c, q, t, need){
   if (q.ang == null){ q.ang = rnd(0, TAU); q.spin = rnd(-0.35, 0.35); }
-  const pur = PUR[q.b], r = pur ? 7 : 4.6, L = pur ? 12 : 8.5, a = q.ang + (still ? 0 : t * q.spin);
+  const f = q.life != null ? (q.life - q.age) / NUC_FADE : q.dAt != null ? 1 - (performance.now() / 1000 - q.dAt) / NUC_FADE : 1;
+  const k = f < 1 ? Math.max(0, f) : 1; if (k <= 0) return;
+  const pur = PUR[q.b], r = (pur ? 9.5 : 6.6) * (0.6 + 0.4 * k), L = (pur ? 16 : 12) * (0.6 + 0.4 * k), a = q.ang + (still ? 0 : t * q.spin);
+  if (k < 1) c.globalAlpha = k;
   const bx = q.x - Math.cos(a) * L, by = q.y - Math.sin(a) * L;
-  c.strokeStyle = T[q.b]; c.lineWidth = 1.3; c.beginPath(); c.moveTo(bx, by); c.lineTo(q.x, q.y); c.stroke();
+  c.strokeStyle = T[q.b]; c.lineWidth = 1.8; c.beginPath(); c.moveTo(bx, by); c.lineTo(q.x, q.y); c.stroke();
   c.fillStyle = T[q.b]; c.beginPath(); c.arc(q.x, q.y, r, 0, TAU); c.fill();
-  c.font = pur ? `700 8.5px ${T.mono}` : `700 6.5px ${T.mono}`; c.fillStyle = T.pond; c.fillText(q.b, q.x, q.y + 0.5);
-  if (need){ c.beginPath(); c.arc(q.x, q.y, r + 3.5, 0, TAU); c.lineWidth = 1.4; c.strokeStyle = T.ink; c.globalAlpha = 0.6; c.stroke(); c.globalAlpha = 1; }
+  c.font = pur ? `700 11.5px ${T.mono}` : `700 9px ${T.mono}`; c.fillStyle = T.pond; c.fillText(q.b, q.x, q.y + 0.5);
+  if (need){ c.beginPath(); c.arc(q.x, q.y, r + 4, 0, TAU); c.lineWidth = 1.6; c.strokeStyle = T.ink; c.globalAlpha = 0.6 * k; c.stroke(); }
+  c.globalAlpha = 1;
 }
 function label(c, text, x, y, col, size){
   c.font = `700 ${size || 13}px ${T.font}`; c.textAlign = 'center'; c.textBaseline = 'alphabetic';

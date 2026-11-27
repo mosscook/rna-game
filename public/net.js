@@ -123,8 +123,10 @@ function create(o){
     for (const [id, x, y, h] of m.F || []){ const f = fragMirror(id); f.buf.push({t:st, x, y, h, mv:0.2, lp:0}); if (f.buf.length > 30) f.buf.shift(); f.last = st; f.seen = t; }
     if (m.N){
       const [add, mov, del] = m.N;
-      for (const [id, x, y, b] of add) N.set(id, {id, x, y, b});
-      for (const [id, x, y, b] of mov){ const q = N.get(id); if (q){ q.x = x; q.y = y; q.b = b; } else N.set(id, {id, x, y, b}); }
+      /* a fifth entry marks a letter that is breaking down: the page fades it out from the moment it hears */
+      const now = performance.now() / 1000, fading = (q, d) => { if (d && q.dAt == null) q.dAt = now; };
+      for (const [id, x, y, b, d] of add){ const q = {id, x, y, b}; fading(q, d); N.set(id, q); }
+      for (const [id, x, y, b, d] of mov){ let q = N.get(id); if (q){ q.x = x; q.y = y; q.b = b; } else N.set(id, q = {id, x, y, b}); fading(q, d); }
       for (const id of del) N.delete(id);
       nucs = [...N.values()];
     }

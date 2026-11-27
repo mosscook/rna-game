@@ -304,8 +304,10 @@ export class GameRoom extends DurableObject {
         const k = c.known.get(q.id);
         if (near(c, q.x, q.y, k ? 200 : 0)){
           seen.add(q.id);
-          if (!k){ add.push([q.id, Math.round(q.x), Math.round(q.y), q.b]); c.known.set(q.id, [q.x, q.y, q.b]); }
-          else if (Math.abs(k[0] - q.x) + Math.abs(k[1] - q.y) > 3 || k[2] !== q.b){ mov.push([q.id, Math.round(q.x), Math.round(q.y), q.b]); k[0] = q.x; k[1] = q.y; k[2] = q.b; }
+          /* d: the letter is breaking down and fades out over its last few seconds */
+          const d = q.life - q.age < sim.NUC_FADE ? 1 : 0;
+          if (!k){ add.push(d ? [q.id, Math.round(q.x), Math.round(q.y), q.b, 1] : [q.id, Math.round(q.x), Math.round(q.y), q.b]); c.known.set(q.id, [q.x, q.y, q.b, d]); }
+          else if (Math.abs(k[0] - q.x) + Math.abs(k[1] - q.y) > 3 || k[2] !== q.b || k[3] !== d){ mov.push(d ? [q.id, Math.round(q.x), Math.round(q.y), q.b, 1] : [q.id, Math.round(q.x), Math.round(q.y), q.b]); k[0] = q.x; k[1] = q.y; k[2] = q.b; k[3] = d; }
         }
       }
       for (const id of c.known.keys()) if (!seen.has(id)){ del.push(id); c.known.delete(id); }

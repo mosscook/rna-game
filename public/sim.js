@@ -31,12 +31,15 @@ const ZONE_FIRST = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).fi
 function create(opts){
   const MAP = opts.MAP, BOTS = opts.BOTS, stage = opts.stage, W = MAP.W, H = MAP.H, MK = MAP.K;
   const hooks = Object.assign({say(){}, fx(){}, dirty(){}, end(){}, tint(){ return null; }}, opts.hooks || {});
-  const ROUND = opts.round || 300, NUC_TARGET = opts.nucTarget || 350, LOBBY_NUCS = 150, MAXLOOSE = 16;
+  const ROUND = opts.round || 300, NUC_TARGET = opts.nucTarget || 280, LOBBY_NUCS = 120, MAXLOOSE = 16;
+  /* free letters break down in water (hydrolysis): each lasts LIFE seconds, faster where they crowd together
+     (so piles thin out on their own) and slower in cold brine. The last NUC_FADE seconds they fade out */
+  const LIFE = [80, 150], CROWD_CELL = 100, CROWD_FREE = 12, CROWD_RATE = 0.2, COLD_RATE = 0.4, NUC_FADE = 2.5;
   /* lobby: a practice pool before a room's game (map.js); no bots, hazards, fragments, harm or clock.
      The Learn lesson uses the same pool with Cleavers working (opt.cuts) and starts it empty of letters (opt.nucs) */
   let lobby = false, cutsOn = true, nucTarget = NUC_TARGET;
   /* fragments drift until a Joiner takes them or a black smoker breaks them up; at most FRAG_MAX + 2 at once */
-  const EAT_R = 16, HIT_R = 13, FRAG_MAX = 7, FRAG_EVERY = 25, FRAG_LIFE = Infinity;
+  const EAT_R = 19, HIT_R = 13, FRAG_MAX = 7, FRAG_EVERY = 25, FRAG_LIFE = Infinity;
   const OPEN_TYPES = MAP.CELLS.map((c, i) => i).filter(i => !MAP.CELLS[i].solid);
   let minStrands = opts.minStrands != null ? opts.minStrands : 10;
 
@@ -130,7 +133,8 @@ function create(opts){
   let nucId = 1;
   function spawnNuc(x, y, b, home){
     if (x == null){ const sp = MAP.spawnSpot(); if (!sp) return; x = sp.x; y = sp.y; b = sp.b; home = sp.home; }
-    nucs.push({id:nucId++, x:clamp(x, 15, W - 15), y:clamp(y, 15, H - 15), b:b || soupLetter(), vx:rnd(-5, 5), vy:rnd(-5, 5), home:home || null});
+    nucs.push({id:nucId++, x:clamp(x, 15, W - 15), y:clamp(y, 15, H - 15), b:b || soupLetter(), vx:rnd(-5, 5), vy:rnd(-5, 5), home:home || null,
+      age:0, life:rnd(LIFE[0], LIFE[1]), rate:1});
   }
   /* the soup's mix: plenty of A for loops and spacers, G and C for strong stems, fewer U */
   function soupLetter(){ const r = Math.random(); return r < 0.34 ? 'A' : r < 0.5 ? 'U' : r < 0.75 ? 'G' : 'C'; }
@@ -274,6 +278,21 @@ function create(opts){
     return true;
   }
 
+  /* how fast each letter breaks down: count letters in 100-px squares, and a letter with more than CROWD_FREE in its
+     own and the eight squares around it (300 px across) ages faster; brine is cold and slows it. Once a second */
+  let crowdT = 0;
+  function crowding(){
+    const grid = new Map(), key = (i, j) => i * 4096 + j;
+    for (const q of nucs){ const k = key(q.x / CROWD_CELL | 0, q.y / CROWD_CELL | 0); grid.set(k, (grid.get(k) || 0) + 1); }
+    for (const q of nucs){
+      const i = q.x / CROWD_CELL | 0, j = q.y / CROWD_CELL | 0; let n = 0;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) n += grid.get(key(i + a, j + b)) || 0;
+      /* a fresh meteorite crater's letters are its prize, so crowding there does not count until it cools */
+      const crowd = MAP.zoneAt(q.x, q.y) === 'crater' ? 1 : 1 + Math.max(0, n - CROWD_FREE) * CROWD_RATE;
+      q.rate = crowd * (MAP.cellAt(q.x, q.y).key === 'BRINE' ? COLD_RATE : 1);
+    }
+  }
+
   /* ---------- the step ---------- */
   function step(dt){
     /* letters drift on the currents, stay near where they formed, bounce off walls, and boil away in smokers */
@@ -284,8 +303,10 @@ function create(opts){
       if (q.home){ const hd = dist(q.x, q.y, q.home.x, q.home.y); if (hd > q.home.r){ q.vx += (q.home.x - q.x) / hd * 10 * dt; q.vy += (q.home.y - q.y) / hd * 10 * dt; } }
       if (Math.abs(q.vx) + Math.abs(q.vy) < 3){ q.vx = rnd(-5, 5); q.vy = rnd(-5, 5); }
       if (MAP.solidAt(q.x, q.y)){ q.x = ox; q.y = oy; q.vx = -q.vx; q.vy = -q.vy; }
-      if (q.x < 12 || q.x > W - 12 || q.y < 12 || q.y > H - 12 || MAP.smokerAt(q.x, q.y)) nucs.splice(i, 1);
+      q.age += dt * q.rate;
+      if (q.age >= q.life || q.x < 12 || q.x > W - 12 || q.y < 12 || q.y > H - 12 || MAP.smokerAt(q.x, q.y)) nucs.splice(i, 1);
     }
+    crowdT -= dt; if (crowdT <= 0){ crowdT = 1; crowding(); }
     MAP.update(dt, mapEv, players.filter(p => p.alive).map(p => p.s.head));
     spawnT += dt; while (spawnT > 0.12){ spawnT -= 0.12; if (nucs.length < nucTarget) spawnNuc(); }
     for (const f of frags.slice()) stepFrag(f, dt);
@@ -460,7 +481,7 @@ function create(opts){
       if (hit.length){ dirty(p); tell(p, `A meteorite struck nearby and damaged your ${hit.join(', ')}.`); }
       if (!p.isBot && !p.seenZone.crater && dist(h.x, h.y, m.x, m.y) < 1400){ p.seenZone.crater = true; tell(p, ZONE_FIRST.crater); }
     }
-    for (let k = 0; k < 34; k++){ const a = rnd(0, TAU), d = Math.sqrt(Math.random()) * 140; spawnNuc(m.x + Math.cos(a) * d, m.y + Math.sin(a) * d, Math.random() < 0.5 ? 'A' : 'G', {x:m.x, y:m.y, r:150}); }
+    for (let k = 0; k < 26; k++){ const a = rnd(0, TAU), d = Math.sqrt(Math.random()) * 140; spawnNuc(m.x + Math.cos(a) * d, m.y + Math.sin(a) * d, Math.random() < 0.5 ? 'A' : 'G', {x:m.x, y:m.y, r:150}); }
   }
   /* a geyser bursts: anything sitting on it is thrown toward another hot spring pool */
   function geyserBurst(g, to){
@@ -487,7 +508,7 @@ function create(opts){
     get players(){ return players; }, get nucs(){ return nucs; }, get frags(){ return frags; }, get news(){ return news; }, get timeLeft(){ return timeLeft; }});
 
   return {MAP, BOTS, stage, W, H, ROUND, MAXLOOSE, ZONE_FIRST, FN_NAMES,
-    reset, start, step, addHuman, leave, fold, drop, spawnFrag, spawnNuc, strike, uvFlash, impact, geyserBurst, complexity, standings,
+    reset, start, step, addHuman, leave, fold, drop, spawnFrag, spawnNuc, NUC_FADE, strike, uvFlash, impact, geyserBurst, complexity, standings,
     working, has, countFn, shieldFor, recipeLen,
     setMinStrands(n){ minStrands = n; fillBots(); },
     get players(){ return players; }, get nucs(){ return nucs; }, get frags(){ return frags; }, get news(){ return news; },
