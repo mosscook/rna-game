@@ -53,12 +53,13 @@
       <button type="button" data-t="lines" aria-pressed="false">Outlines</button>
       <button type="button" data-t="speed" aria-pressed="false">Swim speed</button>
       <button type="button" data-t="play" aria-pressed="false">Sealed water</button>
+      <button type="button" data-t="streams" aria-pressed="false">Streams</button>
       <button type="button" data-t="old" aria-pressed="false">Current map</button>
     </div>
     <label class="sl"><span>layer gap</span><input type="range" id="gap" min="0" max="0.1" step="0.002" value="0.05"></label>
     <label class="sl"><span>smoothing</span><input type="range" id="smooth" min="0" max="8" step="1" value="3"></label>
     <div id="worldBox"><h2>World</h2>
-      <p>The world starts with 1-3 meteor impacts near the centre: their worn, merged basins are the lagoon, and their raised rims the craggy highlands around it. Then deep channels, outer places, smaller craters, volcanoes (big ones with deep, breached calderas), lava channels and chimneys; and in the lagoon, ring mounds with doorways. Swim starts in a mound; letters are collectable. Settings are kept in the page link.</p>
+      <p>The world starts with 1-3 meteor impacts near the centre: their worn, merged basins are the lagoon, and their raised rims the craggy highlands around it. Then deep channels, outer places, smaller craters, volcanoes (big ones with deep, breached calderas), lava channels and chimneys, and streams carved where rain gathers running downhill; and in the lagoon, ring mounds with doorways. Swim starts in a mound; letters are collectable. Settings are kept in the page link.</p>
       <label class="sl"><span>map size</span><input type="range" id="msize" min="0.4" max="1" step="0.05" value="0.7"></label>
       <div class="note" id="msizeV" style="font-size:11px;opacity:.7;margin:-4px 0 6px 0"></div>
       <label class="sl"><span>impacts</span><input type="range" data-w="impacts" min="1" max="3" step="1" value="3"></label>
@@ -79,6 +80,8 @@
       <label class="sl"><span>big volcanoes</span><input type="range" data-w="calderas" min="0" max="3" step="1" value="2"></label>
       <label class="sl"><span>chimneys</span><input type="range" data-w="chimneys" min="0" max="14" step="1" value="6"></label>
       <label class="sl"><span>lava channels</span><input type="range" data-w="lava" min="0" max="6" step="1" value="4"></label>
+      <label class="sl"><span>waterways</span><input type="range" data-w="rivers" min="0" max="1" step="0.05" value="0.5"></label>
+      <label class="sl"><span>river depth</span><input type="range" data-w="riverDepth" min="0" max="1" step="0.05" value="0.5"></label>
       <label class="sl"><span>letters</span><input type="range" data-w="spread" min="0" max="160" step="10" value="20"></label>
     </div>
     <div id="placesBox"><h2>Places</h2>
@@ -136,7 +139,7 @@ const PLACES = [
   {id:'ridge', name:'Ocean ridge', keys:['RIDGE'], preset:'worms', s:0.4, base:0.2, top:0.95, col:[110, 120, 112]}];
 const RES = 25, GX = W / RES, GY = H / RES, N = GX * GY;
 const ITER = 3200, PER_FRAME = 80;
-const show = {parallax:true, sides:false, lines:false, speed:false, play:false, old:false};
+const show = {parallax:true, sides:false, lines:false, speed:false, play:false, old:false, streams:false};
 /* world (test 1): the new generator; patterns: the earlier lab on the old layout */
 let mode = 'world', world = null, letters = [], got = 0, genMs = 0;
 const WORLD = Object.assign({}, window.WorldGen.DEFAULTS);
@@ -353,6 +356,7 @@ function draw(){
   ctx.imageSmoothingEnabled = true;
   if (show.speed && speedImg) whole(speedImg, GX, GY);
   if (show.play && playImg){ ctx.imageSmoothingEnabled = false; whole(playImg, GX, GY); }
+  if (mode === 'world' && show.streams && world) drawStreams();
   if (mode === 'world') drawLetters();
   if (swim) drawStrand();
 }
@@ -469,6 +473,16 @@ function buildWorld(){
   analyse(); renderOverview(); draw(); stats();
 }
 const LCOL = {A:'#f0a35e', U:'#5ec4b8', G:'#b48cf0', C:'#f07fa6'};
+/* the stream network as lines, thicker where more water has joined: for judging the waterways */
+function drawStreams(){
+  const z = cam.z; ctx.save(); ctx.strokeStyle = 'rgba(90,180,255,.85)'; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const r of world.rivers){
+    for (let k = 0; k + 1 < r.length; k++){ const a = r[k], b = r[k + 1];
+      ctx.lineWidth = Math.max(1, Math.min(6, (0.6 + 0.5 * Math.sqrt(a.f)) * z * 2));
+      ctx.beginPath(); ctx.moveTo((a.x - cam.x) * z + cw / 2, (a.y - cam.y) * z + ch / 2); ctx.lineTo((b.x - cam.x) * z + cw / 2, (b.y - cam.y) * z + ch / 2); ctx.stroke(); }
+  }
+  ctx.restore();
+}
 function drawLetters(){
   const z = cam.z, x0 = cam.x - cw / 2 / z - 20, x1 = cam.x + cw / 2 / z + 20, y0 = cam.y - ch / 2 / z - 20, y1 = cam.y + ch / 2 / z + 20;
   ctx.font = `700 ${Math.max(8, 10 * z)}px ui-monospace, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -485,7 +499,7 @@ function stats(){
   if (mode === 'world' && world){
     const lag = new Array(8).fill(0); let ln = 0; for (let n = 0; n < N; n++) if (world.zone[n] === 0){ lag[bandOf(E[n])]++; ln++; }
     const pct = b => Math.round(lag[b] / ln * 100), byWhere = w => world.letters.filter(l => l.where === w).length;
-    $('stat').textContent = `world generated in ${genMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms; close-up tiles: ${tm}\nlagoon by band: ${lag.map((c, b) => `${b}:${pct(b)}%`).join(' ')}\n  (target: mostly 3-6, walls only on mound rims)\nmounds ${world.mounds.length}; craters ${world.craters.length} (basins ${world.craters.filter(c => c.basin).length}); vents ${world.vents.length}; lava channels ${world.lavas.length}\nletters: ${byWhere('mound')} in mounds, ${byWhere('spread')} spread, ${byWhere('pocket')} in pockets, ${byWhere('crater')} in craters, ${byWhere('vent')} at vents\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
+    $('stat').textContent = `world generated in ${genMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms; close-up tiles: ${tm}\nlagoon by band: ${lag.map((c, b) => `${b}:${pct(b)}%`).join(' ')}\n  (target: mostly 3-6, walls only on mound rims)\nmounds ${world.mounds.length}; craters ${world.craters.length} (basins ${world.craters.filter(c => c.basin).length}); vents ${world.vents.length}; lava channels ${world.lavas.length}; streams ${world.rivers.length}\nletters: ${byWhere('mound')} in mounds, ${byWhere('spread')} spread, ${byWhere('pocket')} in pockets, ${byWhere('crater')} in craters, ${byWhere('vent')} at vents\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
     return;
   }
   $('stat').textContent = `pattern: ${GX}×${GY} cells (${RES} px), ${ITER} steps: ${rdMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms\nclose-up tiles (500 px): ${tm}\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;

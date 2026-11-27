@@ -34,7 +34,7 @@ function blur(a, GX, GY, r){
 }
 
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
-const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
+const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
 
 function generate(o){
   const p = Object.assign({}, DEFAULTS, o), {W, H, RES} = p, GX = Math.round(W / RES), GY = Math.round(H / RES), N = GX * GY;
@@ -84,7 +84,7 @@ function generate(o){
      Each place has a smooth weight (zones by distance from the lagoon, outer places by direction). Near a border the
      weights are close, so a blobby noise per place decides: the two zones interleave in blob-shaped islands ("dither"
      in discrete blobs) instead of blending. Channels are their own place. */
-  const PIDS = ['lagoon', 'flats'].concat(p.outer).concat(['water']), pid = new Uint8Array(N), F = new Float32Array(N), DN = new Float32Array(N), L0 = new Float32Array(N), L1 = new Float32Array(N), CH = new Float32Array(N), BK = new Float32Array(N);
+  const PIDS = ['lagoon', 'flats'].concat(p.outer).concat(['water']), pid = new Uint8Array(N), F = new Float32Array(N), EU = new Float32Array(N), DN = new Float32Array(N), L0 = new Float32Array(N), L1 = new Float32Array(N), CH = new Float32Array(N), BK = new Float32Array(N);
   const blobG = PIDS.map(() => noiseGrid(r));
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
     const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, d = dn(x, y); DN[n] = d;
@@ -134,6 +134,7 @@ function generate(o){
     if (id !== 'water'){
       const gapHalf = p.gap * (0.6 + 0.8 * (0.5 + 0.5 * fbm(g[5], x / 500, y / 500)));
       F[n] = smooth(gapHalf, gapHalf + p.slope, dist[n]) * (1 - CH[n]);
+      EU[n] = e * (1 - CH[n]);                                    /* the land as if no gaps were cut: water's view of it */
       e *= smooth(gapHalf, gapHalf + p.slope, dist[n]);
       e = e * (1 - CH[n]) + 0.03 * CH[n] + 0.05 * BK[n] * (1 - CH[n]);
     }
@@ -294,6 +295,70 @@ function generate(o){
     const v = (inC > 0 && e > floor ? e + (floor - e) * inC : e) + 0.07 * levee;
     E[n] = e + (v - e) * F[n]; }
 
+
+  /* ---- waterways: rain falls on the land, runs downhill toward deep water, and gathers into branching streams.
+     Here "downhill" is toward deeper water (lower E); the deep places (black, below band 6) and the map's edge are
+     the outlets. Priority-flood (Barnes et al. 2014): grow outward from every outlet, lowest first; each cell drains
+     to the cell it was reached from, so pits and flats still drain and every path ends in deep water. Then count the
+     rain passing through each cell (flow accumulation) and carve a valley where it's high: wider and deeper as more
+     water joins, so the networks branch on their own. They run after the lava channels, so streams find those lanes
+     and drain down them. Ice sheds the most water (meltwater), the highland rim next, the lagoon least */
+  const rcv = new Int32Array(N).fill(-1), order = new Int32Array(N); let no = 0;
+  /* water sees the land with the border gaps filled back in (Rs), so whole landscapes drain together and streams
+     cross the gaps: long branching waterways instead of a trickle per chunk. Real deep water still stops them */
+  const Rs = new Float32Array(N); for (let n = 0; n < N; n++) Rs[n] = E[n] + (1 - F[n]) * EU[n];
+  /* and sees it broadly: blurred, so the steps between neighbouring zones don't become valleys of their own and
+     streams follow the regional slope, from the highlands down to the channels, craters and lagoon */
+  blur(Rs, GX, GY, 4);
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++) Rs[j * GX + i] += 0.03 * fbm(g2[2], i / 9, j / 9);   /* breaks up flats, so streams wander instead of running ruler-straight */
+  {
+    const hk = new Float32Array(N), hi = new Int32Array(N); let hn = 0;
+    const push = (n, k) => { let c = hn++; while (c > 0){ const pa = (c - 1) >> 1; if (hk[pa] < k || (hk[pa] === k && hi[pa] < n)) break; hk[c] = hk[pa]; hi[c] = hi[pa]; c = pa; } hk[c] = k; hi[c] = n; };
+    const pop = () => { const top = hi[0], k = hk[--hn], n = hi[hn]; let c = 0;
+      for (;;){ let m = 2 * c + 1; if (m >= hn) break; if (m + 1 < hn && (hk[m + 1] < hk[m] || (hk[m + 1] === hk[m] && hi[m + 1] < hi[m]))) m++; if (hk[m] > k || (hk[m] === k && hi[m] > n)) break; hk[c] = hk[m]; hi[c] = hi[m]; c = m; }
+      hk[c] = k; hi[c] = n; return top; };
+    const lvl = new Float32Array(N), done = new Uint8Array(N);
+    for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const n = j * GX + i;
+      /* the map edge is only a last resort (key + 1): water prefers deep water, and only drains off the edge where it can't reach any */
+      if (Rs[n] < 0.2){ done[n] = 1; lvl[n] = Rs[n]; push(n, Rs[n]); }
+      else if (i === 0 || j === 0 || i === GX - 1 || j === GY - 1){ done[n] = 1; lvl[n] = Rs[n] + 1; push(n, Rs[n] + 1); } }
+    while (hn){
+      const n = pop(); order[no++] = n; const i = n % GX, j = (n - i) / GX;
+      for (let q = -1; q <= 1; q++) for (let o = -1; o <= 1; o++){
+        if (!q && !o) continue; const ii = i + o, jj = j + q; if (ii < 0 || jj < 0 || ii >= GX || jj >= GY) continue;
+        const m = jj * GX + ii; if (done[m]) continue;
+        done[m] = 1; rcv[m] = n; lvl[m] = Math.max(Rs[m], lvl[n] + 1e-5); push(m, lvl[m]);
+      }
+    }
+  }
+  const RAIN = {lagoon:0.5, flats:1.4, ice:3, ridge:1.2, island:1, chimneys:0.8, water:0};
+  const acc = new Float32Array(N);
+  for (let n = 0; n < N; n++) acc[n] = Rs[n] >= 0.2 ? (RAIN[PIDS[pid[n]]] ?? 1) : 0;
+  for (let k = no - 1; k >= 0; k--){ const n = order[k], m = rcv[n]; if (m >= 0) acc[m] += acc[n]; }
+  /* carve: every cell over the threshold lowers a round patch around it, width and depth growing with the flow */
+  const A0 = 240 * (1.05 - 0.9 * p.rivers) * (RES / 25) * (RES / 25), LW = new Float32Array(N), streams = [];
+  if (p.rivers > 0) for (let n = 0; n < N; n++){
+    if (acc[n] < A0 || Rs[n] < 0.2 || zone[n] === 0) continue;      /* streams end where they reach the lagoon */
+    const f = Math.sqrt(acc[n] / A0), hw = Math.min(75, 18 + 13 * f), dep = Math.min(0.32, (0.07 + 0.05 * f) * (0.5 + p.riverDepth));
+    const i = n % GX, j = (n - i) / GX, rc = Math.ceil(hw / RES);
+    for (let q = -rc; q <= rc; q++) for (let o = -rc; o <= rc; o++){
+      const ii = i + o, jj = j + q; if (ii < 0 || jj < 0 || ii >= GX || jj >= GY) continue;
+      const d = Math.sqrt(o * o + q * q) * RES / hw; if (d >= 1) continue;
+      const m = jj * GX + ii, low = dep * (1 - smooth(0.35, 1, d)); if (low > LW[m]) LW[m] = low;
+    }
+    streams.push(n);
+  }
+  for (let n = 0; n < N; n++) if (LW[n] > 0) E[n] = Math.max(Math.min(E[n], 0.05), E[n] - LW[n]);
+  /* trace each stream as a line from its head (a stream cell nobody upstream feeds) down to deep water, for drawing */
+  const isS = new Uint8Array(N); for (const n of streams) isS[n] = 1;
+  const fed = new Uint8Array(N); for (const n of streams){ const m = rcv[n]; if (m >= 0) fed[m] = 1; }
+  const rivers = [];
+  for (const n0 of streams) if (!fed[n0]){
+    const line = []; let n = n0, guard = 0;
+    while (n >= 0 && guard++ < 2000){ const i = n % GX; line.push({x:(i + 0.5) * RES, y:((n - i) / GX + 0.5) * RES, f:acc[n] / A0}); if (!isS[n]) break; n = rcv[n]; }
+    if (line.length > 2) rivers.push(line);
+  }
+
   /* rewards: letters gather on crater floors (impact heat) and around chimney pits (vent chemistry) */
   for (const c of craters) if (c.R > 200) for (let q = 0, t = 0; q < (c.basin ? 14 : 7) && t < 120; t++){
     const a = r2() * TAU, d = c.R * (0.15 + 0.4 * r2()), x = c.x + d * dcos(a), y = c.y + d * dsin(a);
@@ -374,7 +439,7 @@ function generate(o){
     for (let q = 0, tries = 0; q < 10 && tries < 200; tries++){ const x = px + (r() * 2 - 1) * 110, y = py + (r() * 2 - 1) * 110; if (inMound(x, y, 15) || eAt(x, y) >= WALL - 0.1) continue; letters.push({x, y, b:BASES[Math.floor(r() * 4)], where:'pocket'}); q++; }
   }
   for (const l of letters2) letters.push(l);
-  return {E, zone, weights:w, letters, spawns, impacts, craters, vents, lavas, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY};
+  return {E, zone, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY};
 }
 return {generate, DEFAULTS, WALL, dsin, dcos};
 })();
