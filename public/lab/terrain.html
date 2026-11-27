@@ -59,7 +59,7 @@
     <label class="sl"><span>layer gap</span><input type="range" id="gap" min="0" max="0.1" step="0.002" value="0.05"></label>
     <label class="sl"><span>smoothing</span><input type="range" id="smooth" min="0" max="8" step="1" value="3"></label>
     <div id="worldBox"><h2>World</h2>
-      <p>The world starts with 1-3 meteor impacts near the centre: their worn, merged basins are the lagoon, and their raised rims the craggy highlands around it. Then deep channels, outer places, smaller craters, volcanoes (big ones with deep, breached calderas), lava channels and chimneys, and streams carved where rain gathers running downhill; and in the lagoon, ring mounds with doorways. Swim starts in a mound; letters are collectable. Settings are kept in the page link.</p>
+      <p>The world starts with 1-3 meteor impacts near the centre: their worn, merged basins are the lagoon, and their raised rims the craggy highlands around it. Then deep channels, outer places, smaller craters, volcanoes (big ones with deep, breached calderas), lava channels and chimneys, and streams carved where rain gathers running downhill; then each place grows its own reaction-diffusion texture, stretched along the slopes and fading over the lanes; and in the lagoon, ring mounds with doorways. Swim starts in a mound; letters are collectable. Settings are kept in the page link.</p>
       <label class="sl"><span>map size</span><input type="range" id="msize" min="0.4" max="1" step="0.05" value="0.7"></label>
       <div class="note" id="msizeV" style="font-size:11px;opacity:.7;margin:-4px 0 6px 0"></div>
       <label class="sl"><span>impacts</span><input type="range" data-w="impacts" min="1" max="3" step="1" value="3"></label>
@@ -82,6 +82,8 @@
       <label class="sl"><span>lava channels</span><input type="range" data-w="lava" min="0" max="6" step="1" value="4"></label>
       <label class="sl"><span>waterways</span><input type="range" data-w="rivers" min="0" max="1" step="0.05" value="0.5"></label>
       <label class="sl"><span>river depth</span><input type="range" data-w="riverDepth" min="0" max="1" step="0.05" value="0.5"></label>
+      <label class="sl"><span>texture</span><input type="range" data-w="texture" min="0" max="2" step="0.1" value="1"></label>
+      <label class="sl"><span>texture follows slope</span><input type="range" data-w="align" min="0" max="1.5" step="0.1" value="1"></label>
       <label class="sl"><span>letters</span><input type="range" data-w="spread" min="0" max="160" step="10" value="20"></label>
     </div>
     <div id="placesBox"><h2>Places</h2>
@@ -471,6 +473,24 @@ function buildWorld(){
   centres = PLACES.map(p => p.id === 'lagoon' ? {x:world.centre.x, y:world.centre.y} : null);
   letters = world.letters.map(l => ({...l})); got = 0;
   analyse(); renderOverview(); draw(); stats();
+  growTexture();
+}
+/* lab step 3: grow each place's reaction-diffusion texture on the finished landforms, and watch it reshape the land */
+let texGen = 0, texMs = 0;
+function growTexture(){
+  const my = ++texGen; texMs = 0;
+  if (!(WORLD.texture > 0)){ $('prog').style.width = '0%'; return; }
+  const tx = window.WorldGen.texture(world, {amp:WORLD.texture, aniso:WORLD.align}), TOTAL = 3000, PER = 60;
+  let frame = 0;
+  const tick = () => {
+    if (my !== texGen) return;
+    const t0 = performance.now(); tx.step(PER); texMs += performance.now() - t0;
+    $('prog').style.width = (tx.iter / TOTAL * 100) + '%';
+    const done = tx.iter >= TOTAL;
+    if (done || ++frame % 8 === 0){ tx.apply(); E.set(world.E); analyse(); renderOverview(); draw(); }
+    if (done){ stats(); $('prog').style.width = '0%'; } else requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 const LCOL = {A:'#f0a35e', U:'#5ec4b8', G:'#b48cf0', C:'#f07fa6'};
 /* the stream network as lines, thicker where more water has joined: for judging the waterways */
@@ -499,7 +519,7 @@ function stats(){
   if (mode === 'world' && world){
     const lag = new Array(8).fill(0); let ln = 0; for (let n = 0; n < N; n++) if (world.zone[n] === 0){ lag[bandOf(E[n])]++; ln++; }
     const pct = b => Math.round(lag[b] / ln * 100), byWhere = w => world.letters.filter(l => l.where === w).length;
-    $('stat').textContent = `world generated in ${genMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms; close-up tiles: ${tm}\nlagoon by band: ${lag.map((c, b) => `${b}:${pct(b)}%`).join(' ')}\n  (target: mostly 3-6, walls only on mound rims)\nmounds ${world.mounds.length}; craters ${world.craters.length} (basins ${world.craters.filter(c => c.basin).length}); vents ${world.vents.length}; lava channels ${world.lavas.length}; streams ${world.rivers.length}\nletters: ${byWhere('mound')} in mounds, ${byWhere('spread')} spread, ${byWhere('pocket')} in pockets, ${byWhere('crater')} in craters, ${byWhere('vent')} at vents\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
+    $('stat').textContent = `world generated in ${genMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms; close-up tiles: ${tm}\nlagoon by band: ${lag.map((c, b) => `${b}:${pct(b)}%`).join(' ')}\n  (target: mostly 3-6, walls only on mound rims)\ntexture grown in ${Math.round(texMs)} ms\nmounds ${world.mounds.length}; craters ${world.craters.length} (basins ${world.craters.filter(c => c.basin).length}); vents ${world.vents.length}; lava channels ${world.lavas.length}; streams ${world.rivers.length}\nletters: ${byWhere('mound')} in mounds, ${byWhere('spread')} spread, ${byWhere('pocket')} in pockets, ${byWhere('crater')} in craters, ${byWhere('vent')} at vents\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;
     return;
   }
   $('stat').textContent = `pattern: ${GX}×${GY} cells (${RES} px), ${ITER} steps: ${rdMs.toFixed(0)} ms here\nwhole map drawn: ${renderMs.toFixed(0)} ms\nclose-up tiles (500 px): ${tm}\nmap by band: ${cells.map((c, b) => `${b}:${Math.round(c / N * 100)}%`).join(' ')}\nsealed-off water: ${(unreach * 100).toFixed(1)}%`;

@@ -1,4 +1,4 @@
-/* RNA Strand Soup: world generator, lab steps 1-2, founded by meteor impacts. Zones, deep channels, the lagoon's ring mounds with doorways,
+/* RNA Strand Soup: world generator, lab steps 1-3, founded by meteor impacts. Zones, deep channels, the lagoon's ring mounds with doorways,
    letter seeding and spawns, as one elevation field E (0 bottomless .. 1 surface; above 0.86 is a wall) on a grid.
 
    Only basic arithmetic (+ - * /, Math.floor, Math.sqrt, Math.imul), never Math.sin/cos/exp/atan2: those may differ
@@ -34,7 +34,7 @@ function blur(a, GX, GY, r){
 }
 
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
-const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
+const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, texture:1, align:1, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
 
 function generate(o){
   const p = Object.assign({}, DEFAULTS, o), {W, H, RES} = p, GX = Math.round(W / RES), GY = Math.round(H / RES), N = GX * GY;
@@ -439,7 +439,81 @@ function generate(o){
     for (let q = 0, tries = 0; q < 10 && tries < 200; tries++){ const x = px + (r() * 2 - 1) * 110, y = py + (r() * 2 - 1) * 110; if (inMound(x, y, 15) || eAt(x, y) >= WALL - 0.1) continue; letters.push({x, y, b:BASES[Math.floor(r() * 4)], where:'pocket'}); q++; }
   }
   for (const l of letters2) letters.push(l);
-  return {E, zone, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY};
+  /* lanes: deep channels, streams and lava channels. Textures fade out over them so travel lanes stay open */
+  const lane = new Float32Array(N);
+  for (let n = 0; n < N; n++) lane[n] = Math.max(CH[n], Math.min(1, LW[n] * 8), LD[n] < 2 ? 1 - smooth(1, 1.8, LD[n]) : 0);
+  return {E, E0:Float32Array.from(E), zone, pid, PIDS, ramp:F, lane, seed:p.seed, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY, RES};
 }
-return {generate, DEFAULTS, WALL, dsin, dcos};
+
+/* ---- place scale: reaction-diffusion textures, steered by the landforms (lab step 3) ----
+   Gray-Scott on the world grid. Each place grows its own preset (feed, kill, size). Diffusion is anisotropic: stronger
+   along the contours (across the slope), so on slopes the patterns stretch into terraces and ridges that follow the
+   land, while on flat ground they stay round. The pattern only reshapes the land inside each zone: it fades to nothing
+   at the black borders and over channels, streams and lava lanes, never makes new walls or new black, and leaves the
+   mounds' walls and deep water alone. Basic arithmetic only, so every device grows the same texture */
+const TEXTURES = {
+  water:{F:0.02, k:0.075, s:0.5, amp:0, aniso:0},
+  lagoon:{F:0.03, k:0.062, s:0.5, amp:0.16, aniso:0.3},       /* spots */
+  flats:{F:0.029, k:0.057, s:0.45, amp:0.3, aniso:0.8},      /* maze -> terraces on the highland rim */
+  island:{F:0.0545, k:0.062, s:0.45, amp:0.26, aniso:0.5},    /* coral */
+  chimneys:{F:0.039, k:0.058, s:0.4, amp:0.28, aniso:0.2},    /* holes */
+  ice:{F:0.029, k:0.057, s:0.35, amp:0.3, aniso:0.6},        /* maze -> crevasses */
+  ridge:{F:0.078, k:0.061, s:0.4, amp:0.28, aniso:0.9}};      /* worms -> rift-parallel */
+function texture(world, o = {}){
+  const {GX, GY} = world, N = GX * GY, E0 = world.E0, amp = o.amp ?? 1, an = o.aniso ?? 1;
+  /* where the texture may act: inside each zone, off the lanes, blurred so it fades in */
+  const M = new Float32Array(N); for (let n = 0; n < N; n++) M[n] = world.ramp[n] * (1 - world.lane[n]); blur(M, GX, GY, 2);
+  const Fp = new Float32Array(N), Kp = new Float32Array(N), Sp = new Float32Array(N), A = new Float32Array(N);
+  const none = TEXTURES.water;
+  for (let n = 0; n < N; n++){
+    const t = TEXTURES[world.PIDS[world.pid[n]]] || none, m = M[n] * (t.amp > 0 ? 1 : 0);
+    Fp[n] = none.F + (t.F - none.F) * m; Kp[n] = none.k + (t.k - none.k) * m; Sp[n] = t.s; A[n] = t.amp * amp * M[n];
+  }
+  /* anisotropy from the slope of the land (blurred), as 8 neighbour weights per cell that still sum to 1 */
+  const Eb = Float32Array.from(E0); blur(Eb, GX, GY, 3);
+  const OFF = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]], BASE = [0.2, 0.2, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05];
+  const Wt = new Float32Array(N * 8);
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
+    const n = j * GX + i, gx = (Eb[j * GX + Math.min(GX - 1, i + 1)] - Eb[j * GX + Math.max(0, i - 1)]) / 2, gy = (Eb[Math.min(GY - 1, j + 1) * GX + i] - Eb[Math.max(0, j - 1) * GX + i]) / 2;
+    const g = Math.sqrt(gx * gx + gy * gy), t = TEXTURES[world.PIDS[world.pid[n]]] || none, a = Math.min(0.95, t.aniso * an * smooth(0.002, 0.012, g));
+    const cxv = g > 0 ? -gy / g : 1, cyv = g > 0 ? gx / g : 0;
+    for (let k = 0; k < 8; k++){ const [ox, oy] = OFF[k], l2 = ox * ox + oy * oy, d = (cxv * ox + cyv * oy), al = d * d / l2; Wt[n * 8 + k] = BASE[k] * (1 + a * (2 * al - 1)); }
+  }
+  /* seeds: small squares scattered where texture can grow */
+  const r = rng((world.seed || 1) * 7919 + 13);
+  let U = new Float32Array(N).fill(1), V = new Float32Array(N), U2 = new Float32Array(N), V2 = new Float32Array(N);
+  for (let j = 1; j < GY - 1; j++) for (let i = 1; i < GX - 1; i++){ const n = j * GX + i;
+    if (r() < 0.03 * M[n]) for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++){ U[n + b * GX + a] = 0.5; V[n + b * GX + a] = 0.25 + r() * 0.25; } }
+  let iter = 0;
+  function step(times){
+    for (let it = 0; it < times; it++){
+      for (let j = 0; j < GY; j++){
+        const jm = (j > 0 ? j - 1 : j) * GX, j0 = j * GX, jp = (j < GY - 1 ? j + 1 : j) * GX;
+        for (let i = 0; i < GX; i++){
+          const im = i > 0 ? i - 1 : i, ip = i < GX - 1 ? i + 1 : i, n = j0 + i, w8 = n * 8, u = U[n], v = V[n];
+          const nb0 = j0 + ip, nb1 = j0 + im, nb2 = jp + i, nb3 = jm + i, nb4 = jp + ip, nb5 = jm + im, nb6 = jm + ip, nb7 = jp + im;
+          const lu = Wt[w8] * U[nb0] + Wt[w8 + 1] * U[nb1] + Wt[w8 + 2] * U[nb2] + Wt[w8 + 3] * U[nb3] + Wt[w8 + 4] * U[nb4] + Wt[w8 + 5] * U[nb5] + Wt[w8 + 6] * U[nb6] + Wt[w8 + 7] * U[nb7] - u;
+          const lv = Wt[w8] * V[nb0] + Wt[w8 + 1] * V[nb1] + Wt[w8 + 2] * V[nb2] + Wt[w8 + 3] * V[nb3] + Wt[w8 + 4] * V[nb4] + Wt[w8 + 5] * V[nb5] + Wt[w8 + 6] * V[nb6] + Wt[w8 + 7] * V[nb7] - v;
+          const s = Sp[n], uvv = u * v * v;
+          U2[n] = u + s * lu - uvv + Fp[n] * (1 - u);
+          V2[n] = v + s * 0.5 * lv + uvv - (Fp[n] + Kp[n]) * v;
+        }
+      }
+      let t = U; U = U2; U2 = t; t = V; V = V2; V2 = t;
+    }
+    iter += times; return iter;
+  }
+  /* write the texture into world.E: raise where the pattern is, lower between, within the band range */
+  function apply(){
+    const E = world.E;
+    for (let n = 0; n < N; n++){
+      const e = E0[n]; if (e < 0.2 || e >= WALL || A[n] <= 0.001){ E[n] = e; continue; }
+      const t = V[n], d = A[n] * (smooth(0.06, 0.22, t) - 0.4);
+      E[n] = Math.max(0.2, Math.min(WALL - 0.02, e + d));
+    }
+    return E;
+  }
+  return {step, apply, get iter(){ return iter; }, get V(){ return V; }};
+}
+return {generate, texture, TEXTURES, DEFAULTS, WALL, dsin, dcos};
 })();
