@@ -130,7 +130,19 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .sheet .alt:hover{color:var(--ink)}
 
 /* start and end screens */
-.overlay{position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--pond) 55%,transparent);overflow:auto;z-index:5}
+/* the start screen's logo: RNA written by three live strands, GAME in plain type beneath */
+.logo{display:grid;justify-items:center;pointer-events:none;user-select:none}
+.logo svg{width:min(300px,78vw,42vh);height:auto;overflow:visible}
+.logoWord{font:800 clamp(22px,min(6vw,5vh),36px)/1 var(--font-display);letter-spacing:.42em;margin:-6px 0 6px .42em;color:var(--ink);opacity:.92}
+.sheet.start{gap:8px;padding:14px 16px;max-width:400px}
+.sheet.start h2{font-size:17px}
+.sheet.start > p{font-size:13.5px;margin:0}
+.sheet.start .mode{padding:8px 12px}
+.sheet.start .mode b{font-size:16px}
+.sheet.start .mode small{font-size:12px}
+.sheet.start .room{margin:6px 0 2px}
+.sheet.start .fine{margin:0;font-size:11.5px}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;align-content:safe center;gap:4px;padding:16px;background:color-mix(in srgb,var(--pond) 55%,transparent);overflow:auto;z-index:5}
 .sheet{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;max-width:440px;display:grid;gap:10px;box-shadow:0 8px 30px rgb(0 0 0 / .25)}
 .sheet h2{font-size:20px}
 .sheet .fine{font-size:12px;color:var(--muted)}
@@ -288,7 +300,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn sm" type="button" id="wStop" aria-label="Stop watching" title="Back to your strand (V)">&times;</button>
   </div>
   <p class="toast" id="toast" aria-live="polite"></p>
-  <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+  <div class="overlay" id="overlay"><div class="logo" id="logo" hidden aria-label="RNA game"><svg id="logoSvg" viewBox="-24 -26 348 176" aria-hidden="true"></svg><div class="logoWord" aria-hidden="true">GAME</div></div><div class="sheet" id="sheet"></div></div>
 </div>
 
 <script src="segments.js"></script>
@@ -587,7 +599,7 @@ function modeButtons(play, watchText, learnText){
   </div>`;
 }
 function showStart(){
-  $('overlay').hidden = false;
+  $('overlay').hidden = false; $('sheet').classList.add('start');
   if (net){
     $('sheet').innerHTML = `<h2>Room ${ROOM}</h2>
       <p>Everyone who opens <b>${location.host}/${ROOM}</b> plays in the same soup.</p>
@@ -597,8 +609,7 @@ function showStart(){
     $('mWatch').addEventListener('click', watchRoom);
     $('mLearn').addEventListener('click', () => { location.href = '/?learn=' + ROOM; });
   } else {
-    $('sheet').innerHTML = `<h2>RNA Strand Soup</h2>
-      <p>Before DNA and proteins, strands of RNA may have done everything. Grow the most complex strand in five minutes.</p>
+    $('sheet').innerHTML = `<p>Before DNA and proteins, strands of RNA may have done everything. Grow the most complex strand in five minutes.</p>
       ${modeButtons('A five-minute round against nine bots', 'Watch the bots build, and see what they are thinking', 'About two minutes, one step at a time')}
       <form class="room" id="roomForm"><label for="roomName">Play together:</label><span class="host">${location.host}/</span><input id="roomName" placeholder="period3" maxlength="32" autocomplete="off" spellcheck="false" aria-label="Room name"><button class="btn" type="submit">Join room</button></form>
       ${HOW}
@@ -614,6 +625,54 @@ function showStart(){
   }
   (learned ? $('mPlay') : $('mLearn')).focus();
 }
+/* ---------- the start screen's logo ----------
+   R, N and A are each one live strand laid along the letter's stroke (A's crossbar is a fourth, short one), using the
+   same engine and look as the strands in the soup. The strokes drift on slow, out-of-step waves and the strands keep
+   their own ripple and helical twist, so the word never quite holds still. It only runs while the start card shows,
+   and holds almost still for people who ask for less motion. */
+const logo = (() => {
+  const svg = $('logoSvg'), box = $('logo'), st = RS.createStage(svg), still = matchMedia('(prefers-reduced-motion: reduce)');
+  const seg = (a, b, out) => { const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3)); for (let k = out.length ? 1 : 0; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); return out; };
+  const arc = (cx, cy, r, a0, a1, out) => { const n = Math.ceil(Math.abs(a1 - a0) * r / 3); for (let k = 1; k <= n; k++){ const a = a0 + (a1 - a0) * k / n; out.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } return out; };
+  const line = (...p) => { const out = []; for (let k = 0; k + 1 < p.length; k++) seg(p[k], p[k + 1], out); return out; };
+  /* letters 80 wide and 120 tall, 30 apart; each stroke starts where its strand's head goes */
+  const R = (() => { const o = line([0, 120], [0, 0], [42, 0]); arc(42, 30, 30, -Math.PI / 2, Math.PI / 2, o); seg([42, 60], [6, 60], o); seg([6, 60], [80, 120], o); return o; })();
+  const N = line([110, 120], [110, 0], [190, 120], [190, 0]);
+  const A = line([220, 120], [260, 0], [300, 120]);
+  const BAR = line([238, 72], [282, 72]);
+  const PATHS = [R, N, A, BAR], SEQ = 'GGAUCCUAGCAUGGCUUAACGGUCAUAGCCGUAUGCAAUCGGAUC';
+  let strands = null, t = 0, last = 0, raf = 0;
+  const lengthOf = p => { let L = 0; for (let k = 1; k < p.length; k++) L += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); return L; };
+  function make(){
+    strands = PATHS.map((p, k) => {
+      const s = st.addStrand({seq:'A', x:p[0][0], y:p[0][1]}), sp = s.spacing;
+      const n = Math.max(2, Math.floor((lengthOf(p) - sp.lead) / sp.gap) + 1);
+      s.setSeq(Array.from({length:n}, (_, i) => SEQ[(i * 7 + k * 11) % SEQ.length]).join(''));
+      return {s, p, k};
+    });
+  }
+  /* each point drifts on two slow waves that run along the stroke, a little out of step between letters */
+  const wobble = (p, k, amp) => p.map((q, i) => ({x:q[0] + amp * (Math.sin(t * 0.9 + i * 0.11 + k * 1.7) + 0.5 * Math.sin(t * 1.7 - i * 0.07 + k)),
+    y:q[1] + amp * (Math.cos(t * 0.7 + i * 0.09 + k * 2.3) + 0.5 * Math.sin(t * 1.3 + i * 0.13 - k))}));
+  function frame(now){
+    raf = 0;
+    if (box.hidden || $('overlay').hidden) return;
+    const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016); last = now;
+    const calm = still.matches; t += dt * (calm ? 0.05 : 1);
+    for (const q of strands) q.s.lay(calm ? dt * 0.05 : dt, wobble(q.p, q.k, calm ? 0.6 : 2.6), {moving:calm ? 0 : 0.55});
+    st.render();
+    raf = requestAnimationFrame(frame);
+  }
+  function sync(){
+    const on = !$('overlay').hidden && !!$('sheet').querySelector('#mPlay');
+    box.hidden = !on;
+    if (on){ if (!strands) make(); if (!raf){ last = 0; raf = requestAnimationFrame(frame); } }
+    else $('sheet').classList.remove('start');
+  }
+  new MutationObserver(sync).observe($('sheet'), {childList:true});
+  new MutationObserver(sync).observe($('overlay'), {attributes:true, attributeFilter:['hidden']});
+  return {sync};
+})();
 /* ---------- Learn: a guided first round in the small practice pool ----------
    Five steps, each finished by doing it: swim, pick a recipe, collect its letters, fold, cut. The pool starts empty so
    stray letters do not get in the way of the first recipe; once the recipe is picked, letters fill in and the next one
