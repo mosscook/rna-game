@@ -35,6 +35,23 @@ A last card covers what the lesson didn't show: scoring, the other segments, bot
 
 A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
 
+## Microscope look
+
+`public/lens.js` adds optional effects that make the soup look like a view down a microscope. All are off unless chosen with `?lens=` (comma-separated), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
+
+| Effect | What it does | Cost |
+| --- | --- | --- |
+| `vignette` | Light falls off toward the corners | None measurable (a CSS gradient on a layer that never changes) |
+| `eyepiece` | A round field of view; corners go dark | None measurable, but it hides strands coming from the corners |
+| `rim` | A faint blue and magenta fringe near the edge, like a cheap lens | None measurable |
+| `bokeh` | Out-of-focus specks drifting above and below the focal plane, with parallax | None measurable (27 soft discs a frame) |
+| `soft` | The ground out of focus, so only strands and letters are sharp | Slightly cheaper than normal: ground tiles are drawn at lower resolution and blurred once |
+| `scale` | A scale bar in nanometres above the minimap (letters are about 0.6 nm apart) | None measurable |
+| `grain` | Sensor noise | About 25% of frame rate in a slowed-down test |
+| `edge` | Real blur around the edge (backdrop-filter); for testing on a real Chromebook only | Every frame, on the graphics chip |
+
+Recommended set: `?lens=vignette,rim,bokeh,soft,scale`.
+
 ## Watching
 
 Press **Watch** (or V) to follow other strands: ◀ ▶ (or the arrow keys) move between them, **Tour** moves on every 15 seconds, and × (or Esc) goes back to your own strand. While you watch, your strand waits where it is and can still be hit. The bar shows each strand's score, its place, and what a bot is thinking.

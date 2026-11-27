@@ -202,6 +202,18 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .dev .legend{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
 .dev .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;background:var(--c);vertical-align:-1px}
 .dev h3{margin:2px 0 0;font:700 10px var(--font-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+/* the microscope look (lens.js): layers between the strands and the top canvas */
+.lens,.edgeblur{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.lens.soft{background:radial-gradient(ellipse farthest-corner at 50% 50%,transparent 52%,rgb(0 0 0/.28) 78%,rgb(0 0 0/.62) 100%)}
+.lens.eyepiece{background:radial-gradient(circle farthest-side at 50% 50%,transparent 72%,rgb(0 0 0/.45) 90%,rgb(0 0 0/.9) 99%,#000 100%)}
+.lens.rim::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse farthest-corner at 50% 50%,transparent 66%,rgb(90 200 255/.07) 74%,rgb(255 90 210/.07) 82%,transparent 90%)}
+.lens.eyepiece.rim::after{background:radial-gradient(circle farthest-side at 50% 50%,transparent 80%,rgb(90 200 255/.09) 86%,rgb(255 90 210/.09) 92%,transparent 97%)}
+.lens .grain{position:absolute;inset:-160px;opacity:.07;will-change:transform;animation:grain .6s steps(5) infinite}
+@keyframes grain{0%{transform:translate(0,0)}20%{transform:translate(-61px,37px)}40%{transform:translate(43px,-89px)}60%{transform:translate(-97px,-23px)}80%{transform:translate(71px,101px)}100%{transform:translate(0,0)}}
+.edgeblur{-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+  -webkit-mask-image:radial-gradient(ellipse farthest-corner at 50% 50%,transparent 60%,#000 92%);mask-image:radial-gradient(ellipse farthest-corner at 50% 50%,transparent 60%,#000 92%)}
+.edgeblur.round{-webkit-mask-image:radial-gradient(circle farthest-side at 50% 50%,transparent 62%,#000 86%);mask-image:radial-gradient(circle farthest-side at 50% 50%,transparent 62%,#000 86%)}
+@media (prefers-reduced-motion:reduce){ .lens .grain{animation:none} }
 /* the start screen: three ways in */
 .modes{display:grid;gap:8px}
 .mode{display:grid;gap:2px;text-align:left;padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:var(--field);color:var(--ink);cursor:pointer;font:inherit;position:relative}
@@ -286,6 +298,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 <script src="bots.js"></script>
 <script src="sim.js"></script>
 <script src="net.js"></script>
+<script src="lens.js"></script>
 <script>
 (() => {
 'use strict';
@@ -311,6 +324,9 @@ const zoneAt = (x, y) => MAP.zoneAt(x, y);
 /* the name of each place, shown at the top left (biomes.js) */
 const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
 const stage = RS.createStage($('sv'));
+/* the microscope look: ?lens=vignette,bokeh,... picks effects (lens.js); ?lens=off for none */
+const LENS = window.SoupLens.create({pond:$('pond'), under:$('top'), MAP});
+{ const q = new URLSearchParams(location.search).get('lens'); if (q != null) LENS.set(q === 'off' ? [] : q.split(',')); }
 let me = null, fx = [], paused = false, clockT = 0;
 let uiDirty = true, pointer = null, showThoughts = true;
 const T = {};
@@ -453,6 +469,7 @@ function devSetup(){
   const solo = !net, seg = SEG.LIST.map(s => `<button class="btn" type="button" data-add="${s.fn}">+${s.fn}</button>`).join('');
   $('dev').innerHTML = `<pre id="devStats"></pre>`
     + `<div class="row"><button class="btn" type="button" id="dBio" aria-pressed="false">Ground map <kbd>B</kbd></button></div>`
+    + `<h3>Microscope look</h3><div class="row">${LENS.ALL.map(k => `<button class="btn" type="button" data-lens="${k}" aria-pressed="${LENS.has(k)}">${k}</button>`).join('')}</div>`
     + (solo ? `<h3>Add to your strand</h3><div class="row">${seg}</div>`
       + `<h3>Make it happen here</h3><div class="row"><button class="btn" type="button" data-do="frag">Fragment</button><button class="btn" type="button" data-do="meteor">Meteorite</button>`
       + `<button class="btn" type="button" data-do="uv">UV flash</button><button class="btn" type="button" data-do="damage">Damage me</button></div>`
@@ -462,6 +479,11 @@ function devSetup(){
     + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`;
   $('dev').hidden = false;
   $('dBio').addEventListener('click', toggleBiomes);
+  $('dev').addEventListener('click', e => {
+    const b = e.target.closest('[data-lens]'); if (!b) return;
+    LENS.toggle(b.dataset.lens);
+    for (const x of $('dev').querySelectorAll('[data-lens]')) x.setAttribute('aria-pressed', LENS.has(x.dataset.lens));
+  });
   if (!solo) return;
   /* "here" is where the pointer is, or your head */
   const here = () => pointer ? {x:clamp(camX + pointer.x / scale, 5, W - 5), y:clamp(camY + pointer.y / scale, 5, H - 5)} : {x:me.s.head.x, y:me.s.head.y};
@@ -813,6 +835,8 @@ function draw(t){
   MAP.drawBase(ctx, camX, camY, vw, vh, t);
   MAP.drawOver(ctx, camX, camY, vw, vh, still ? 0 : t);
   if (devBiomes) drawBiomes(ctx, vw, vh);
+  LENS.drawBack(ctx, camX, camY, cw, ch, scale, t, dpr);
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);
   ctx.font = `700 9px ${T.mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const need = wantedLetters();
   ctx.lineCap = 'round';
@@ -830,6 +854,7 @@ function draw(t){
 
   /* top canvas: names, effects, pointers, minimap */
   tx.setTransform(dpr, 0, 0, dpr, 0, 0); tx.clearRect(0, 0, cw, ch);
+  LENS.drawFront(tx, camX, camY, cw, ch, scale, t, dpr);
   tx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);
   for (const p of L.players){
     if (!p.alive) continue;
@@ -883,6 +908,7 @@ function draw(t){
   for (const p of L.players){ const px = p === me || p.mx == null ? p.s.head.x : p.mx, py = p === me || p.my == null ? p.s.head.y : p.my; if (!p.alive && p.mx == null) continue; tx.fillStyle = T[p.col]; tx.beginPath(); tx.arc(MX(px), MY(py), p === fp ? 4.5 : p === me ? 4 : 2.8, 0, TAU); tx.fill(); if (p === fp && fp !== me){ tx.lineWidth = 1.5; tx.strokeStyle = T.ink; tx.stroke(); } }
   tx.save(); tx.beginPath(); tx.rect(mx, my, mw, mhh); tx.clip();
   tx.strokeStyle = T.ink; tx.strokeRect(MX(camX), MY(camY), Math.min(vw, mv.w) * k, Math.min(vh, mv.h) * k); tx.restore();
+  if (LENS.has('scale')) drawScaleBar(mx, my - 12);
   drawStick();
 }
 
@@ -1049,6 +1075,13 @@ tc.addEventListener('pointermove', e => {
   if (stick && e.pointerId === stick.id){ const at = local(e); stick.x = at.x; stick.y = at.y; }
 });
 ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(n => tc.addEventListener(n, e => { if (stick && e.pointerId === stick.id) stick = null; }));
+/* a scale bar, as on a micrograph: letters sit about 0.6 nm apart along the backbone, and RS.LB px apart on screen.
+   (Something this small needs an electron microscope; a light microscope stops at about 200 nm.) */
+function drawScaleBar(x, y){
+  const pxPerNm = RS.geo.LB / window.SoupLens.NM_PER_LETTER * scale, nm = [5, 10, 20, 50].find(n => n * pxPerNm >= 60) || 50, len = nm * pxPerNm;
+  tx.fillStyle = T.ink; tx.globalAlpha = 0.85; tx.fillRect(x, y, len, 3); tx.fillRect(x, y - 3, 1.5, 9); tx.fillRect(x + len - 1.5, y - 3, 1.5, 9);
+  tx.font = `700 11px ${T.mono}`; tx.textAlign = 'left'; tx.textBaseline = 'bottom'; tx.fillText(`${nm} nm`, x + len + 6, y + 6); tx.globalAlpha = 1;
+}
 /* while a finger is down: a faint ring where it landed and a knob where it is */
 function drawStick(){
   if (!stick) return;

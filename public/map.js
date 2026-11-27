@@ -272,11 +272,18 @@ function update(dt, ev, heads){
 const chunks = new Map(); let renderBudget = 0;
 function dirty(cx, cy){ chunks.delete(Math.floor(cx / CH) + ',' + Math.floor(cy / CH)); mini.dirty = true; }
 const hash = (a, b) => { let h = Math.imul(a, 374761393) + Math.imul(b, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
+/* the microscope look (lens.js) can draw the ground out of focus: each chunk is blurred once, when it is made.
+   It is drawn with a margin first, so neighbouring chunks blur into each other without seams */
+let softPx = 0, softMode = 'low';
+function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode) return; softPx = px; softMode = mode || softMode; chunks.clear(); }
 function renderChunk(kx, ky){
-  const c = document.createElement('canvas'), px = CH * CELL * CR; c.width = c.height = px;
-  const g = c.getContext('2d'); g.scale(CR, CR); g.translate(-kx * CH * CELL, -ky * CH * CELL);
+  /* soft ground is drawn at a lower resolution (fewer pixels to fill, and the upscale softens it), then lightly blurred */
+  const R = softPx && softMode === 'low' ? 0.34 : CR;
+  const S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, px = S * R;
+  const c = document.createElement('canvas'); c.width = c.height = Math.round((S + 2 * pad) * R);
+  const g = c.getContext('2d'); g.scale(R, R); g.translate(-kx * S + pad, -ky * S + pad);
   const cx0 = kx * CH - 1, cy0 = ky * CH - 1, cx1 = kx * CH + CH, cy1 = ky * CH + CH;
-  g.fillStyle = COL[K.OCEAN]; g.fillRect(kx * CH * CELL, ky * CH * CELL, CH * CELL, CH * CELL);
+  g.fillStyle = COL[K.OCEAN]; g.fillRect(kx * S - pad, ky * S - pad, S + 2 * pad, S + 2 * pad);
   for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++){ if (typeAtCell(cx, cy) === K.DEEP){ g.fillStyle = COL[K.DEEP]; g.fillRect(cx * CELL, cy * CELL, CELL, CELL); } }
   /* water and ground types as overlapping round blobs, so borders come out soft */
   const blobs = (t, rad) => { g.fillStyle = COL[t]; g.beginPath(); for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) if (typeAtCell(cx, cy) === t){ const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL; g.moveTo(x + rad, y); g.arc(x, y, rad, 0, TAU); } g.fill(); };
@@ -291,11 +298,16 @@ function renderChunk(kx, ky){
     g.fill();
   }
   /* texture: pores in the chimneys, cracks in the ice, grit in the clay, sparkle in the shallows */
-  for (let cy = cy0 + 1; cy < cy1; cy++) for (let cx = cx0 + 1; cx < cx1; cx++){
+  const e = pad ? 0 : 1;
+  for (let cy = cy0 + e; cy <= cy1 - e; cy++) for (let cx = cx0 + e; cx <= cx1 - e; cx++){
     const t = typeAtCell(cx, cy), x = cx * CELL, y = cy * CELL, h1 = hash(cx, cy), h2 = hash(cy, cx);
     const tex = CELLS[t] && CELLS[t].texture; if (tex) tex(g, x, y, h1, h2, cx, cy, hash, CELL);
   }
-  return c;
+  if (!pad) return c;
+  const out = document.createElement('canvas'); out.width = out.height = Math.round(px);
+  const o = out.getContext('2d'); o.filter = `blur(${(softPx * R * (softMode === 'low' ? 0.5 : 1)).toFixed(2)}px)`;
+  o.drawImage(c, -pad * R, -pad * R);
+  return out;
 }
 function chunk(kx, ky){
   const key = kx + ',' + ky;
@@ -508,7 +520,7 @@ return {W, H, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
-  get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }};
+  get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }, setSoft, renderChunk};
 };
 window.SoupMap = makeSoupMap();
 window.SoupMap.create = makeSoupMap;
