@@ -85,7 +85,7 @@ const LIST = [
      if (c.n){ c.want *= 0.3 + 0.7 * c.tr.opportunism; if (!free) c.gain *= 0.5; }
    }},
 
-  {fn:'Repairer', core:'GACGACGAC', body:'helpers',
+  {fn:'Repairer', core:'GACAGAC', body:'helpers',
    does:'Leaves the strand as two helpers that travel up it once, mending damage and clearing junk.',
    tag:'Game idea', sci:'Cells today repair RNA and DNA with protein enzymes. Whether early RNA could mend itself is an open question.',
    likedBy:[],
@@ -93,6 +93,8 @@ const LIST = [
      /* worth what it would mend */
      const dmg = c.info.damaged;
      c.gain = dmg.reduce((s, f) => s + (c.kinds.has(f.fn) ? 1 : 3), 0);
+     /* a damaged structure cuts in one more hit and everything behind it floats away: mending protects that too */
+     if (dmg.length) c.gain += 0.5 * c.p.s.functions.filter(f => f.start > dmg[0].start && !f.damaged).length;
      if (c.gain < 2) return false;
      /* the other way to mend is a trip to the ice: a Repairer is worth more when there is none nearby */
      const M = c.G.MAP, h = c.info.h, cold = M.CELLS.map((x, i) => i).filter(i => M.CELLS[i].mends);
