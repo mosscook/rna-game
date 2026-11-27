@@ -1,0 +1,72 @@
+# The improvement loop
+
+Every run of the loop is a fresh agent session that follows this page. It tries one or two ideas for making the game more **balanced**. It tests each idea with bot games against an unchanged baseline, and opens a pull request for each idea that measurably helps. Nothing reaches rna.game until Moss merges a pull request.
+
+## What "better" means
+
+Better means more balanced, measured by `evolve/score.mjs`. It checks four things:
+
+- No personality wins more often than the others: the spread of average rank between bot traits.
+- No home area wins more often than the others: the same spread between home areas.
+- The four core segments (Joiner, Cleaver, Membrane, Detector) end up on strands about equally often.
+- Bots actually use the one-use segments (Repairer, Self-cutter). The goal is at least 15% of strands each.
+
+The script combines these into a balance index (higher is better). Comparing a change with its baseline gives the change in index and a 95% interval. An idea counts as better only if the whole interval is above zero, on at least one map, and the index doesn't get clearly worse on the other map.
+
+Keep the game itself in mind as well. Students should still be able to build segments, and rounds should still be winnable. Read the full reports, not just the index. Don't buy balance by making the game dull. For example, nobody building anything is perfectly balanced. If median score drops more than 20% or winner score drops more than 25%, treat the change as worse.
+
+## Rules
+
+- Never push to `main`, never merge, never force-push, and never delete branches you didn't create in this run.
+- Work on a new branch named `evolve/<yyyy-mm-dd>-<short-idea>`. Make one idea per branch and keep the diff small.
+- Allowed changes:
+  - numbers and rules in `public/sim.js`, `public/segments.js`, `public/biomes.js` and `public/bots.js`
+  - the classic map in `public/map.js`
+  - the world generator's settings and landforms in `public/worldgen.js`
+  - letters (how many there are, their mix, how they spawn and how they break down)
+  - segment mechanics
+- Don't touch:
+  - the network code: `src/room.js`, `public/net.js`, `src/worker.js`
+  - privacy, reports, deploy settings, tests' pass conditions, or this folder's scoring
+  - `worldgen.js`'s determinism rule (basic arithmetic only)
+- `npm test` must pass on your branch. Your change is meant to change the game, so re-record the fingerprint with `npm run fingerprint -- --save` and say so in the pull request.
+- If 5 or more `evolve/` pull requests are already open and unreviewed, don't open more. Run the analysis only and log it.
+- At most 2 pull requests per run.
+
+## A run, step by step
+
+1. **Set up.**
+   - Attach the repo with push access, clone it, `npm ci`.
+   - Read `evolve/IDEAS.md`.
+   - Read the log: `git fetch origin evolve-log && git show origin/evolve-log:LOG.md` (it may not exist yet).
+   - List open and recent `evolve/` pull requests with `gh api repos/mosscook/rna-game/pulls?state=all`, and read any review comments Moss left. They are guidance for this run.
+2. **Baseline.** On `main`, run `evolve/run.sh base` (40 rounds per map, about 15–20 minutes). Read both reports in `evolve-out/`.
+3. **Pick ideas.** Choose 1–2. Prefer untried ideas from the log and `IDEAS.md`, plus anything new the baseline reports suggest. Don't repeat an idea the log shows failing unless you're trying it a clearly different way.
+4. **For each idea:**
+   - Branch from `main` and make the change.
+   - Run `npm test`.
+   - Run `evolve/run.sh cand`.
+   - Compare: `node evolve/score.mjs evolve-out/base-classic.json evolve-out/cand-classic.json`, then the same for `-world`.
+   - Read the reports for side effects.
+5. **If an idea is better** by the rule above:
+   - Re-record the fingerprint and commit.
+   - Push the branch, then open a pull request with `gh api repos/mosscook/rna-game/pulls -f title='evolve: <idea>' -f head='<branch>' -f base='main' -f body='<body>'`.
+   - The body covers:
+     - the idea and why
+     - the change, in a sentence or two
+     - the balance index before → after on each map, with its interval
+     - the key numbers that moved (scores, segment shares, wins by trait and by home)
+     - side effects
+     - how to try it (a preview isn't automatic; Moss can check out the branch)
+6. **Log the run** whatever happened. Append a dated entry to `LOG.md` on the `evolve-log` branch and push it (create the branch from `main` the first time, with only `LOG.md` changed). The entry has:
+   - the baseline index on each map and the standout numbers
+   - each idea tried, its result (better, worse, no clear change) and the pull request link
+   - new ideas for later runs
+
+   Keep the log readable. Every 10 runs, fold old entries into a short summary at the top.
+
+## Testing tips
+
+- Rounds are 3 minutes with 10 bots. 40 rounds per map is enough to see changes of about ±5 index points. If an idea looks promising but unclear, rerun both sides with 80 rounds, using the same seed so the rounds pair up.
+- `test/balance.mjs` reports personalities, skill, segments, growth, deaths, places, movement and depth bands. Read them for why an idea worked or didn't.
+- Bots are part of the game. A change that only helps because bots play badly, such as tuning around a bot bug, isn't a balance change. Report the bug in the log instead.

@@ -3,6 +3,7 @@
 
      npm run balance                          12 rounds of 5 minutes, 10 bots each
      npm run balance -- --rounds 40 --seconds 120 --seed 7 --threads 2 --json out.json
+     npm run balance -- --world 0.7           the same on a generated world (worldgen.js), 0.7 of the classic size
 
    --seed makes the run repeatable (the same seed plays the same rounds). Rounds run in parallel: one per CPU core,
    leaving one free, unless --threads says otherwise. */
@@ -17,7 +18,7 @@ const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ?
 const mulberry = s => () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 
 /* ---------- one round, in a worker ---------- */
-async function playRound(seed, seconds){
+async function playRound(seed, seconds, world){
   const {makeGame} = await import('../src/game.js');
   Math.random = mulberry(seed);
   let ended = null;
@@ -26,10 +27,10 @@ async function playRound(seed, seconds){
   const evs = new Map(), addStrand = stage.addStrand;
   stage.addStrand = o => { let s = null; s = addStrand.call(stage, Object.assign({}, o, {onEvent:(t, d) => {
     if (s){ const c = evs.get(s) || {}; c[t] = (c[t] || 0) + 1; evs.set(s, c); } if (o.onEvent) o.onEvent(t, d); }})); return s; };
-  sim.reset(seed);
+  sim.reset(seed, world ? {world:{size:world}} : undefined);
   const rec = new Map();
   const R = p => { let r = rec.get(p.id); if (!r){ r = {name:p.name, lead:p.mind.lead, skill:p.mind.skill, home:p.mind.home, deaths:{}, hitsDealt:0, cutsDealt:0, hitsTaken:0, cutsTaken:0, zones:{}, held:{}, samples:0,
-    first:null, firstT:null, kinds:new Set(), folded:0, nf:0, joins:0, jc:false, scoreAt:[], goals:{}}; rec.set(p.id, r); } return r; };
+    first:null, firstT:null, kinds:new Set(), folded:0, nf:0, joins:0, jc:false, scoreAt:[], goals:{}, dist:0, stuck:0, speed:0, bands:{}, last:null}; rec.set(p.id, r); } return r; };
   /* listen in on the bots' own event calls */
   const onHit = BOTS.onHit, onDeath = BOTS.onDeath;
   BOTS.onHit = (victim, by, cut) => { if (by && by.mind){ R(by)[cut ? 'cutsDealt' : 'hitsDealt']++; } if (victim.mind) R(victim)[cut ? 'cutsTaken' : 'hitsTaken']++; return onHit(victim, by, cut); };
@@ -49,42 +50,47 @@ async function playRound(seed, seconds){
       for (const f of sim.working(p)) if (!r.kinds.has(f.fn)){ r.kinds.add(f.fn); if (f.fn !== 'Mover' && !r.first){ r.first = f.fn; r.firstT = t; } }
       if (t % 60 === 0 && t > 0) r.scoreAt[t / 60 - 1] = sim.complexity(p);
       if (p.ai && p.ai.goal) r.goals[p.ai.goal] = (r.goals[p.ai.goal] || 0) + 1;
-      if (p.alive){ const z = MAP.zoneAt(p.s.head.x, p.s.head.y); r.zones[z] = (r.zones[z] || 0) + 1; }
+      if (p.alive){ const h = p.s.head, z = MAP.zoneAt(h.x, h.y); r.zones[z] = (r.zones[z] || 0) + 1;
+        /* movement: distance per second, and 'stuck' seconds (moved under 25 px while its goal was over 300 px away) */
+        if (r.last){ const d = Math.hypot(h.x - r.last.x, h.y - r.last.y); r.dist += d; if (d < 25 && Math.hypot(p.tx - h.x, p.ty - h.y) > 300) r.stuck++; }
+        r.last = {x:h.x, y:h.y}; r.speed += MAP.speedAt(h.x, h.y);
+        if (MAP.world){ const b = globalThis.WorldGen.bandOf(MAP.surface.elev(h.x, h.y)); r.bands[b] = (r.bands[b] || 0) + 1; } }
+      else r.last = null;
       for (const f of sim.working(p)) r.held[f.fn] = (r.held[f.fn] || 0) + 1 / Math.max(1, sim.countFn(p, f.fn));
     }
   }
   const rows = (ended || sim.standings()).map((row, i) => {
     const r = R(row.p);
     const e = evs.get(row.p.s) || {};
-    delete r.kinds; delete r.jc; delete r.nf;
+    delete r.kinds; delete r.jc; delete r.nf; delete r.last;
     return {...r, damage:e.damaged || 0, rank:i + 1, score:row.score, letters:row.p.s.length, used:{Repairer:e.repairerLaunched || 0, 'Self-cutter':e.cutterLaunched || 0}, mended:e.mended || 0,
       final:sim.working(row.p).map(f => f.fn), damaged:row.p.s.functions.filter(f => f.damaged).length};
   });
   const fragsLeft = sim.frags.length;
   stage.dispose();
-  return {seed, rows, fragsLeft};
+  return {seed, rows, fragsLeft, nucsLeft:sim.nucs.length, map:MAP.world ? {W:MAP.W, H:MAP.H, ok:MAP.world.checks.ok, tries:MAP.world.checks.tries} : {W:MAP.W, H:MAP.H}};
 }
 if (!isMainThread){
-  parentPort.on('message', async ({seed, seconds}) => parentPort.postMessage(await playRound(seed, seconds)));
+  parentPort.on('message', async ({seed, seconds, world}) => parentPort.postMessage(await playRound(seed, seconds, world)));
 }
 
 /* ---------- the run: hand rounds to workers, then report ---------- */
 if (isMainThread){
-  const rounds = +arg('rounds', 12), seconds = +arg('seconds', 300), seed0 = +arg('seed', Date.now() % 1e6), out = arg('json', null);
+  const rounds = +arg('rounds', 12), seconds = +arg('seconds', 300), seed0 = +arg('seed', Date.now() % 1e6), out = arg('json', null), world = +arg('world', 0) || 0;
   const threads = Math.max(1, Math.min(rounds, +arg('threads', 0) || availableParallelism() - 1 || 1));
-  console.log(`Playing ${rounds} rounds of ${seconds} s with 10 bots each (seed ${seed0}, ${threads} at a time)…`);
+  console.log(`Playing ${rounds} rounds of ${seconds} s with 10 bots each on ${world ? `a generated world (size ${world})` : 'the classic map'} (seed ${seed0}, ${threads} at a time)…`);
   const t0 = Date.now(), results = [];
   let next = 0;
   await Promise.all(Array.from({length:threads}, () => new Promise(done => {
     const w = new Worker(fileURLToPath(import.meta.url));
-    const give = () => { if (next >= rounds){ w.terminate(); return done(); } w.postMessage({seed:seed0 + next++, seconds}); };
+    const give = () => { if (next >= rounds){ w.terminate(); return done(); } w.postMessage({seed:seed0 + next++, seconds, world}); };
     w.on('message', r => { results.push(r); process.stdout.write(`\r  ${results.length}/${rounds} rounds`); give(); });
     w.on('error', e => { console.error('\n', e); process.exit(1); });
     give();
   })));
   console.log(`  (${((Date.now() - t0) / 1000).toFixed(0)} s)\n`);
   report(results, {rounds, seconds, seed:seed0});
-  if (out){ writeFileSync(out, JSON.stringify({rounds, seconds, seed:seed0, results}, null, 1)); console.log(`\nWrote every round to ${out}`); }
+  if (out){ writeFileSync(out, JSON.stringify({rounds, seconds, seed:seed0, world, results}, null, 1)); console.log(`\nWrote every round to ${out}`); }
 }
 
 function report(results, run){
@@ -157,6 +163,13 @@ function report(results, run){
   console.log(zl.map(([z, n]) => `${z} ${pct(n / all)}`).join(', ') + '\n');
   const homes = {}; for (const r of rows) (homes[r.home] = homes[r.home] || []).push(r);
   table(['home region', 'bots', 'avg score', 'won'], Object.entries(homes).map(([h, g]) => [h, g.length, f1(avg(g, r => r.score)), pct(g.filter(r => r.rank === 1).length / g.length)]));
+
+  console.log('MOVEMENT');
+  console.log(`distance swum per bot per minute: ${(avg(rows, r => r.dist / Math.max(1, r.samples)) * 60).toFixed(0)} px · swim speed where bots are: ${f1(avg(rows, r => r.speed / Math.max(1, r.samples)) * 100)}% of normal · stuck: ${pct(avg(rows, r => r.stuck / Math.max(1, r.samples)))} of the time`);
+  if (rows.some(r => Object.keys(r.bands).length)){ const bt = {}; let bn = 0; for (const r of rows) for (const [b, n] of Object.entries(r.bands)){ bt[b] = (bt[b] || 0) + n; bn += n; }
+    console.log(`time by depth band (0 wall .. 7 black): ${Object.keys(bt).sort().map(b => `${b}:${pct(bt[b] / bn)}`).join(' ')}`); }
+  console.log(`letters left on the map at the end: ${f1(avg(results, r => r.nucsLeft))}${results[0].map ? ` · map ${results[0].map.W}x${results[0].map.H}` : ''}\n`);
+  if (avg(rows, r => r.stuck / Math.max(1, r.samples)) > 0.1) notes.push(`bots are stuck ${pct(avg(rows, r => r.stuck / Math.max(1, r.samples)))} of the time`);
 
   console.log('WORTH A LOOK');
   if (R < 10) notes.push(`only ${R} rounds: differences under about 15 points are noise. Try --rounds 40.`);
