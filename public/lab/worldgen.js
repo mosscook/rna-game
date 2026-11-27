@@ -1,4 +1,4 @@
-/* RNA Strand Soup: world generator, lab steps 1-2. Zones, deep channels, the lagoon's ring mounds with doorways,
+/* RNA Strand Soup: world generator, lab steps 1-2, founded by meteor impacts. Zones, deep channels, the lagoon's ring mounds with doorways,
    letter seeding and spawns, as one elevation field E (0 bottomless .. 1 surface; above 0.86 is a wall) on a grid.
 
    Only basic arithmetic (+ - * /, Math.floor, Math.sqrt, Math.imul), never Math.sin/cos/exp/atan2: those may differ
@@ -34,7 +34,7 @@ function blur(a, GX, GY, r){
 }
 
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
-const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, outer:['island', 'chimneys', 'ice', 'ridge']};
+const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
 
 function generate(o){
   const p = Object.assign({}, DEFAULTS, o), {W, H, RES} = p, GX = Math.round(W / RES), GY = Math.round(H / RES), N = GX * GY;
@@ -44,12 +44,27 @@ function generate(o){
   const w = {lagoon:new Float32Array(N), flats:new Float32Array(N), water:new Float32Array(N)};
   p.outer.forEach(id => w[id] = new Float32Array(N));
 
-  /* ---- world scale: the lagoon in the middle, a middle ring, outer areas split among the places ---- */
-  const cx = W / 2 + (r() - 0.5) * 400, cy = H / 2 + (r() - 0.5) * 300, RX = p.lagoon, RY = p.lagoon * 0.78;
+  /* ---- world scale, founded by meteors: 1-3 big impacts near the centre. Their merged, worn basins are the lagoon;
+     their raised rims, the craggy highlands around it; everything further out is measured from them. dn(x, y) is the
+     distance from the impact field in basin radii (1 = the old rim): a smooth union of tilted ellipses, roughened by
+     erosion noise, so the lagoon is central but never a plain oval ---- */
+  const S = p.scale || 1, impacts = [];
+  const R1 = p.lagoon * S * (0.85 + 0.15 * r()), mx = W / 2 + (r() - 0.5) * 0.06 * W, my = H / 2 + (r() - 0.5) * 0.06 * H;
+  for (let k = 0; k < Math.max(1, p.impacts); k++){
+    const R = k ? R1 * (0.42 + 0.3 * r()) : R1, a = r() * TAU, d = k ? p.ispread * R1 * (0.6 + 0.5 * r()) : p.ispread * R1 * 0.25 * r(), tilt = r() * PI;
+    impacts.push({x:mx + d * dcos(a), y:my + d * dsin(a), R, c:dcos(tilt), s:dsin(tilt), asp:0.78 + 0.2 * r()});
+  }
+  const dI = (m, x, y) => { const ex = x - m.x, ey = y - m.y, u = (ex * m.c + ey * m.s) / m.R, v = (ey * m.c - ex * m.s) / (m.R * m.asp); return Math.sqrt(u * u + v * v); };
+  const KS = 0.2 + 0.4 * p.erosion, EA = 0.08 + 0.16 * p.erosion, EB = 0.03 + 0.09 * p.erosion;
+  const smin = (a, b) => { const h = Math.max(KS - Math.abs(a - b), 0) / KS; return Math.min(a, b) - h * h * KS * 0.25; };
+  let cx = 0, cy = 0, sw0 = 0; for (const m of impacts){ const q = m.R * m.R; cx += m.x * q; cy += m.y * q; sw0 += q; } cx /= sw0; cy /= sw0;
+  let RX = 0, RY = 0; for (const m of impacts){ RX = Math.max(RX, Math.abs(m.x - cx) + m.R); RY = Math.max(RY, Math.abs(m.y - cy) + m.R * 0.9); }
+  const dn = (x, y) => { let d = dI(impacts[0], x, y); for (let k = 1; k < impacts.length; k++) d = smin(d, dI(impacts[k], x, y));
+    return d + EA * fbm(g[0], x / (1800 * S), y / (1800 * S)) + EB * fbm(g[0], x / (650 * S) + 31, y / (650 * S)); };
+  /* the point at angle a from the centre where dn first reaches d */
+  const at = (a, d) => { const ux = dcos(a), uy = dsin(a); let t = 0; while (t < 9000 && dn(cx + ux * t, cy + uy * t) < d) t += 15; return {x:cx + ux * t, y:cy + uy * t}; };
   const a0 = r() * TAU, K = p.outer.length;
   const sites = p.outer.map((id, k) => { const a = a0 + TAU * k / K + (r() - 0.5) * 0.5; return {id, a, ux:dcos(a), uy:dsin(a)}; });
-  const dn = (x, y) => { const ex = (x - cx) / RX, ey = (y - cy) / RY; return Math.sqrt(ex * ex + ey * ey) + 0.16 * fbm(g[0], x / 1800, y / 1800); };
-  const at = (a, d) => ({x:cx + RX * d * dcos(a), y:cy + RY * d * dsin(a)});
 
   /* ---- deep channels, laid down first so the land forms around them ----
      a ring between the middle ring and the outer areas, three quarters of the way round; spokes from the lagoon's edge
@@ -69,10 +84,10 @@ function generate(o){
      Each place has a smooth weight (zones by distance from the lagoon, outer places by direction). Near a border the
      weights are close, so a blobby noise per place decides: the two zones interleave in blob-shaped islands ("dither"
      in discrete blobs) instead of blending. Channels are their own place. */
-  const PIDS = ['lagoon', 'flats'].concat(p.outer).concat(['water']), pid = new Uint8Array(N), F = new Float32Array(N), L0 = new Float32Array(N), L1 = new Float32Array(N), CH = new Float32Array(N), BK = new Float32Array(N);
+  const PIDS = ['lagoon', 'flats'].concat(p.outer).concat(['water']), pid = new Uint8Array(N), F = new Float32Array(N), DN = new Float32Array(N), L0 = new Float32Array(N), L1 = new Float32Array(N), CH = new Float32Array(N), BK = new Float32Array(N);
   const blobG = PIDS.map(() => noiseGrid(r));
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
-    const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, d = dn(x, y);
+    const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, d = dn(x, y); DN[n] = d;
     const wL = 1 - smooth(0.74, 1.26, d), wO = smooth(1.45, 2.05, d), wM = Math.max(0, 1 - wL - wO);
     let ux = (x - cx) / RX, uy = (y - cy) / RY; const ul = Math.sqrt(ux * ux + uy * uy) || 1; ux /= ul; uy /= ul;
     let bd = -2; const dots = sites.map(s0 => { const v = ux * s0.ux + uy * s0.uy; if (v > bd) bd = v; return v; });
@@ -106,6 +121,16 @@ function generate(o){
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
     const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, id = PIDS[pid[n]], n1 = L0[n], n2 = L1[n];
     let e = id === 'lagoon' ? 0.39 + 0.34 * n1 + 0.1 * n2 : id === 'flats' ? 0.47 + 0.32 * n1 + 0.15 * n2 : id === 'water' ? 0.03 : (OUTER_BASE[id] || 0.6) + 0.28 * n1 + 0.15 * n2;
+    const d = DN[n];
+    if (id === 'lagoon'){
+      /* the impacts' eroded central peaks survive as islands; the floor shallows toward the old rim */
+      for (const m of impacts) if (m.R > R1 * 0.4){ const c = 1 - smooth(0, 0.22, dI(m, x, y)); if (c > 0) e += 0.3 * c * (0.65 + 0.35 * fbm(g[4], x / (300 * S), y / (300 * S))); }
+      e += 0.12 * smooth(0.7, 1.0, d);
+    } else if (id === 'flats'){
+      /* the raised rim: highest just outside the old rim, craggy (ridged noise: sharp crests), falling away outward */
+      const rim = smooth(0.85, 1.05, d) * (1 - smooth(1.15, 1.8, d)), rid = Math.max(0, 1 - 2 * Math.abs(fbm(g[4], x / (380 * S), y / (380 * S))));
+      e += rim * (0.12 + 0.18 * rid);
+    }
     if (id !== 'water'){
       const gapHalf = p.gap * (0.6 + 0.8 * (0.5 + 0.5 * fbm(g[5], x / 500, y / 500)));
       F[n] = smooth(gapHalf, gapHalf + p.slope, dist[n]) * (1 - CH[n]);
@@ -134,14 +159,14 @@ function generate(o){
     return null;
   }
   /* stamp: for each cell in reach, f(rr, ux, uy, e) gives the new height; warped distance makes the outline organic */
-  function stamp(x0, y0, R, warp, k, f){
-    const reach = R * 1.9 + warp, i0 = Math.max(0, Math.floor((x0 - reach) / RES)), i1 = Math.min(GX - 1, Math.floor((x0 + reach) / RES));
+  function stamp(x0, y0, R, warp, k, f, ext = 1.9){
+    const reach = R * ext + warp, i0 = Math.max(0, Math.floor((x0 - reach) / RES)), i1 = Math.min(GX - 1, Math.floor((x0 + reach) / RES));
     const j0 = Math.max(0, Math.floor((y0 - reach) / RES)), j1 = Math.min(GY - 1, Math.floor((y0 + reach) / RES));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++){
       const n = j * GX + i; if (F[n] <= 0 || zone[n] === 0) continue;
       const x = (i + 0.5) * RES, y = (j + 0.5) * RES;
       const wx = x - x0 + warp * fbm(g2[0], x / 230 + k * 2.7, y / 230), wy = y - y0 + warp * fbm(g2[0], x / 230 + 7.3, y / 230 + k * 1.9);
-      const d = Math.sqrt(wx * wx + wy * wy), rr = d / R; if (rr > 1.9) continue;
+      const d = Math.sqrt(wx * wx + wy * wy), rr = d / R; if (rr > ext) continue;
       const ux = d > 0 ? wx / d : 1, uy = d > 0 ? wy / d : 0, e = E[n];
       E[n] = e + (f(rr, ux, uy, e) - e) * F[n];
     }
@@ -180,13 +205,13 @@ function generate(o){
   for (let b = 0; b < p.basins && basinPlaces.length; b++){
     /* places are broken up by the border blobs, so shrink the basin until it fits well inside one */
     const id = basinPlaces[b % basinPlaces.length];
-    for (let R = 460 + r2() * 240; R >= 300; R *= 0.85){
+    for (let R = (460 + r2() * 240) * S; R >= 260 * S; R *= 0.85){
       const s0 = siteIn(q => q === pidOf(id), R * 0.45, (x, y) => far(craters, x, y, R * 0.9), 300);
       if (s0){ craters.push({x:s0.x, y:s0.y, R, k:craters.length, basin:true}); break; }
     }
   }
-  for (let t = 0, made = 0; made < p.craters && t < p.craters * 30; t++){
-    const u = r2(), R = 70 / Math.sqrt(1 - u * 0.97); if (R > 420) continue;
+  for (let t = 0, made = 0, want = Math.round(p.craters * S * S); made < want && t < want * 30; t++){
+    const u = r2(), R = 70 / Math.sqrt(1 - u * 0.97); if (R > 420 * S) continue;
     const s0 = siteIn(landNotLagoon, R * 0.4, (x, y) => far(craters.filter(c => c.R > 300), x, y, R * 0.8), 4);
     if (!s0) continue; craters.push({x:s0.x, y:s0.y, R, k:craters.length}); made++;
   }
@@ -195,6 +220,15 @@ function generate(o){
   /* volcanoes. The island: 2-3 overlapping shields whose tops break the surface (walls), so it reads as land. The
      chimneys: small steep cones with a deep vent pit in the middle (hydrothermal chimneys: heat and chemistry) */
   const vents = [];
+  /* big volcanoes: a broad cone whose rim reaches the surface around a full-depth caldera, breached in 1-2 places so
+     you can swim in. Like the lagoon's mounds, but bigger and further out: room for dangers later */
+  for (let c = 0; c < p.calderas; c++){
+    let site = null, R = (250 + r2() * 120) * Math.max(0.75, S);
+    for (; !site && R >= 150; R *= 0.85) site = siteIn(q => q >= 2 && q < WATER, R * 0.7, (x, y) => far(craters.filter(b => b.basin), x, y, R * 2.2) && far(vents, x, y, R * 2.4), 300);
+    if (!site) continue;
+    const a = r2() * TAU, bv = [a, a + PI * (0.7 + 0.6 * r2())].slice(0, r2() < 0.5 ? 1 : 2).map(t => ({x:dcos(t), y:dsin(t)}));
+    vents.push({x:site.x, y:site.y, R, kind:'caldera', k:400 + c, bv});
+  }
   const islandPid = pidOf('island'), chimPid = pidOf('chimneys');
   if (islandPid >= 0){
     let c0 = null; for (let md = 300; !c0 && md >= 80; md *= 0.7) c0 = siteIn(q => q === islandPid, md, (x, y) => far(craters, x, y, 200), 500);
@@ -208,7 +242,15 @@ function generate(o){
     if (s0){ vents.push({x:s0.x, y:s0.y, R, kind:'chimney', k:300 + v}); v++; }
   }
   for (const v of vents){
-    if (v.kind === 'shield') stamp(v.x, v.y, v.R, v.R * 0.25, v.k, (rr, ux, uy, e) => e + 0.26 * (1 - smooth(0, 1.6, rr)) + 0.16 * (1 - smooth(0, 0.45, rr)));   /* broad flanks you can climb, a small summit that breaks the surface */
+    if (v.kind === 'caldera') stamp(v.x, v.y, v.R, v.R * 0.2, v.k, (rr, ux, uy, e) => {
+      let br = 1; for (const b of v.bv){ const ex = ux - b.x, ey = uy - b.y; br = Math.min(br, smooth(0.15, 0.4, Math.sqrt(ex * ex + ey * ey))); }
+      let val = e + 0.3 * (1 - smooth(0.9, 2.5, rr)) + 0.14 * smooth(0.7, 1.0, rr) * (1 - smooth(1.0, 1.5, rr));
+      val = val + (0.04 - val) * (1 - smooth(0.62, 0.92, rr));                            /* the deep caldera */
+      const bw = (1 - br) * smooth(0.5, 0.8, rr) * (1 - smooth(2.2, 2.6, rr));
+      if (val > 0.6) val += (0.6 - val) * bw;
+      return val;
+    }, 2.6);
+    else if (v.kind === 'shield') stamp(v.x, v.y, v.R, v.R * 0.25, v.k, (rr, ux, uy, e) => e + 0.26 * (1 - smooth(0, 1.6, rr)) + 0.16 * (1 - smooth(0, 0.45, rr)));   /* broad flanks you can climb, a small summit that breaks the surface */
     else stamp(v.x, v.y, v.R, v.R * 0.18, v.k, (rr, ux, uy, e) => {
       const cone = e + 0.2 * (1 - smooth(0.2, 1.3, rr));
       return cone + (0.06 - cone) * (1 - smooth(0.2, 0.4, rr));                             /* the deep vent pit */
@@ -256,6 +298,8 @@ function generate(o){
   for (const c of craters) if (c.R > 200) for (let q = 0, t = 0; q < (c.basin ? 14 : 7) && t < 120; t++){
     const a = r2() * TAU, d = c.R * (0.15 + 0.4 * r2()), x = c.x + d * dcos(a), y = c.y + d * dsin(a);
     if (E[cellOf(x, y)] >= WALL - 0.1) continue; letters2.push({x, y, b:BASES2[Math.floor(r2() * 4)], where:'crater'}); q++; }
+  for (const v of vents) if (v.kind === 'caldera') for (let q = 0; q < 10; q++){
+    const a = r2() * TAU, d = v.R * 0.45 * r2(); letters2.push({x:v.x + d * dcos(a), y:v.y + d * dsin(a), b:BASES2[Math.floor(r2() * 4)], where:'caldera'}); }
   for (const v of vents) if (v.kind === 'chimney') for (let q = 0; q < 5; q++){
     const a = r2() * TAU, d = v.R * (0.45 + 0.25 * r2()); letters2.push({x:v.x + d * dcos(a), y:v.y + d * dsin(a), b:BASES2[Math.floor(r2() * 4)], where:'vent'}); }
 
@@ -330,7 +374,7 @@ function generate(o){
     for (let q = 0, tries = 0; q < 10 && tries < 200; tries++){ const x = px + (r() * 2 - 1) * 110, y = py + (r() * 2 - 1) * 110; if (inMound(x, y, 15) || eAt(x, y) >= WALL - 0.1) continue; letters.push({x, y, b:BASES[Math.floor(r() * 4)], where:'pocket'}); q++; }
   }
   for (const l of letters2) letters.push(l);
-  return {E, zone, weights:w, letters, spawns, craters, vents, lavas, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY};
+  return {E, zone, weights:w, letters, spawns, impacts, craters, vents, lavas, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY};
 }
 return {generate, DEFAULTS, WALL, dsin, dcos};
 })();
