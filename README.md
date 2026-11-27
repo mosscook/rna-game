@@ -37,10 +37,11 @@ A room opens in a lobby: a small walled pool with clumps of letters that keep re
 
 ## Microscope look
 
-`public/lens.js` adds optional effects that make the soup look like a view down a microscope. All are off unless chosen with `?lens=` (comma-separated), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
+`public/lens.js` adds optional effects that make the soup look like a view down a microscope. Only `motes` is on by default; choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
 
 | Effect | What it does | Cost |
 | --- | --- | --- |
+| `motes` (on by default) | Floating grains, clay flakes and fatty-acid vesicles in four parallax layers: three below the strands (hidden behind rock and ice) sliding slower than the ground, one above them sliding faster | About 1 ms of drawing a frame on a slowed-down processor; half as many in low detail |
 | `vignette` | Light falls off toward the corners | None measurable (a CSS gradient on a layer that never changes) |
 | `eyepiece` | A round field of view; corners go dark | None measurable, but it hides strands coming from the corners |
 | `rim` | A faint blue and magenta fringe near the edge, like a cheap lens | None measurable |
@@ -50,7 +51,7 @@ A room opens in a lobby: a small walled pool with clumps of letters that keep re
 | `grain` | Sensor noise | About 25% of frame rate in a slowed-down test |
 | `edge` | Real blur around the edge (backdrop-filter); for testing on a real Chromebook only | Every frame, on the graphics chip |
 
-Recommended set: `?lens=vignette,rim,bokeh,soft,scale`.
+Recommended set: `?lens=motes,vignette,rim,bokeh,soft,scale`.
 
 ## Watching
 

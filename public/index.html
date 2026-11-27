@@ -325,7 +325,7 @@ const zoneAt = (x, y) => MAP.zoneAt(x, y);
 const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
 const stage = RS.createStage($('sv'));
 /* the microscope look: ?lens=vignette,bokeh,... picks effects (lens.js); ?lens=off for none */
-const LENS = window.SoupLens.create({pond:$('pond'), under:$('top'), MAP});
+const LENS = window.SoupLens.create({pond:$('pond'), under:$('top'), MAP, low:() => RS.S.goo === 'off'});
 { const q = new URLSearchParams(location.search).get('lens'); if (q != null) LENS.set(q === 'off' ? [] : q.split(',')); }
 let me = null, fx = [], paused = false, clockT = 0;
 let uiDirty = true, pointer = null, showThoughts = true;
