@@ -231,7 +231,7 @@ function build(o){
   craters.sort((a, b) => b.R - a.R).forEach(crater);              /* big ones first, so small craters pock their rims */
 
   /* volcanoes. The island: 2-3 overlapping shields whose tops break the surface (walls), so it reads as land. The
-     chimneys: small steep cones with a deep vent pit in the middle (hydrothermal chimneys: heat and chemistry) */
+     chimneys: tall rings up to the highest swimmable layer around a hollow vent (hydrothermal chimneys: heat and chemistry) */
   const vents = [];
   /* big volcanoes: a broad cone whose rim reaches the surface around a full-depth caldera, breached in 1-2 places so
      you can swim in. Like the lagoon's mounds, but bigger and further out: room for dangers later */
@@ -264,9 +264,12 @@ function build(o){
       return val;
     }, 2.6);
     else if (v.kind === 'shield') stamp(v.x, v.y, v.R, v.R * 0.25, v.k, (rr, ux, uy, e) => e + 0.26 * (1 - smooth(0, 1.6, rr)) + 0.16 * (1 - smooth(0, 0.45, rr)));   /* broad flanks you can climb, a small summit that breaks the surface */
+    /* chimneys: a tall ring whose rim always rises to the highest swimmable layer (just under a wall), around a
+       hollow vent that goes all the way down */
     else stamp(v.x, v.y, v.R, v.R * 0.18, v.k, (rr, ux, uy, e) => {
-      const cone = e + 0.2 * (1 - smooth(0.2, 1.3, rr));
-      return cone + (0.06 - cone) * (1 - smooth(0.2, 0.4, rr));                             /* the deep vent pit */
+      const rim = T[0] - 0.03, ring = smooth(0.22, 0.36, rr) * (1 - smooth(0.78, 1.15, rr));
+      const val = e + (rim - e) * ring;
+      return val + (0.04 - val) * (1 - smooth(0.26, 0.38, rr));                             /* the hollow vent */
     });
   }
 
