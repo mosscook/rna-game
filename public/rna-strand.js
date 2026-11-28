@@ -156,7 +156,7 @@ const UNIT_TEXT = {
   Cleaver:'one long arm that folds into two opposing spikes', Mover:'two arms side by side', Membrane:'three or more arms side by side',
   Joiner:'a cheap 7-letter hairpin with a GGA loop. At the tail it is a mouth that grabs fragments; once one attaches right behind it, it fuses around that segment and adds +1',
   Detector:'pricey like the Repairer: one long run that folds back on itself twice, with ACA at each turn. Its middle pairs with both sides, so the strand arcs out, runs back along the spine and arcs out the other way, closing into a circle',
-  'Self-cutter':'a cheap 7-letter hairpin with a UAG loop. It leaves the strand as a ring, slides up to the structure ahead, squeezes it off, and both burst into loose letters', Repairer:'the priciest: two hairpins with GAC loops side by side, one long and one short. It leaves the strand and its two hairpins become odd-shaped helpers that travel up the strand once, mending damaged structures and clearing away junk and loose letters, then dissolve at the 5′ end'
+  'Self-cutter':'a cheap 7-letter hairpin with a UAG loop. It leaves the strand as a ring, slides up to the structure ahead, squeezes it off, and both burst into loose letters', Repairer:'two hairpins with GAC loops side by side, one long and one short. It leaves the strand and its two hairpins become odd-shaped helpers that travel up the strand once, mending damaged structures and clearing away junk and loose letters, then dissolve at the 5′ end'
 };
 /* Repairer: two GAC-loop hairpins side by side with different stem lengths (3 to 6 pairs) */
 function repairersOf(s){
