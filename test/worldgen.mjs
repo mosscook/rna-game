@@ -12,7 +12,7 @@ function holds(w, what){
   const c = w.checks, N = w.E.length, bad = m => fails.push(`${what}: ${m}`);
   if (!c.ok) bad(`checks failed (${JSON.stringify({unlinked:c.unlinked, small:c.small, lagoonMid:c.lagoonMid, spawnSpread:c.spawnSpread})})`);
   if (w.spawns.length !== 7 || w.mounds.length !== 7) bad(`${w.spawns.length} starts`);
-  for (const s of w.spawns){ if (!(s.x > 0 && s.y > 0 && s.x < W && s.y < H)) bad('a start is off the map'); else if (w.E[Math.floor(s.y / 25) * w.GX + Math.floor(s.x / 25)] >= WG.WALL) bad('a start is inside a wall'); }
+  for (const s of w.spawns){ if (!(s.x > 0 && s.y > 0 && s.x < W && s.y < H)) bad('a start is off the map'); else { const n = Math.floor(s.y / 25) * w.GX + Math.floor(s.x / 25); if (w.E[n] >= WG.WALL) bad('a start is inside a wall'); else if (w.zone[n] !== 0) bad('a start is not in the lagoon'); } }
   for (const a of w.spawns) for (const b of w.spawns) if (a !== b && Math.hypot(a.x - b.x, a.y - b.y) < 250) bad('two starts are on top of each other');
   const kinds = k => w.vents.filter(v => v.kind === k).length;
   if (!kinds('chimney')) bad('no chimneys'); if (!kinds('shield')) bad('no shield volcano'); if (!w.lavas.length) bad('no lava channel'); if (!w.rivers.length) bad('no streams');

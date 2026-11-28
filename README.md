@@ -44,7 +44,65 @@ A room opens in a lobby: a mini version of the generated world (a small two-impa
 
 ## The map
 
-The map is a world grown from a seed by `public/worldgen.js`, and tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a central lagoon, with ring mounds inside it and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. The world is 0.7 of the classic map across, about half the area.
+The map is a world grown from a seed by `public/worldgen.js`, and tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a lagoon, with ring mounds inside it and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. The world is 0.7 of the classic map across, about half the area.
+
+### Layouts
+
+The big shapes differ from seed to seed. A **layout style** sets how far each trait is pushed, and `auto` (the default) picks a style from the seed:
+
+| Style | What you get |
+|---|---|
+| ring | Closest to the first generated maps: a roundish lagoon near the middle, a channel most of the way round it |
+| crescent | Impacts in a bent row: a long or crescent lagoon, off to one side |
+| continent | The lagoon pushed toward an edge; one or two places take most of the rest |
+| archipelago | Open sea between the outer places, which become islands |
+| strait | A great channel across the whole map, past the lagoon |
+
+Five settings scale the style (`DEFAULTS` in `worldgen.js`):
+
+| Setting | What it does |
+|---|---|
+| `asymmetry` | The master dial. 0 gives the old even layout whatever the style; 1 the style at full strength. Default 0.85 |
+| `offset` | How far the lagoon sits from the middle (1 = as the style says, up to 2) |
+| `elongation` | How long or bent the lagoon is |
+| `variance` | How much outer places differ in size and shape, how uneven the highland rim is, and whether a place gets a second, outlying patch |
+| `sea` | How much open water lies between the outer places |
+
+Each outer place grows from a seed point beyond the rim and owns the land nearest it; the points are spread by always taking the free spot furthest from the others. Mounds are placed the same way inside the lagoon, so starts stay apart whatever its shape. The lobby's mini world uses `layout:'ring'` with `asymmetry:0`.
+
+Every map is checked before it is used, and regrown from the next seed if a check fails (about 1 map in 16; at most 4 tries): sealed water is opened, starts are evenly spaced and none is walled in, every outer place is there with at least 2.5% of the map and touches a channel, the lagoon is mostly middle depths, and there is a lava channel and at least two chimneys.
+
+### Patterns
+
+Each place has its own kind of ground, picked by name (`PLACE_PATTERNS` in `worldgen.js`). A pattern raises and lowers the land a little inside its place, so it changes swim speed lightly. It never adds or removes a wall, never makes new deep water, and stays off channels, streams, lava lanes and chimney rings.
+
+| Pattern | Looks like | Made by | Default for |
+|---|---|---|---|
+| ripples | soft parallel swells that bend to the contours | stripes | lagoon |
+| terraces | steps along the contour lines | stripes read off the land's height | highlands |
+| streaks | grooves running downhill, like lava flows | noise smeared along the slope | volcanic island |
+| pits | a plateau pocked with round pits | scattered points (Voronoi) | chimneys |
+| cracks | plates split by cracks that run along the contours | scattered points | ice |
+| ridges | long sharp crests side by side | stretched, folded noise | ocean ridge |
+| pebbles | round bumps | scattered points | |
+| spots, labyrinth, stripes, coral, holes, worms | the reaction-diffusion looks | Gray-Scott, grown once on a 48-cell square that repeats | |
+
+Each place has three knobs: **size**, **strength** and **follows the land** (how much it bends to the contours; for streaks, how far they run downhill). Two more apply everywhere: `pattern` (all strengths times this; 0 = none) and `contrast` (soft relief to crisp shapes).
+
+Patterns are laid on in one pass, about 20 ms, so they are on for everyone, rooms included. A reaction-diffusion pattern adds about a tenth of a second the first time it is used on a device. (The earlier full-map Gray-Scott growth took 3 s and is gone.)
+
+### The terrain lab
+
+`/lab/terrain.html` is where layouts and patterns are tuned:
+
+- **The strip along the bottom** shows ten seeds; click one, page with ◀ ▶, type a seed, or press `[` and `]`. The thumbnails redraw when a setting changes, so a layout knob shows its effect on ten maps at once.
+- **Layout**: the style buttons and the five knobs.
+- **Patterns**: click a place to open it, pick a pattern from the pictures, and move its knobs. Pattern changes show at once, without regrowing the map.
+- **Landforms** holds the older settings (mounds, craters, channels and so on). **View** has outlines, swim speed, sealed water and streams.
+- **Swim** puts a test strand in the first mound.
+- **Copy settings** puts everything changed on the clipboard as JSON. To try it in the game, press **Paste settings** in the dev panel. To make it everyone's default, copy the values into `DEFAULTS` (the `settings` part) and `PLACE_PATTERNS` (the `patterns` part) in `public/worldgen.js`. The settings also ride in the page link, so a link reproduces a map.
+
+`node tools/mapsheet.mjs --out sheet.png` draws 12 seeds side by side with no browser (`--places` for a close-up of each place, `--swatches` for the pattern library, `--set '{"layout":"strait"}'` for any setting). `node tools/mapstats.mjs --n 200` reports failed checks, regrown maps and build times over many seeds. The pictures in `docs/mapgen/` were made this way.
 
 **Fallback:** the old painted map is still there. In a room, the host ticks **Classic map** in the lobby, or opens the room with `?map=classic`. Solo play takes `?map=classic` too. Use it if the world runs slowly on a device.
 
@@ -80,7 +138,7 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 
 Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default. Raise `LOOKS_V` at the same time, so looks saved on devices before then are replaced.
 
-The server and every browser build the same map from the seed: the generator uses only basic arithmetic. The room also sends a fingerprint of the map, and a browser that grew a different one says so in its console. `node test/world.mjs` plays a round on a world. `node test/room-world.mjs` checks a world room against `wrangler dev`. The reaction-diffusion textures are off in the game for now: they take 2-3 s to grow.
+The server and every browser build the same map from the seed: the generator uses only basic arithmetic. The room also sends a fingerprint of the map, and a browser that grew a different one says so in its console. `node test/worldgen.mjs` holds the generator to its promises over a spread of seeds, every layout and every pattern (same seed, same map; checks pass; patterns never touch walls or lanes). `node test/world.mjs` plays a round on a world. `node test/room-world.mjs` checks a world room against `wrangler dev`.
 
 ## Picking up letters
 
@@ -183,7 +241,7 @@ Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). The panel's se
 
 **Segments** adjusts each segment type, one at a time (pick it from the row of buttons). Values are grouped into **What it does** (reach, rest and recovery times, bonuses, chances) and **How it looks** (spike lengths when active and resting, chamber size, goo). The Cleaver, for example, has strike reach, rest after a cut, regrow time, the cut-off piece's timings and reach, and spike length active and resting. A changed value is shown in bold with ↺ to put it back, and • marks a changed segment. Changes are remembered on that device. Game values only change single-player games, since a room runs the server's copy. **Copy settings** puts the changes on the clipboard as JSON, to be baked in as the new defaults (in each entry of `segments.js`, or `DEFAULTS` in `rna-strand.js` for the `S.` ones). To make a new value adjustable, add it to the entry's `tune` list (see the top of `segments.js`).
 
-**Terrain** (single player only; a room grows the server's map) adjusts the generated world: the lagoon and channels, mounds, borders between places, features and letter spread (the settings in `worldgen.js` `DEFAULTS`), and the reaction-diffusion texture, both for all places (strength, how much it follows the slope, growth steps) and for one place at a time (strength, pattern size, feed, kill, follows slope: `TEXTURES`). The texture is off by default because it adds a few seconds to building the map on every device. Changes take effect with **Rebuild map** (same seed, the round restarts) or **New seed**, and are remembered on that device.
+**Terrain** (single player only; a room grows the server's map) adjusts the generated world: the layout style and its five knobs, the lagoon and channels, mounds, borders between places, features and letter spread (the settings in `worldgen.js` `DEFAULTS`), and the patterns: strength and soft-to-crisp for all places, and for one place at a time its pattern (picked from small pictures), size, strength and how much it follows the land (`PLACE_PATTERNS`). Changes take effect with **Rebuild map** (same seed, the round restarts) or **New seed**, and are remembered on that device. **Copy settings** gives the same JSON as the terrain lab, which shows changes live and is the better place to tune.
 
 In single-player the panel also has test buttons: add any segment to your strand; make a fragment, meteorite or UV flash where the pointer is; damage your strand; run time 4× faster; skip a minute; end the round; clear the bots. In rooms it only shows information, so nobody can cheat in a shared game.
 

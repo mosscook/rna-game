@@ -7,7 +7,7 @@ const n = +arg('n', 100), s0 = +arg('seed', 1), set = JSON.parse(arg('set', '{}'
 let fail = 0, regrown = 0, ms = [], lay = {}, why = {}, land = 0, spread = 0, carved = 0;
 for (let k = 0; k < n; k++){
   const t0 = performance.now(), w = WG.generate(Object.assign({}, set, {seed:s0 + k, W, H, RES:25, scale:size})), c = w.checks; ms.push(performance.now() - t0);
-  if (!c.ok){ fail++; const y = [c.unlinked.length && 'unlinked', c.small && c.small.length && 'small', c.missing && c.missing.length && 'missing:' + c.missing, c.lagoonMid < 0.35 && 'lagoon', c.spawnSpread >= 0.8 && 'spread', c.mounds !== w.mounds.length && 'mounds'].filter(Boolean).join('+'); why[y] = (why[y] || 0) + 1; }
+  if (!c.ok){ fail++; const y = [c.unlinked.length && 'unlinked', c.small && c.small.length && 'small', c.missing && c.missing.length && 'missing:' + c.missing, c.lagoonMid < 0.35 && 'lagoon', c.badStarts && 'starts', c.spawnSpread >= 0.8 && 'spread', c.mounds !== w.mounds.length && 'mounds'].filter(Boolean).join('+'); why[y] = (why[y] || 0) + 1; }
   if (c.tries > 1) regrown++; lay[w.layout] = (lay[w.layout] || 0) + 1; spread += c.spawnSpread; carved += c.carved;
   let open = 0; for (let i = 0; i < w.E.length; i++) if (w.E[i] >= 0.14 && w.E[i] < WG.WALL) open++; land += open / w.E.length;
 }

@@ -26,7 +26,6 @@ function vnoise(g, x, y){
   return (a(i, j) * (1 - sx) + a(i + 1, j) * sx) * (1 - sy) + (a(i, j + 1) * (1 - sx) + a(i + 1, j + 1) * sx) * sy;
 }
 const fbm = (g, x, y) => vnoise(g, x, y) * 0.55 + vnoise(g, x * 2.03 + 17.1, y * 2.03 + 3.3) * 0.28 + vnoise(g, x * 4.1 + 5.7, y * 4.1 + 29.2) * 0.17;
-const segDist = (x, y, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy; let t = L ? ((x - a.x) * dx + (y - a.y) * dy) / L : 0; t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - a.x - t * dx, ey = y - a.y - t * dy; return Math.sqrt(ex * ex + ey * ey); };
 function blur(a, GX, GY, r){
   const t = new Float32Array(a.length);
   for (let j = 0; j < GY; j++){ let s = 0, c = 0; for (let i = -r; i < GX + r; i++){ if (i + r < GX){ s += a[j * GX + i + r]; c++; } if (i - r - 1 >= 0){ s -= a[j * GX + i - r - 1]; c--; } if (i >= 0 && i < GX) t[j * GX + i] = s / c; } }
@@ -52,7 +51,6 @@ const LAYOUTS = {
   continent:  {off:1,    long:0.45, vary:1,   sea:0,    arc:0.5,  strait:0},
   archipelago:{off:0.6,  long:0.6,  vary:0.8, sea:1,    arc:0.45, strait:0},
   strait:     {off:0.8,  long:0.8,  vary:0.7, sea:0.3,  arc:0.45, strait:1}};
-const LAYOUT_NAMES = Object.keys(LAYOUTS);
 /* 'auto' draws from this list: the ring, the layout closest to the old map, comes up half as often as the others */
 const AUTO = ['ring', 'crescent', 'crescent', 'continent', 'continent', 'archipelago', 'archipelago', 'strait', 'strait'];
 
@@ -507,14 +505,20 @@ function build(o){
   const pang = (dx, dy) => { const q = dx / ((dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) || 1); return dy < 0 ? 3 + q : 1 - q; };   /* a pseudo-angle: grows with the true angle, plain arithmetic only */
   {
     const belt = [], pad = p.rin + p.rim, lo = mix(0.5, 0.2, A), hi = mix(0.62, 0.66, A);
-    for (let y = pad; y <= H - pad; y += 60) for (let x = pad; x <= W - pad; x += 60){ const d = dn(x, y); if (d > lo && d < hi) belt.push({x, y}); }
+    /* a spot counts only if it and the ground around it are lagoon: border blobs of other places reach into the
+       lagoon, and a mound can only be raised on lagoon floor */
+    const lagoonAt = (x, y) => zone[cellOf(x, y)] === 0, rr = p.rin * 0.7;
+    const clear = (x, y) => { if (!lagoonAt(x, y)) return false; let hit = 0; for (let k = 0; k < 8; k++) if (lagoonAt(x + rr * dcos(k * PI / 4), y + rr * dsin(k * PI / 4))) hit++; return hit >= 7; };
+    for (let y = pad; y <= H - pad; y += 60) for (let x = pad; x <= W - pad; x += 60){ const d = dn(x, y); if (d > lo && d < hi && lagoonAt(x, y)) belt.push({x, y, clear:clear(x, y)}); }
     const taken = [];
     if (belt.length >= p.mounds * 4){
-      taken.push(belt[Math.floor(r() * belt.length)]);
-      while (taken.length < p.mounds){ let best = null, bv = -1;
+      { const first = belt.filter(q => q.clear), from = first.length ? first : belt; taken.push(from[Math.floor(r() * from.length)]); }
+      /* spots with clear lagoon all round come first; if none of those is far enough from the mounds already placed
+         (a mound's rim must not land on its neighbour's middle), any lagoon spot will do */
+      while (taken.length < p.mounds){ let best = null, bv = -1, any = null, av = -1;
         for (const q of belt){ let md = Infinity; for (const t of taken){ const dx = q.x - t.x, dy = q.y - t.y, v = dx * dx + dy * dy; if (v < md) md = v; }
-          const v = Math.sqrt(md) * (1 + 0.3 * A * fbm(g[3], q.x / 400 + 9, q.y / 400)); if (v > bv){ bv = v; best = q; } }
-        taken.push(best); }
+          const v = Math.sqrt(md) * (1 + 0.3 * A * fbm(g[3], q.x / 400 + 9, q.y / 400)); if (v > av){ av = v; any = q; } if (q.clear && v > bv){ bv = v; best = q; } }
+        taken.push(best && bv > p.rin * 1.9 ? best : any); }
     } else for (let k = 0; k < p.mounds; k++) taken.push(at(a0 + TAU * k / p.mounds + (r() - 0.5) * 0.3, 0.56 * (1 + (r() - 0.5) * 0.12)));
     /* in order round the centre, so each mound's neighbour (for doorways and letter pockets) is the next one along */
     taken.map(q => ({q, a:pang(q.x - cx, q.y - cy)})).sort((u, v) => u.a - v.a).forEach(({q, a}, k) => { const rin = p.rin * (0.85 + r() * 0.3);
@@ -632,7 +636,9 @@ function build(o){
     let lag = 0, mid = 0; for (let n = 0; n < N; n++) if (zone[n] === 0){ lag++; if (E[n] >= 0.14 && E[n] < 0.62) mid++; }
     checks.lagoonMid = lag ? mid / lag : 0;
     checks.mounds = mounds.length;
-    checks.ok = checks.unlinked.length === 0 && checks.small.length === 0 && checks.missing.length === 0 && checks.lagoonMid >= 0.35 && checks.spawnSpread < 0.8 && mounds.length === p.mounds;
+    /* no start may be walled in by its neighbour's rim, or pushed off the lagoon */
+    checks.badStarts = spawns.filter(sp => { const n = cellOf(sp.x, sp.y); return E[n] >= WALL || zone[n] !== 0; }).length;
+    checks.ok = checks.unlinked.length === 0 && checks.small.length === 0 && checks.missing.length === 0 && checks.badStarts === 0 && checks.lagoonMid >= 0.35 && checks.spawnSpread < 0.8 && mounds.length === p.mounds;
     checks.score = (checks.ok ? 10 : 0) - checks.unlinked.length * 2 - checks.small.length * 2 - checks.missing.length + checks.lagoonMid - checks.spawnSpread;
   }
   /* lanes: deep channels, streams and lava channels. Textures fade out over them so travel lanes stay open */

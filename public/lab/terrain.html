@@ -50,6 +50,7 @@
   .strip .th[aria-pressed="true"]{border-color:var(--stain);background:rgb(167 139 250 / .18);color:var(--ink)}
   .strip label{font-size:12px;color:var(--muted);white-space:nowrap} .strip input{width:64px;font:inherit;background:#0d1715;color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:3px 4px}
   .hud{bottom:auto;top:10px}
+  .strip[hidden]{display:none}
   @media (max-width:820px){ .strip{left:10px} .panel{max-height:calc(100% - 130px)} }
 </style>
 </head>
@@ -165,7 +166,7 @@ const PRESETS = {
 const PLACES = [
   {id:'water', name:'Open water', keys:['DEEP', 'OCEAN'], preset:'none', s:1, base:0, top:0, col:[60, 110, 120]},
   {id:'lagoon', name:'Tide-pool lagoon', keys:['LAGOON'], preset:'spots', s:0.5, base:0.46, top:0.8, col:[80, 160, 125]},
-  {id:'flats', name:'Clay and tidal flats', keys:['FLATS', 'CLAY'], preset:'holes', s:0.45, base:0.6, top:0.8, col:[170, 130, 92]},
+  {id:'flats', name:'Highlands', keys:['FLATS', 'CLAY'], preset:'holes', s:0.45, base:0.6, top:0.8, col:[170, 130, 92]},
   {id:'island', name:'Volcanic island', keys:['SPRING', 'UV', 'ROCK'], preset:'coral', s:0.45, base:0.4, top:1, col:[150, 100, 80]},
   {id:'chimneys', name:'White chimneys', keys:['CHIMNEY', 'PORE', 'POCKET'], preset:'holes', s:0.4, base:0.3, top:1, col:[215, 205, 180]},
   {id:'ice', name:'Ice veins', keys:['ICE', 'BRINE'], preset:'maze', s:0.35, base:0.35, top:1, col:[160, 210, 235]},
