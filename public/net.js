@@ -124,7 +124,7 @@ function create(o){
       if (id === meId) correct(mm, x, y, h, t);
     }
     /* a freshly cut piece also says how long it can still be taken and how far through fading it is */
-    for (const [id, x, y, h, fr, fd] of m.F || []){ const f = fragMirror(id); f.buf.push({t:st, x, y, h, mv:0.2, lp:0}); if (f.buf.length > 30) f.buf.shift(); f.last = st; f.seen = t; if (fr != null){ f.fresh = fr; f.fade = fd < 0 ? null : fd; f.cutAt = t; } }
+    for (const [id, x, y, h, fr, fd] of m.F || []){ const f = fragMirror(id); f.buf.push({t:st, x, y, h, mv:0.2, lp:0}); if (f.buf.length > 30) f.buf.shift(); f.last = st; f.seen = t; f.gone = false; if (fr != null){ f.fresh = fr; f.fade = fd < 0 ? null : fd; f.cutAt = t; } }
     if (m.N){
       const [add, mov, del] = m.N;
       /* a fifth entry marks a letter that is breaking down: the page fades it out from the moment it hears */
@@ -139,7 +139,7 @@ function create(o){
     for (const mm of P.values()) if (mm.last != null && mm.last < st - 0.4 && mm.id !== meId){ mm.shown = false; mm.alive = false; }
     /* fragments the server stopped sending (taken in by a Joiner, burst, or out of view): hide them at once, not just
        stop moving them, and forget them after a while */
-    for (const f of F.values()) if (t - f.seen > 0.3){ if (f.shown){ f.shown = false; f.s.setVisible(false); } if (t - f.seen > 90) dropMirror(F, f.id); }
+    for (const f of F.values()) if (t - f.seen > 0.3){ f.gone = true; if (f.shown){ f.shown = false; f.s.setVisible(false); } if (t - f.seen > 90) dropMirror(F, f.id); }
   }
 
   /* ---------- your own strand: predicted here, corrected by the server ---------- */
@@ -224,7 +224,9 @@ function create(o){
       mm.s.follow(dt, p.x, p.y, p.h, {moving:p.mv, limp:p.lp});
     }
     for (const f of F.values()){
-      if (!f.buf.length) continue;
+      /* gone: the server stopped sending it. Without this check it was shown again on the very next frame, which is why
+         fragments stayed on the map after being taken (rooms only; single player removes them directly) */
+      if (!f.buf.length || f.gone) continue;
       const p = sample(f.buf, rt);
       if (!f.shown){ f.s.place(p.x, p.y, p.h); f.shown = true; }
       f.s.follow(dt, p.x, p.y, p.h, {moving:0.2, limp:0});
