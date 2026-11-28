@@ -81,7 +81,8 @@ const LIST = [
      const detector = c.has('Detector');
      if (!free && !detector) return false;
      c.want = 1.1 * c.tr.opportunism + 0.45 * free + (c.info.cleaver ? 0.5 * c.tr.aggression : 0) + (detector ? 0.3 : 0);
-     if (free) c.gain += 1.2;
+     /* a fragment's segments are worth more than the Joiner itself, but over 40% of Joiners never take one in */
+     if (free) c.gain += 0.3;
      if (c.n){ c.want *= 0.3 + 0.7 * c.tr.opportunism; if (!free) c.gain *= 0.5; }
    }},
 
