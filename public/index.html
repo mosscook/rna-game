@@ -1187,7 +1187,7 @@ function togglePause(){ if (net || sim.state !== 'play') return; paused = !pause
 $('bPause').addEventListener('click', togglePause);
 $('bLow').addEventListener('click', () => {
   const low = RS.S.goo !== 'off';
-  RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo');
+  RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo'); LENS.refresh();
   $('bLow').setAttribute('aria-pressed', low);
   try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
 });
@@ -1203,7 +1203,9 @@ const LOOK_PRESETS = {
 const LOOK_SLOTS = {filled:'Filled', lines:'Lines'};
 const PLACE_IDS = ['lagoon', 'flats', 'island', 'chimneys', 'ice', 'ridge', 'water'];
 const PLACE_LABEL = {lagoon:'lagoon', flats:'highlands', island:'island', chimneys:'chimneys', ice:'ice', ridge:'ridge', water:'channels', deep:'deep'};
-const freshLooks = () => ({slot:'filled', filled:Object.assign({colours:{}}, LOOK_PRESETS.filled, {deep:[3, 5, 7]}), lines:Object.assign({colours:{}}, LOOK_PRESETS['lines + depth'], {deep:[3, 5, 7]})});
+/* everyone's default: the Lines look as Moss tuned it (27 Nov 2026) */
+const freshLooks = () => ({slot:'lines', filled:Object.assign({colours:{}}, LOOK_PRESETS.filled, {deep:[3, 5, 7]}),
+  lines:{colours:{lagoon:[79, 85, 4]}, fill:0.2, depth:1.4, line:0.4, lineW:1, lineFade:1, wall:0.4, deep:[3, 5, 7]}});
 let looks = freshLooks();
 try {
   const v = JSON.parse(localStorage.getItem('soup2.looks') || 'null');
@@ -1301,7 +1303,7 @@ function start(){
   /* the lab's look, a little larger so strands read at game scale */
   RS.S.glyphSize = 4; RS.S.gooSize = 30; RS.restyle();
   readTokens(); buildList(); devSetup();
-  try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); } } catch(e){}
+  try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); LENS.refresh(); } } catch(e){}
   applyLook();
   if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
   reset(); resize();

@@ -14,13 +14,13 @@
                low detail; no drifting with reduced motion. About 120 small drawImage calls a frame.
      scale     a scale bar in nanometres, from the strand's own spacing (about 0.6 nm between letters).
      edge      (to test on a real Chromebook only) real blur around the edge with backdrop-filter. This one costs
-               every frame on the graphics chip, so it is off unless asked for.
+               every frame on the graphics chip. On by default since Nov 2026; off in low detail, like grain.
    Choose with ?lens=soft,bokeh,... (or ?lens=off), or the buttons in ?dev. */
 window.SoupLens = (() => {
 'use strict';
 const TAU = Math.PI * 2;
 const ALL = ['motes', 'vignette', 'eyepiece', 'rim', 'grain', 'bokeh', 'soft', 'scale', 'edge'];
-const DEFAULT = ['motes'];
+const DEFAULT = ['motes', 'eyepiece', 'grain', 'bokeh', 'edge'];
 
 function create({pond, under, MAP, low = () => false}){
   /* the layer sits between the strands and the top canvas, so names, effects and the minimap stay bright */
@@ -42,8 +42,10 @@ function create({pond, under, MAP, low = () => false}){
     el.classList.toggle('soft', on.has('vignette') && !on.has('eyepiece'));
     el.classList.toggle('eyepiece', on.has('eyepiece'));
     el.classList.toggle('rim', on.has('rim'));
-    grain.hidden = !on.has('grain'); if (on.has('grain')) makeGrain();
-    edge.hidden = !on.has('edge');
+    /* the two that cost every frame (grain, edge) stay off in low detail (the Lo button), whatever is picked */
+    const heavy = !low();
+    grain.hidden = !(on.has('grain') && heavy); if (!grain.hidden) makeGrain();
+    edge.hidden = !(on.has('edge') && heavy);
     edge.classList.toggle('round', on.has('eyepiece'));
     if (MAP.setSoft) MAP.setSoft(on.has('soft') ? 1.6 : 0);
   }
@@ -136,7 +138,7 @@ function create({pond, under, MAP, low = () => false}){
     g.restore();
   }
   apply();
-  return {set, toggle, has:k => on.has(k), get list(){ return [...on]; }, ALL,
+  return {set, toggle, refresh:apply, has:k => on.has(k), get list(){ return [...on]; }, ALL,
     drawBack:(g, ...a) => { drawMotes(g, false, ...a); drawSpecks(g, true, ...a); }, drawFront:(g, ...a) => { drawMotes(g, true, ...a); drawSpecks(g, false, ...a); }};
 }
 /* about 0.6 nm between letters along an RNA backbone; the strand draws them LB px apart */

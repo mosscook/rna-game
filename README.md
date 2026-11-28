@@ -53,7 +53,7 @@ The world's places reuse the classic map's ground types:
 | Big volcanoes | hot springs in the caldera, with a geyser |
 | Bigger streams | currents toward deep water |
 
-The world has two looks, **Filled** and **Lines**, switched with the ◯ button in the bottom bar, the O key, or `?look=lines` / `?look=filled`. Lines starts as thin coloured band edges over a faint fill, so the strands stand out while depth (and so speed) stays readable. Both looks can be adjusted in the dev panel (`?dev`, **Map look**), and each browser remembers its own:
+The world has two looks, **Filled** and **Lines**, switched with the ◯ button in the bottom bar, the O key, or `?look=lines` / `?look=filled`. Lines is the default: thin coloured band edges over a faint fill, so the strands stand out while depth (and so speed) stays readable. Both looks can be adjusted in the dev panel (`?dev`, **Map look**), and each browser remembers its own:
 
 | Setting | What it does |
 |---|---|
@@ -74,19 +74,19 @@ Free letters don't last forever, as real nucleotides break down in water (hydrol
 
 ## Microscope look
 
-`public/lens.js` adds optional effects that make the soup look like a view down a microscope. Only `motes` is on by default; choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
+`public/lens.js` adds optional effects that make the soup look like a view down a microscope. On by default: `motes`, `eyepiece`, `grain`, `bokeh` and `edge`. The Lo button turns off the two that cost every frame (`grain`, `edge`). choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
 
 | Effect | What it does | Cost |
 | --- | --- | --- |
-| `motes` (on by default) | Floating grains, clay flakes and fatty-acid vesicles in four parallax layers: three below the strands (hidden behind rock and ice) sliding slower than the ground, one above them sliding faster | About 1 ms of drawing a frame on a slowed-down processor; half as many in low detail |
+| `motes` (on) | Floating grains, clay flakes and fatty-acid vesicles in four parallax layers: three below the strands (hidden behind rock and ice) sliding slower than the ground, one above them sliding faster | About 1 ms of drawing a frame on a slowed-down processor; half as many in low detail |
 | `vignette` | Light falls off toward the corners | None measurable (a CSS gradient on a layer that never changes) |
-| `eyepiece` | A round field of view; corners go dark | None measurable, but it hides strands coming from the corners |
+| `eyepiece` (on) | A round field of view; corners go dark | None measurable, but it hides strands coming from the corners |
 | `rim` | A faint blue and magenta fringe near the edge, like a cheap lens | None measurable |
-| `bokeh` | Out-of-focus specks drifting above and below the focal plane, with parallax | None measurable (27 soft discs a frame) |
+| `bokeh` (on) | Out-of-focus specks drifting above and below the focal plane, with parallax | None measurable (27 soft discs a frame) |
 | `soft` | The ground out of focus, so only strands and letters are sharp | Slightly cheaper than normal: ground tiles are drawn at lower resolution and blurred once |
 | `scale` | A scale bar in nanometres above the minimap (letters are about 0.6 nm apart) | None measurable |
-| `grain` | Sensor noise | About 25% of frame rate in a slowed-down test |
-| `edge` | Real blur around the edge (backdrop-filter); for testing on a real Chromebook only | Every frame, on the graphics chip |
+| `grain` (on; off in low detail) | Sensor noise | About 25% of frame rate in a slowed-down test |
+| `edge` (on; off in low detail) | Real blur around the edge of the view (CSS backdrop-filter), round with the eyepiece, so only the middle is sharp | Every frame, on the graphics chip |
 
 Recommended set: `?lens=motes,vignette,rim,bokeh,soft,scale`.
 
