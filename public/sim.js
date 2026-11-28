@@ -436,6 +436,11 @@ function create(opts){
     heatT += dt;
     if (heatT > 0.5){
       heatT = 0;
+      /* letters and fragments that drift into lava burn away */
+      if (MAP.lavas.length){
+        for (let i = nucs.length - 1; i >= 0; i--) if (MAP.lavaAt(nucs[i].x, nucs[i].y)) nucs.splice(i, 1);
+        for (const f of frags.slice()) if (MAP.lavaAt(f.s.head.x, f.s.head.y)){ puff(f.s.head.x, f.s.head.y, 'warn', 24); removeFrag(f); }
+      }
       for (const p of players){
         if (!p.alive) continue;
         const nn = p.s.nodes;
@@ -443,6 +448,18 @@ function create(opts){
           if (!MAP.smokerAt(nn[j].x, nn[j].y, 60)) continue;
           const st = p.s.structureAt(j);
           if (st && !st.damaged){ p.s.damageAt(j); puff(nn[j].x, nn[j].y, 'warn', 20); dirty(p); tell(p, `Heat from a black smoker damaged your ${st.fn || 'arm'}.`); break; }
+        }
+        /* lava: every structure touching it is damaged, and loose letters touching it burn off with everything behind */
+        if (p.inv <= 0 && MAP.lavas.length && MAP.lavaNear(p.s.head.x, p.s.head.y, nn.length * 14 + 40)){
+          const hurt = [];
+          for (let j = 0; j < nn.length; j++){
+            if (!MAP.lavaAt(nn[j].x, nn[j].y)) continue;
+            const st = p.s.structureAt(j);
+            if (!st){ if (j >= nn.length - p.s.tail.length){ puff(nn[j].x, nn[j].y, 'warn', 18); p.s.shedFrom(j); dirty(p); tell(p, 'Lava burned the loose letters off your tail.'); break; } continue; }
+            if (!st.damaged){ p.s.damageAt(j); hurt.push(st.fn || 'arm'); puff(nn[j].x, nn[j].y, 'warn', 22); }
+            j = st.end;
+          }
+          if (hurt.length){ dirty(p); tell(p, `Lava damaged your ${hurt.join(', ')}.`); }
         }
         for (const f of working(p)){
           const seg = SEG.get(f.fn), sb = seg && seg.saltBreaks; if (!sb) continue;

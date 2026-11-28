@@ -72,6 +72,8 @@ const ZONES = {
     intro:'White chimneys: towers of carbonate riddled with tiny pores. Warm water seeps through and pushes molecules into dead-end pockets where they pile up.'},
   pocket:{label:'Nursery pocket: safe from UV and meteorites, rich in letters',
     intro:'A nursery pocket. Molecules collect in dead ends like this, out of reach of UV and meteorites. A real hypothesis for where RNA could build up.'},
+  lava:{label:'Lava: everything it touches is damaged',
+    intro:'An active volcano. Lava is over 1,000 °C: any part of your strand that touches it is damaged, and loose letters burn away. Swim around it, and watch the flows creep downhill and back.'},
   smoker:{label:'Black smoker: scalding',
     intro:'Black smokers: acidic jets of black mineral smoke at over 350 °C. They shred RNA. Touching one destroys your core.'},
   spring:{label:'Hot spring terrace: rich in A and G',
