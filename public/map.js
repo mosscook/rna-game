@@ -39,6 +39,7 @@ const fbm = (x, y) => (noise(x, y) + 0.5 * noise(x * 2.1, y * 2.1) + 0.25 * nois
 
 /* ---------- state ---------- */
 let grid = null, flows = [], pools = [], springs = [], smokers = [], geysers = [], rafts = [], craters = [], meteors = [], uvFlashes = [];
+let lavas = [];   /* active volcanoes: lava pools in vents and calderas, and lava running down the island's channels */
 let raftRoute = null, melted = new Set(), byType = [], tide = 1, clock = 0, iceT = 12, meteorT = 30, uvT = 4;
 const cellIdx = (cx, cy) => cy * GW + cx;
 const typeAtCell = (cx, cy) => (cx < 0 || cy < 0 || cx >= GW || cy >= GH) ? K.DEEP : grid[cellIdx(cx, cy)];
@@ -69,8 +70,8 @@ function generate(s, opt){
   if (opt && opt.world){ chunks.clear(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
   W = BASE_W; H = BASE_H; GW = W / CELL; GH = H / CELL; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
   grid = new Uint8Array(GW * GH).fill(K.OCEAN);
-  flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
-  melted = new Set(); chunks.clear(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
+  shores.clear(); flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
+  lavas = []; melted = new Set(); chunks.clear(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
   lobby = !!(opt && opt.lobby); lobbyClumps = [];
   if (lobby) return generateLobby();
   const setC = (cx, cy, t) => { cx = Math.floor(cx); cy = Math.floor(cy); if (cx >= 0 && cy >= 0 && cx < GW && cy < GH) grid[cellIdx(cx, cy)] = t; };
@@ -129,10 +130,11 @@ let look = Object.assign({}, LOOK_BASE);
 function setWorldLook(o){
   const recol = o && o.colours && JSON.stringify(o.colours) !== JSON.stringify(look.colours);
   look = Object.assign({}, LOOK_BASE, o || {});
-  if (recol && surf){ surf.recolour(look.colours); mini.dirty = true; }
-  chunks.clear();
+  if (recol && surf) surf.recolour(look.colours);
+  mini.dirty = true; chunks.clear();
 }
 const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
+const MEND_E = 0.62;   /* the generated world's ice mends at this elevation and above (the top two swimmable bands) */
 function generateWorld(s, o){
   const WG = window.WorldGen, size = Math.max(0.4, Math.min(1, o.size || 0.7));
   W = Math.round(BASE_W * size / 100) * 100; H = Math.round(BASE_H * size / 100) * 100; GW = W / CELL; GH = H / CELL;
@@ -156,12 +158,38 @@ function generateWorld(s, o){
     else if (id === 'flats') t = e >= 0.5 ? K.FLATS : K.OCEAN;
     else if (id === 'island') t = e >= 0.62 ? K.UV : e >= 0.38 ? K.CLAY : K.OCEAN;
     else if (id === 'chimneys') t = e >= 0.62 ? K.POCKET : K.PORE;
-    else if (id === 'ice') t = K.BRINE;
+    else if (id === 'ice') t = e >= MEND_E ? K.BRINE : K.SLUSH;   /* only the higher ice mends, so mending means a trip deep in */
     else t = K.OCEAN;
     grid[cy * GW + cx] = t;
   }
   for (const v of world.vents) if (v.kind === 'chimney') smokers.push({x:v.x, y:v.y, r:Math.max(40, v.R * 0.3)});
-  for (const v of calderas){ const sp = {x:v.x, y:v.y, r:v.R * 0.55, k:springs.length}; springs.push(sp); geysers.push({x:v.x + v.R * 0.25, y:v.y, r:85, t:rr(2, 10), phase:'wait'}); }
+  /* active volcanoes: about half the shields and calderas, chosen from the seed so every screen agrees. A shield's vent
+     pit holds a lava pool and lava runs down its channels; an active caldera's floor is a lava lake (and has no geyser).
+     The lava swells and ebbs: each flow's front creeps down its channel and back over half a minute or so */
+  lavas = [];
+  const cones = world.vents.filter(v => v.kind === 'shield' || v.kind === 'caldera');
+  let active = cones.filter(v => hash(s, v.k) < 0.5); if (!active.length && cones.length) active = [cones[0]];
+  /* at least one active shield with a channel, so there is always a flow to see */
+  const shields = cones.filter(v => v.kind === 'shield'), ownerOf = path => shields.reduce((a, u) => !a || Math.hypot(path[0].x - u.x, path[0].y - u.y) < Math.hypot(path[0].x - a.x, path[0].y - a.y) ? u : a, null);
+  if (world.lavas.length && !world.lavas.some(path => active.includes(ownerOf(path)))){ const o = ownerOf(world.lavas[0]); if (o) active.push(o); }
+  for (const v of active){
+    const P = 34 + hash(s, v.k + 7) * 22, ph = hash(s, v.k + 11);
+    if (v.kind === 'caldera'){ lavas.push({kind:'pool', x:v.x, y:v.y, r0:v.R * 0.22, r1:v.R * 0.4, lo:0, P, ph}); continue; }
+    lavas.push({kind:'pool', x:v.x, y:v.y, r0:v.R * 0.1, r1:v.R * 0.18, lo:0, P, ph});
+    for (const path of world.lavas){
+      /* each channel belongs to the shield it starts nearest */
+      if (ownerOf(path) !== v || Math.hypot(path[0].x - v.x, path[0].y - v.y) > v.R * 0.6) continue;
+      /* from the vent itself, and no further than 1400 px down the channel */
+      let pts = [{x:v.x, y:v.y}, ...path.map(q => ({x:q.x, y:q.y}))];
+      for (let it = 0; it < 2; it++){ const q2 = [pts[0]]; for (let k = 0; k + 1 < pts.length; k++){ const A = pts[k], B = pts[k + 1]; q2.push({x:A.x * 0.75 + B.x * 0.25, y:A.y * 0.75 + B.y * 0.25}, {x:A.x * 0.25 + B.x * 0.75, y:A.y * 0.25 + B.y * 0.75}); } q2.push(pts[pts.length - 1]); pts = q2; }
+      const cum = [0];
+      for (let k = 1; k < pts.length; k++){ cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y)); if (cum[k] > 1400){ pts.length = k + 1; break; } }
+      cum.length = pts.length;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const q of pts){ x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+      lavas.push({kind:'flow', pts, cum, total:cum[cum.length - 1], w:18, lo:0.3, P, ph:ph + 0.08, box:[x0, y0, x1, y1]});
+    }
+  }
+  for (const v of calderas){ const sp = {x:v.x, y:v.y, r:v.R * 0.55, k:springs.length}; springs.push(sp); if (!active.includes(v)) geysers.push({x:v.x + v.R * 0.25, y:v.y, r:85, t:rr(2, 10), phase:'wait'}); }
   for (const c of world.craters) if (c.R > 200) springs.push({x:c.x, y:c.y, r:c.R * 0.4, k:springs.length});
   if (geysers.length && springs.length < 2) geysers.length = 0;
   /* the bigger streams run as currents, toward deep water */
@@ -189,7 +217,7 @@ const MINI_LOBBY = {size:0.4, settings:{lagoon:2500, impacts:2, ispread:0.5, mou
   craters:20, basins:0, chimneys:0, calderas:0, lava:0, rivers:0.4, spread:20, pockets:0}};
 function generateMiniLobby(s){
   const sp = generateWorld(s, MINI_LOBBY);
-  lobby = true; flows = []; smokers = []; geysers = []; springs = []; LABELS.length = 0;
+  lobby = true; flows = []; smokers = []; geysers = []; springs = []; lavas = []; LABELS.length = 0;
   const c = world.centre, open = (x, y) => !solidAt(x, y) && !solidAt(x + 70, y) && !solidAt(x - 70, y) && !solidAt(x, y + 70) && !solidAt(x, y - 70);
   /* clumps: one inside each mound, then open lagoon water around the middle */
   lobbyClumps = world.mounds.map(m => ({x:m.x, y:m.y, r:Math.min(110, m.rin * 0.55)}));
@@ -239,8 +267,34 @@ function speedAt(x, y){
 const cellAt = (x, y) => CELLS[typeAt(x, y)];
 /* shelters: nursery pockets, ice veins and the inside of a pumice raft keep out radiation and meteorites */
 const shelterAt = (x, y) => !!CELLS[typeAt(x, y)].shelter || !!raftInside(x, y);
+/* lava: how far it reaches now (0..1 of its full size) */
+const lavaExt = q => q.lo + (1 - q.lo) * (0.5 - 0.5 * Math.cos(TAU * (clock / q.P + q.ph)));
+/* the nearest lava to a point: {d, x, y}, d being the distance from the lava's edge (negative inside), x, y the nearest
+   point of its middle. Only lava within 'within' px is looked at; null if none */
+function lavaNear(x, y, within = 0){
+  let best = null;
+  for (const q of lavas){
+    if (q.kind === 'pool'){
+      const r = q.r0 + (q.r1 - q.r0) * lavaExt(q), d = Math.hypot(x - q.x, y - q.y) - r;
+      if (d <= within && (!best || d < best.d)) best = {d, x:q.x, y:q.y};
+      continue;
+    }
+    const b = q.box, pad = q.w + within;
+    if (x < b[0] - pad || x > b[2] + pad || y < b[1] - pad || y > b[3] + pad) continue;
+    const L = lavaExt(q) * q.total, P = q.pts;
+    for (let k = 1; k < P.length && q.cum[k - 1] < L; k++){
+      const A = P[k - 1], B0 = P[k], sl = q.cum[k] - q.cum[k - 1] || 1, f = Math.min(1, (L - q.cum[k - 1]) / sl);
+      const bx = A.x + (B0.x - A.x) * f, by = A.y + (B0.y - A.y) * f, vx = bx - A.x, vy = by - A.y, vv = vx * vx + vy * vy || 1;
+      const u = Math.max(0, Math.min(1, ((x - A.x) * vx + (y - A.y) * vy) / vv)), px = A.x + vx * u, py = A.y + vy * u, d = Math.hypot(x - px, y - py) - q.w;
+      if (d <= within && (!best || d < best.d)) best = {d, x:px, y:py};
+    }
+  }
+  return best;
+}
+const lavaAt = (x, y, pad = 0) => !!lavaNear(x, y, pad);
 function zoneAt(x, y){
   if (smokerAt(x, y, 90)) return 'smoker';
+  if (lavas.length && lavaAt(x, y, 40)) return 'lava';
   if (raftInside(x, y)) return 'raft';
   if (craterAt(x, y)) return 'crater';
   const t = typeAt(x, y);
@@ -371,6 +425,7 @@ function update(dt, ev, heads){
 
 /* ---------- drawing: cached terrain chunks, plus what moves ---------- */
 const chunks = new Map(); let renderBudget = 0;
+const shores = new Map();   /* per chunk: the wall's edge as short segments with outward normals, for the ripples */
 function dirty(cx, cy){ chunks.delete(Math.floor(cx / CH) + ',' + Math.floor(cy / CH)); mini.dirty = true; }
 const hash = (a, b) => { let h = Math.imul(a, 374761393) + Math.imul(b, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
 /* the microscope look (lens.js) can draw the ground out of focus: each chunk is blurred once, when it is made.
@@ -503,23 +558,101 @@ function drawBase(g, camX, camY, vw, vh, t){
   g.fill(); g.globalAlpha = 1;
 }
 const seen = (x, y, pad, camX, camY, vw, vh) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
-function drawOver(g, camX, camY, vw, vh, t){
-  /* currents: arrows drift along each stream */
-  g.lineCap = 'round';
-  for (const f of flows){
-    const P = f.pts;
-    for (let i = 0; i + 1 < P.length; i++){
-      const a = P[i], b = P[i + 1], L = Math.hypot(b.x - a.x, b.y - a.y);
-      if (!seen((a.x + b.x) / 2, (a.y + b.y) / 2, L / 2 + f.w, camX, camY, vw, vh)) continue;
-      const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L, sp = 90, off = (t * f.v * 0.6) % sp;
-      g.strokeStyle = f.kind === 'spill' ? 'rgba(140,220,220,.45)' : f.kind === 'melt' ? 'rgba(180,220,255,.4)' : 'rgba(120,160,210,.32)'; g.lineWidth = 2.2;
-      g.beginPath();
-      for (let d = off; d < L; d += sp) for (const o of [-f.w * 0.25, f.w * 0.25]){
-        const x = a.x + ux * d - uy * o, y = a.y + uy * d + ux * o;
-        g.moveTo(x - ux * 9 - uy * 6, y - uy * 9 + ux * 6); g.lineTo(x, y); g.lineTo(x - ux * 9 + uy * 6, y - uy * 9 - ux * 6);
-      }
-      g.stroke();
+/* the wall's edge in one chunk, by marching squares on a 16 px grid. Each crossing keeps the downhill direction there,
+   so a ripple can be drawn by pushing the whole edge outward. Built once per chunk, the first time it is seen */
+function shoreOf(kx, ky){
+  const key = kx + ',' + ky; let sh = shores.get(key); if (sh) return sh;
+  const WALL = window.WorldGen.WALL, S = CH * CELL, n = Math.round(S / 16), st = S / n, x0 = kx * S, y0 = ky * S, m = n + 1, E = new Float32Array(m * m), out = [];
+  for (let j = 0; j < m; j++) for (let i = 0; i < m; i++) E[j * m + i] = surf.elev(Math.min(W - 1, x0 + i * st), Math.min(H - 1, y0 + j * st));
+  const pt = (xa, ya, ea, xb, yb, eb) => {
+    const f = (WALL - ea) / (eb - ea), x = xa + (xb - xa) * f, y = ya + (yb - ya) * f;
+    const gx = surf.elev(x + 4, y) - surf.elev(x - 4, y), gy = surf.elev(x, y + 4) - surf.elev(x, y - 4), L = Math.hypot(gx, gy) || 1;
+    return [x, y, -gx / L, -gy / L];
+  };
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++){
+    const a = E[j * m + i], b = E[j * m + i + 1], c = E[(j + 1) * m + i + 1], d = E[(j + 1) * m + i];
+    const xa = x0 + i * st, ya = y0 + j * st, xb = xa + st, yb = ya + st, hits = [];
+    if ((a >= WALL) !== (b >= WALL)) hits.push(pt(xa, ya, a, xb, ya, b));
+    if ((b >= WALL) !== (c >= WALL)) hits.push(pt(xb, ya, b, xb, yb, c));
+    if ((c >= WALL) !== (d >= WALL)) hits.push(pt(xb, yb, c, xa, yb, d));
+    if ((d >= WALL) !== (a >= WALL)) hits.push(pt(xa, yb, d, xa, ya, a));
+    for (let k = 0; k + 1 < hits.length; k += 2) out.push(...hits[k], ...hits[k + 1]);
+  }
+  sh = new Float32Array(out); shores.set(key, sh); return sh;
+}
+/* water lapping at the walls: three faint outlines leave each wall edge, spread out and fade, so what cannot be
+   swum through stands out a little without being drawn brighter. Cheap: a few hundred short lines on screen */
+function drawRipples(g, camX, camY, vw, vh, t){
+  if (!world || !surf) return;
+  const S = CH * CELL, kx0 = Math.max(0, Math.floor((camX - 40) / S)), ky0 = Math.max(0, Math.floor((camY - 40) / S));
+  const kx1 = Math.min(Math.ceil(W / S) - 1, Math.floor((camX + vw + 40) / S)), ky1 = Math.min(Math.ceil(H / S) - 1, Math.floor((camY + vh + 40) / S));
+  const sets = [];
+  for (let ky = ky0; ky <= ky1; ky++) for (let kx = kx0; kx <= kx1; kx++){ const sh = shoreOf(kx, ky); if (sh.length) sets.push(sh); }
+  if (!sets.length) return;
+  g.lineWidth = 1.1; g.lineCap = 'round';
+  for (let r = 0; r < 3; r++){
+    const ph = (t * 0.22 + r / 3) % 1, a = Math.sin(Math.PI / 2 * Math.min(1, ph * 4)) * (1 - ph) * (1 - ph) * 0.32;
+    if (a < 0.01) continue;
+    const base = 3 + ph * 30;
+    g.strokeStyle = `rgba(190,220,235,${a.toFixed(3)})`; g.beginPath();
+    for (const sh of sets) for (let q = 0; q < sh.length; q += 8){
+      const w1 = base + 2.5 * Math.sin(t * 1.3 + sh[q] * 0.021 + sh[q + 1] * 0.017), w2 = base + 2.5 * Math.sin(t * 1.3 + sh[q + 4] * 0.021 + sh[q + 5] * 0.017);
+      g.moveTo(sh[q] + sh[q + 2] * w1, sh[q + 1] + sh[q + 3] * w1); g.lineTo(sh[q + 4] + sh[q + 6] * w2, sh[q + 5] + sh[q + 7] * w2);
     }
+    g.stroke();
+  }
+}
+function drawOver(g, camX, camY, vw, vh, t){
+  drawRipples(g, camX, camY, vw, vh, t);
+  /* currents: motes that wink into being somewhere along a stream, drift with it for a few seconds and fade away.
+     Stateless: each mote's life is a function of the clock, so nothing is stored and every screen agrees closely enough */
+  for (let fi = 0; fi < flows.length; fi++){
+    const f = flows[fi], P = f.pts;
+    if (!f.cum){ f.cum = [0]; for (let i = 1; i < P.length; i++) f.cum.push(f.cum[i - 1] + Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y)); }
+    const total = f.cum[f.cum.length - 1]; if (total < 1) continue;
+    const n = Math.ceil(total / 55), rgb = f.kind === 'spill' ? '170,235,235' : f.kind === 'melt' ? '200,230,255' : '160,195,235';
+    for (let k = 0; k < n; k++){
+      const life = 2.6 + hash(fi * 977 + k, 3) * 2.4, tt = t / life + hash(fi * 977 + k, 5), cyc = Math.floor(tt), age = tt - cyc;
+      const travel = life * f.v * 0.6, d = hash(fi * 977 + k, cyc * 31 + 7) * total + age * travel;
+      if (d >= total) continue;
+      let i = 1; while (i < f.cum.length - 1 && f.cum[i] < d) i++;
+      const A = P[i - 1], B = P[i], seg = f.cum[i] - f.cum[i - 1] || 1, u = (d - f.cum[i - 1]) / seg;
+      const ux = (B.x - A.x) / seg, uy = (B.y - A.y) / seg, o = (hash(fi * 977 + k, cyc * 31 + 11) - 0.5) * f.w * 0.7;
+      const x = A.x + (B.x - A.x) * u - uy * o, y = A.y + (B.y - A.y) * u + ux * o;
+      if (!seen(x, y, 10, camX, camY, vw, vh)) continue;
+      const fade = Math.sin(Math.PI * age), r = 1.2 + hash(fi * 977 + k, 13) * 1.6;
+      g.fillStyle = `rgba(${rgb},${(0.55 * fade * fade).toFixed(3)})`; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+    }
+  }
+  /* lava: a dark crust, a glowing body and a bright core that streams downhill, with a hot front where it is advancing */
+  for (const q of lavas){
+    const ext = lavaExt(q);
+    if (q.kind === 'pool'){
+      const r = q.r0 + (q.r1 - q.r0) * ext; if (!seen(q.x, q.y, r + 60, camX, camY, vw, vh)) continue;
+      const gr = g.createRadialGradient(q.x, q.y, r * 0.2, q.x, q.y, r + 50);
+      const br = 0.85 + 0.15 * Math.sin(t * 1.7 + q.ph * 9);
+      gr.addColorStop(0, `rgba(240,150,70,${(0.6 * br).toFixed(3)})`); gr.addColorStop(r / (r + 50) * 0.75, 'rgba(190,62,26,.5)'); gr.addColorStop(r / (r + 50), 'rgba(90,22,12,.45)'); gr.addColorStop(1, 'rgba(90,22,12,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(q.x, q.y, r + 50, 0, TAU); g.fill();
+      g.globalAlpha = 0.3; g.strokeStyle = '#f0a860'; g.lineWidth = 1.5; g.setLineDash([4, 16]); g.lineDashOffset = -t * 8;
+      g.beginPath(); g.arc(q.x, q.y, r * 0.6, 0, TAU); g.stroke(); g.setLineDash([]); g.lineDashOffset = 0; g.globalAlpha = 1;
+      continue;
+    }
+    const b = q.box; if (b[2] < camX - 60 || b[0] > camX + vw + 60 || b[3] < camY - 60 || b[1] > camY + vh + 60) continue;
+    const L = ext * q.total, P = q.pts; let fx = P[0].x, fy = P[0].y;
+    g.beginPath(); g.moveTo(P[0].x, P[0].y);
+    for (let k = 1; k < P.length; k++){
+      if (q.cum[k] <= L){ g.lineTo(P[k].x, P[k].y); fx = P[k].x; fy = P[k].y; continue; }
+      const f = (L - q.cum[k - 1]) / (q.cum[k] - q.cum[k - 1] || 1); fx = P[k - 1].x + (P[k].x - P[k - 1].x) * f; fy = P[k - 1].y + (P[k].y - P[k - 1].y) * f; g.lineTo(fx, fy); break;
+    }
+    g.lineJoin = 'round'; g.lineCap = 'round';
+    g.strokeStyle = 'rgba(70,16,9,.5)'; g.lineWidth = q.w * 2 + 10; g.stroke();
+    g.strokeStyle = 'rgba(180,56,24,.5)'; g.lineWidth = q.w * 2; g.stroke();
+    g.strokeStyle = 'rgba(235,120,50,.4)'; g.lineWidth = q.w * 0.9; g.stroke();
+    g.strokeStyle = 'rgba(255,190,110,.45)'; g.lineWidth = 2; g.setLineDash([5, 19]); g.lineDashOffset = -t * 30; g.stroke(); g.setLineDash([]); g.lineDashOffset = 0;
+    /* the front: glows while it advances, dull while it ebbs */
+    const adv = Math.sin(TAU * (clock / q.P + q.ph)) > 0, fr = g.createRadialGradient(fx, fy, 2, fx, fy, q.w * 2);
+    fr.addColorStop(0, adv ? 'rgba(250,160,80,.55)' : 'rgba(200,80,40,.25)'); fr.addColorStop(1, 'rgba(200,80,40,0)');
+    g.fillStyle = fr; g.beginPath(); g.arc(fx, fy, q.w * 2, 0, TAU); g.fill();
   }
   /* craters: a warm rim that cools over time */
   for (const c of craters){
@@ -590,10 +723,37 @@ function buildMinimap(){
   const g = c.getContext && c.getContext('2d'); if (!g){ mini.dirty = false; return; }   /* no canvas (a server room): nothing to draw */
   const img = g.createImageData(GW, GH);
   if (world){
-    const WG = window.WorldGen, col = [0, 0, 0];
+    /* the world's own look (fill, outlines, walls, colours), with half the bands: wall, shallows (1-2), middle (3-4),
+       deep (5-6) and black. At one pixel per 50 px cell the full seven bands are a blur of rings; four read at a glance */
+    const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT, Lk = look, col = [0, 0, 0], [d0, d1, d2] = Lk.deep;
+    const CUT = [T[0], T[2], T[4], T[6]], REP = [0, 1.5, 3.5, 5.5];
+    const brAt = r => { const k = Math.floor(r), f = r - k, v = BR[k] + (BR[Math.min(6, k + 1)] - BR[k]) * f; return Math.max(0, 1 - (1 - v) * Lk.depth); };
+    const band = new Uint8Array(GW * GH), cols = new Float32Array(GW * GH * 3);
     for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++){
-      const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL, e = surf.elev(x, y), k = WG.bandOf(e), o = (cy * GW + cx) * 4; surf.colour(x, y, col);
-      const m = k === 7 ? 0 : WG.BRIGHT[k] * 1.25; img.data[o] = Math.min(255, col[0] * m + 6); img.data[o + 1] = Math.min(255, col[1] * m + 8); img.data[o + 2] = Math.min(255, col[2] * m + 10); img.data[o + 3] = 255;
+      const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL, e = surf.elev(x, y), n = cy * GW + cx;
+      let b = 0; while (b < 4 && e < CUT[b]) b++; band[n] = b;
+      surf.colour(x, y, col); cols[n * 3] = col[0]; cols[n * 3 + 1] = col[1]; cols[n * 3 + 2] = col[2];
+    }
+    /* a little more fill than the big map, so the overview never goes all black; lines where the coarse band changes */
+    const fill = Math.max(Lk.fill, 0.3), line = Math.max(Lk.line, Lk.fill < 0.5 ? 0.6 : 0);
+    for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++){
+      const n = cy * GW + cx, b = band[n], o = n * 4, cr = cols[n * 3], cg = cols[n * 3 + 1], cb = cols[n * 3 + 2];
+      let r = d0, gg = d1, bb = d2;
+      if (b < 4){
+        const m = brAt(REP[b]) * 1.15;
+        r = d0 + (cr * m - d0) * fill; gg = d1 + (cg * m - d1) * fill; bb = d2 + (cb * m - d2) * fill;
+        if (b === 0 && Lk.wall > fill * m){ r = d0 + (cr * Lk.wall - d0); gg = d1 + (cg * Lk.wall - d1); bb = d2 + (cb * Lk.wall - d2); }
+      }
+      /* an edge: a neighbour (right or below) is a shallower coarse band; the line takes the shallower band's brightness */
+      const nb = Math.min(cx < GW - 1 ? band[n + 1] : b, cy < GH - 1 ? band[n + GW] : b, cx > 0 ? band[n - 1] : b, cy > 0 ? band[n - GW] : b);
+      if (line > 0 && nb < b){ const mm = 1 - Lk.lineFade * (1 - brAt(REP[nb])) * 0.8; r += (cr * mm - r) * line; gg += (cg * mm - gg) * line; bb += (cb * mm - bb) * line; }
+      img.data[o] = Math.min(255, r); img.data[o + 1] = Math.min(255, gg); img.data[o + 2] = Math.min(255, bb); img.data[o + 3] = 255;
+    }
+    /* active lava, at its fullest */
+    const hot = (x, y) => { const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL); if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) return; const o = (cy * GW + cx) * 4; img.data[o] = 235; img.data[o + 1] = 96; img.data[o + 2] = 36; };
+    for (const q of lavas){
+      if (q.kind === 'pool'){ for (let y = q.y - q.r1; y <= q.y + q.r1; y += CELL / 2) for (let x = q.x - q.r1; x <= q.x + q.r1; x += CELL / 2) if (Math.hypot(x - q.x, y - q.y) <= q.r1) hot(x, y); continue; }
+      for (let k = 1; k < q.pts.length; k++){ const A = q.pts[k - 1], B = q.pts[k], n = Math.ceil(Math.hypot(B.x - A.x, B.y - A.y) / (CELL / 2)); for (let j = 0; j <= n; j++) hot(A.x + (B.x - A.x) * j / n, A.y + (B.y - A.y) * j / n); }
     }
     g.putImageData(img, 0, 0); mini.c = c; mini.dirty = false; return;
   }
@@ -675,6 +835,7 @@ function randomOf(types){
 return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, get worldLook(){ return JSON.parse(JSON.stringify(look)); }, setWorldLook, LOOK_BASE, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
+  get lavas(){ return lavas; }, lavaAt, lavaNear,
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
   get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }, setSoft, renderChunk};
 };

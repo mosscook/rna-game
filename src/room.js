@@ -253,10 +253,12 @@ export class GameRoom extends DurableObject {
     const sg = s.segments;
     const dm = []; for (const g of sg){ const st = s.structureAt(g.start); if (st && st.damaged) dm.push(g.start); }
     /* a segment's strength rides along only when it isn't exact (a recipe folded with one wrong letter) */
-    return {seq:s.seq, sg:sg.map(g => g.q != null && g.q !== 1 ? [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end, g.q] : [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end]), dm};
+    /* Cleavers growing back after a cut: [start, seconds left], sent once when the rest begins (the page counts down) */
+    const p = this.sim.players.find(q => q.s === s), rs = p && p.rest && p.rest.size ? [...p.rest].map(([a, l]) => [a, r1(l)]) : [];
+    return {seq:s.seq, sg:sg.map(g => g.q != null && g.q !== 1 ? [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end, g.q] : [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end]), dm, rs};
   }
   strandMsg(s, id, frag){ const q = this.strandParts(s); return frag ? {t:'q', id, f:1, ...q} : {t:'q', id, ...q}; }
-  qKey(q){ return q.seq + '|' + q.sg.join(';') + '|' + q.dm.join(','); }
+  qKey(q){ return q.seq + '|' + q.sg.join(';') + '|' + q.dm.join(',') + '|' + q.rs.map(r => r[0]).join(','); }
 
   /* after each step: roster and strand shapes that changed go to everyone */
   sendChanges(){
@@ -285,7 +287,7 @@ export class GameRoom extends DurableObject {
       return {p, x:h.x, y:h.y, e:[p.id, r1(h.x), r1(h.y), r3(s.heading), Math.round(s.moving * 100), Math.round(s.limp * 100),
         p.alive ? 1 : 0, r1(Math.max(0, p.inv || 0)), (p.ai && p.ai.label) || '']};
     });
-    const F = sim.frags.map(f => ({x:f.s.head.x, y:f.s.head.y, e:[f.id, r1(f.s.head.x), r1(f.s.head.y), r3(f.s.heading)]}));
+    const F = sim.frags.map(f => ({x:f.s.head.x, y:f.s.head.y, e:f.fresh != null ? [f.id, r1(f.s.head.x), r1(f.s.head.y), r3(f.s.heading), r1(Math.max(0, f.fresh)), f.fade == null ? -1 : r1(f.fade)] : [f.id, r1(f.s.head.x), r1(f.s.head.y), r3(f.s.heading)]}));
     const X = this.fxQ.splice(0).map(e => ({x:e.x, y:e.y, e:[Math.round(e.x), Math.round(e.y), e.col, Math.round(e.r || 26), e.dur || 0.5, e.flash ? 1 : 0]}));
     const near = (c, x, y, mx = 0) => Math.abs(x - c.cx) < VIEW_X + mx && Math.abs(y - c.cy) < VIEW_Y + mx;
     const every = n => this.k % n === 0;

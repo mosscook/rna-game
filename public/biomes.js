@@ -53,7 +53,9 @@ const CELLS = [
    texture(g, x, y, h1, h2, cx, cy, hash, CELL){ if (h1 < 0.25){ g.fillStyle = 'rgba(190,210,255,.18)'; g.fillRect(x + h2 * CELL, y + h1 * CELL * 4 % CELL, 10, 1.5); } }},
   {key:'ICE',     solid:true,  speed:0,    spawn:0,    mix:'soup', color:'#8cbad0', edge:'#cdeaf7', layer:3, zone:'',
    texture(g, x, y, h1, h2, cx, cy, hash, CELL){ if (h1 < 0.35){ g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x + h1 * CELL, y + h2 * CELL); g.lineTo(x + h2 * CELL, y + CELL * (1 - h1)); g.stroke(); } }},
-  {key:'BRINE',   solid:false, speed:0.5,  spawn:1.1,  mix:'even', color:'#0c2431', layer:8, zone:'ice', shelter:true, mends:6}
+  {key:'BRINE',   solid:false, speed:0.5,  spawn:1.1,  mix:'even', color:'#0c2431', layer:8, zone:'ice', shelter:true, mends:6},
+  /* the generated world's ice veins below the higher ground: slow and sheltered, but too thin to mend in (map.js) */
+  {key:'SLUSH',   solid:false, speed:0.5,  spawn:1.1,  mix:'even', color:'#0b1f2b', layer:8, zone:'slush', shelter:true, mini:'BRINE'}
 ];
 const K = Object.fromEntries(CELLS.map((c, i) => [c.key, i]));
 
@@ -72,6 +74,8 @@ const ZONES = {
     intro:'White chimneys: towers of carbonate riddled with tiny pores. Warm water seeps through and pushes molecules into dead-end pockets where they pile up.'},
   pocket:{label:'Nursery pocket: safe from UV and meteorites, rich in letters',
     intro:'A nursery pocket. Molecules collect in dead ends like this, out of reach of UV and meteorites. A real hypothesis for where RNA could build up.'},
+  lava:{label:'Lava: everything it touches is damaged',
+    intro:'An active volcano. Lava is over 1,000 °C: any part of your strand that touches it is damaged, and loose letters burn away. Swim around it, and watch the flows creep downhill and back.'},
   smoker:{label:'Black smoker: scalding',
     intro:'Black smokers: acidic jets of black mineral smoke at over 350 °C. They shred RNA. Touching one destroys your core.'},
   spring:{label:'Hot spring terrace: rich in A and G',
@@ -80,7 +84,9 @@ const ZONES = {
     intro:'Clay flats. Clay surfaces grab nucleotides and help link them, and lab experiments grew chains of about 50 this way. You swim slowly, but you grab letters from further away.'},
   uv:{label:'UV shallows: rich in C and U, and UV flashes damage you',
     intro:'UV shallows. With no ozone layer, UV light plus simple chemicals in shallow water built nucleotides, especially C and U. The same UV damages RNA: watch for flashes.'},
-  ice:{label:'Ice vein: slow and safe, damage slowly mends',
+  slush:{label:'Ice vein: slow and safe. Damage mends higher up, deeper in the ice',
+    intro:'Ice veins. Freezing squeezes molecules into thin, concentrated brine channels. Slow and sheltered here, but to mend damage you need the colder ice higher up, deeper in.'},
+  ice:{label:'Ice vein, high and cold: damage slowly mends',
     intro:'Ice veins. Freezing squeezes molecules into thin, concentrated brine channels, and the cold slows breakdown. RNA enzymes still work in ice. Slow and safe: damage slowly mends here.'},
   raft:{label:'Inside a pumice raft: sheltered',
     intro:'A pumice raft: foamy volcanic rock drifting on the currents. Inside it you are sheltered from UV and meteorites.'},

@@ -211,7 +211,7 @@ function bestLetter(p, info, need){
     if (need && q.b !== need) continue;
     const dx = q.x - h.x, dy = q.y - h.y; if (Math.abs(dx) > S || Math.abs(dy) > S) continue;
     let c = Math.hypot(dx, dy);
-    if (MAP.smokerAt(q.x, q.y, 120)) continue;
+    if (MAP.smokerAt(q.x, q.y, 120) || (MAP.lavaAt && MAP.lavaAt(q.x, q.y, 50))) continue;
     /* letters in front of me are cheaper: turning around costs time */
     const ahead = Math.cos(wrapA(Math.atan2(dy, dx) - p.s.heading)); c *= 1.15 - 0.15 * ahead;
     if (c > 300 && !MAP.lineClear(h.x, h.y, q.x, q.y)) c *= 1.7;
@@ -314,7 +314,7 @@ const MODES = {
     score:(p, i) => i.warn ? 12 : 0,
     act(p, i){
       const w = i.warn, h = i.h;
-      const sh = (w.kind !== 'geyser' && p.mind.traits.caution > 0.4) ? MAP.nearestOf([K.POCKET, K.BRINE], h.x, h.y, 400) : null;
+      const sh = (w.kind !== 'geyser' && p.mind.traits.caution > 0.4) ? MAP.nearestOf([K.POCKET, K.BRINE, K.SLUSH], h.x, h.y, 400) : null;
       p.ai.label = sh ? `hiding from ${w.kind}` : `dodging ${w.kind}`;
       if (sh) return sh;
       const d = dist(h.x, h.y, w.x, w.y) || 1;
@@ -329,7 +329,7 @@ const MODES = {
     },
     act(p, i){
       const h = i.h, tr = p.mind.traits;
-      const sh = MAP.nearestOf([K.POCKET, K.BRINE, K.PORE], h.x, h.y, 700 + 400 * tr.caution);
+      const sh = MAP.nearestOf([K.POCKET, K.BRINE, K.SLUSH, K.PORE], h.x, h.y, 700 + 400 * tr.caution);
       p.ai.label = `fleeing ${i.threat ? i.threat.name : ''}`.trim();
       const fx = i.fx, fy = i.fy, fl = Math.hypot(fx, fy) || 1;
       if (sh && (sh.x - h.x) * fx + (sh.y - h.y) * fy > -200){ p.ai.label += ' to shelter'; return sh; }
@@ -555,6 +555,8 @@ function steer(p){
     if (edge < reach){ const k = (reach - edge) / reach * k0; dx += (h.x - zx) / dv * k; dy += (h.y - zy) / dv * k; }
   };
   for (const v of MAP.smokers) avoid(v.x, v.y, v.r, 170, 2.8);
+  /* lava: steer away from the nearest edge, harder the closer it is */
+  if (MAP.lavas && MAP.lavas.length){ const lv = MAP.lavaNear(h.x, h.y, 150); if (lv){ const dv = dist(h.x, h.y, lv.x, lv.y) || 1; avoid(lv.x, lv.y, Math.max(0, dv - Math.max(0, lv.d)), 150, 3); } }
   /* keep clear of other strands' spikes, unless I am the one attacking */
   const shy = 0.4 + 1.4 * m.traits.caution;
   for (const o of G.players){

@@ -71,6 +71,8 @@ function create(o){
       if (dm.has(g.start) && !st.damaged) s.damageAt(g.start);
       else if (!dm.has(g.start) && st.damaged) s.mendAt(g.start);
     }
+    /* Cleavers growing back: the page counts each one down from what the server said */
+    if (!m.f){ const was = t.rest || new Map(); t.rest = new Map((m.rs || []).map(([a, l]) => [a, was.has(a) ? was.get(a) : now() + l])); for (const a of was.keys()) if (!t.rest.has(a)) s.setRest(a, 0); }
     if (!m.f && m.id === meId) hooks.dirty();
   }
 
@@ -121,7 +123,8 @@ function create(o){
       mm.last = st;
       if (id === meId) correct(mm, x, y, h, t);
     }
-    for (const [id, x, y, h] of m.F || []){ const f = fragMirror(id); f.buf.push({t:st, x, y, h, mv:0.2, lp:0}); if (f.buf.length > 30) f.buf.shift(); f.last = st; f.seen = t; }
+    /* a freshly cut piece also says how long it can still be taken and how far through fading it is */
+    for (const [id, x, y, h, fr, fd] of m.F || []){ const f = fragMirror(id); f.buf.push({t:st, x, y, h, mv:0.2, lp:0}); if (f.buf.length > 30) f.buf.shift(); f.last = st; f.seen = t; if (fr != null){ f.fresh = fr; f.fade = fd < 0 ? null : fd; f.cutAt = t; } }
     if (m.N){
       const [add, mov, del] = m.N;
       /* a fifth entry marks a letter that is breaking down: the page fades it out from the moment it hears */
@@ -206,6 +209,7 @@ function create(o){
     if (offset == null) return;
     const rt = t + offset - DELAY;
     for (const mm of P.values()){
+      if (mm.rest && mm.rest.size) for (const [a, until] of mm.rest) mm.s.setRest(a, window.SoupSegments.restOf(until - now()));
       if (mm.id === meId){
         if (mm.alive && mm.shown && state === 'play'){
           if (mm.cx || mm.cy){ const k = Math.min(1, dt * 12), dx = mm.cx * k, dy = mm.cy * k, h = mm.s.head; mm.s.setHead(h.x + dx, h.y + dy); mm.cx -= dx; mm.cy -= dy; if (Math.abs(mm.cx) + Math.abs(mm.cy) < 0.05) mm.cx = mm.cy = 0; }
@@ -224,6 +228,12 @@ function create(o){
       const p = sample(f.buf, rt);
       if (!f.shown){ f.s.place(p.x, p.y, p.h); f.shown = true; }
       f.s.follow(dt, p.x, p.y, p.h, {moving:0.2, limp:0});
+      if (f.fresh != null){
+        /* run the pulse and fade on here between snapshots, from what the last one said */
+        const SG = window.SoupSegments, el = now() - f.cutAt;
+        let fr = 0, fd = null; if (f.fade == null){ fr = f.fresh - el; if (fr <= 0) fd = SG.CUT_FADE + fr; } else fd = f.fade - el;
+        f.s.setOpacity(SG.fragAlpha(fr, fd, now()));
+      }
     }
   }
 

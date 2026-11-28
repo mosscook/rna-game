@@ -49,7 +49,7 @@ The world's places reuse the classic map's ground types:
 | Highlands | tidal flats in the shallows (slow at low tide), ridge walls |
 | Volcanic island | UV shallows near the top, clay lower down |
 | Chimneys | nursery pockets and pores; each vent pit is a black smoker |
-| Ice | brine (cold, slow, shelter) between ice walls |
+| Ice | slush (cold, slow, shelter) between ice walls; only the higher ice (elevation 0.62 and up, `MEND_E` in `map.js`) is brine that mends damage, so mending means a trip deep in |
 | Big volcanoes | hot springs in the caldera, with a geyser |
 | Bigger streams | currents toward deep water |
 
@@ -71,6 +71,20 @@ The server and every browser build the same map from the seed: the generator use
 ## Picking up letters
 
 A strand's head picks up a letter within 19 px (more on clay). People's heads reach 45% further than that, about 28 px, without it showing: they steer with a finger or a mouse, and in a room their head is a few frames behind the server's. Bots keep the plain reach. Letters also push each other apart when they're closer than 34 px, so piles spread into a loose scatter you can swim through and pick from. That costs about 0.15 ms a step for 280 letters. The constants are `HUMAN_REACH`, `REPEL_R` and `REPEL_A` at the top of `public/sim.js`.
+
+## Active volcanoes
+
+About half the shield volcanoes and calderas are active, chosen from the seed so every screen agrees (there is always at least one shield with a lava flow). An active shield's vent pit holds a lava pool and lava runs down its channels, no more than 1400 px; an active caldera's floor is a lava lake and has no geyser. The lava swells and ebbs over 34 to 56 seconds: each flow's front creeps down its channel and back, glowing while it advances. Twice a second every structure touching lava is damaged, loose letters touching it burn off with everything behind them, and free letters and fragments that drift in burn away. Bots steer clear of it. It shows orange on the minimap at its fullest. The code is `lavas`, `lavaNear` and `lavaAt` in `map.js`.
+
+## Membranes side by side
+
+A Membrane takes hits meant for the function on either side of it. Two or more Membranes in a row stack: a Membrane is shielded by a working neighbour Membrane too, so a pair takes three hits to cut instead of two, and when shields stand on both sides of a struck function their strengths add up (two weak ones hold like one exact one). The strongest takes the hit. Their goo overlaps too: where two or three Membranes reach, it is drawn again on top, so it looks denser.
+
+## Cut-off pieces
+
+A Cleaver that has just cut something shrinks to a stub (an eighth of its length) and strikes nothing for 10 seconds: it stays a stub until the last second, then grows back quickly (`CLEAVE_REST` in `segments.js`). Damaging a hit does not set it off, only a cut.
+
+When a Cleaver cuts a strand, everything behind the cut floats free as a piece. For 3.5 seconds anyone's tail end that touches it takes it on, no Joiner needed: the strand that lost it (by turning back), the one that cut it, or anyone passing. It cannot be taken for the first 0.6 seconds, so it does not jump straight back onto the strand it came from. While it can be taken it pulses; then it fades for 0.8 seconds and breaks up into letters. A Joiner can also take it while it lasts. The times are `CUT_FRESH`, `CUT_ARM` and `CUT_FADE` in `segments.js`. Fragments that drift in on their own last until a Joiner takes them or a smoker breaks them up.
 
 ## Letters break down
 
