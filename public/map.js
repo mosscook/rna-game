@@ -591,15 +591,20 @@ function chunk(kx, ky){
 /* draw the ground under everything: only the chunks in view, at most a few new ones per frame */
 function drawBase(g, camX, camY, vw, vh, t){
   renderBudget = 3;
-  const S = CH * CELL, k0 = Math.max(0, Math.floor(camX / S)), k1 = Math.min(Math.ceil(W / S) - 1, Math.floor((camX + vw) / S));
-  const j0 = Math.max(0, Math.floor(camY / S)), j1 = Math.min(Math.ceil(H / S) - 1, Math.floor((camY + vh) / S));
-  /* parallax, seen from the top (where the strands are): the top layer, the walls, is drawn as is; each layer below it
-     is drawn scaled about the middle of the view by 1 + depth x gap, and the floor (everything under the raised layers)
-     the most. So deeper ground slides faster than the walls as the view moves, more so toward the edges. A layer's
-     sides fill the step down to the layer below it in thin slices, like cliff faces */
+  /* parallax, as a camera above the water sees it: the strands swim at the surface, and the ground lies below it, each
+     layer deeper than the one above. A layer at depth d is drawn scaled about the middle of the view by 1 / (1 + d x gap),
+     as a pinhole camera would see it: the walls (which reach the surface, and are where strands collide) are drawn as
+     they are, and deeper ground looks a little smaller and slides more slowly than the strands as the view moves. Off to
+     the sides you look down past the edge of each layer at the one below, and its sides (thin darkened slices, if on)
+     fill that drop like cliff faces */
   const L = world ? parallaxLayers(look) : 0, P = L ? look.gap : 0, cx = camX + vw / 2, cy = camY + vh / 2;
   const hOf = i => Math.pow(i + 1, look.gapCurve || 1), top = L ? hOf(L - 1) : 0;
-  const at = (depth, fn) => { const z = 1 + depth * P; if (z === 1) return fn(); g.save(); g.translate(cx, cy); g.scale(z, z); g.translate(-cx, -cy); fn(); g.restore(); };
+  const zOf = depth => 1 / (1 + depth * P);
+  const at = (depth, fn) => { const z = zOf(depth); if (z === 1) return fn(); g.save(); g.translate(cx, cy); g.scale(z, z); g.translate(-cx, -cy); fn(); g.restore(); };
+  /* the deepest layer looks smallest, so more of the map is needed to fill the view */
+  const zf = zOf(top), hw = vw / 2 / zf, hh = vh / 2 / zf, S = CH * CELL;
+  const k0 = Math.max(0, Math.floor((cx - hw) / S)), k1 = Math.min(Math.ceil(W / S) - 1, Math.floor((cx + hw) / S));
+  const j0 = Math.max(0, Math.floor((cy - hh) / S)), j1 = Math.min(Math.ceil(H / S) - 1, Math.floor((cy + hh) / S));
   at(top, () => {
     for (let ky = j0; ky <= j1; ky++) for (let kx = k0; kx <= k1; kx++){
       const c = chunk(kx, ky);
@@ -609,7 +614,8 @@ function drawBase(g, camX, camY, vw, vh, t){
   });
   if (L){
     const slices = Math.round(look.sides || 0), list = [];
-    for (let ky = j0 - 1; ky <= j1 + 1; ky++) for (let kx = k0 - 1; kx <= k1 + 1; kx++){ const c = chunks.get(kx + ',' + ky); if (c && c.layers) list.push([kx, ky, c]); }
+    for (let ky = j0; ky <= j1; ky++) for (let kx = k0; kx <= k1; kx++){ const c = chunks.get(kx + ',' + ky); if (c && c.layers) list.push([kx, ky, c]); }
+    /* from the deepest raised layer up to the walls; each one's sides span the drop to the layer below it */
     for (let i = 0; i < L; i++){
       const k = L - 1 - i, d1 = top - hOf(i), d0 = i ? top - hOf(i - 1) : top;
       for (let s2 = 0; s2 < slices; s2++){ const dd = d0 + (d1 - d0) * s2 / slices;
