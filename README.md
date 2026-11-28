@@ -37,7 +37,7 @@ A room opens in a lobby: a mini version of the generated world (a small two-impa
 
 ## Speed on slow devices
 
-- **Low detail** (the **Lo** button): no goo, a lighter lens, and flat ground (no parallax, no caustics). The button's choice is remembered on that device. On a device that stays under about 22 frames a second for 5 seconds of play, it switches on by itself once, with a note; pressing **Lo** to turn it off stops that for good on that device.
+- **Low detail** (the **Lo** button): no goo, a lighter lens, and flat ground (no parallax). The button's choice is remembered on that device. On a device that stays under about 22 frames a second for 5 seconds of play, it switches on by itself once, with a note; pressing **Lo** to turn it off stops that for good on that device.
 - When frames are slow the game takes fewer, bigger steps (up to 1/30 s, the server's rate, at most three a frame), instead of catching up with many small ones.
 - The ground is drawn a few rows at a time within about 6 ms a frame, and around your strand while the start screen shows, so a round starts without gaps and swimming into new ground does not freeze. The cache is capped at about 40 MB.
 - The current at a point comes from a 25 px grid filled in as it is asked for; names over the map are drawn once and reused, and only on screen; letter text in strands exists only when letters are shown.
@@ -75,8 +75,6 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 | Raised layers | How many of the top layers are lifted (1-4; the walls are always the top one) |
 | Height curve | Above 1 the top layers are spaced further apart than the deeper ones; below 1, closer together |
 | Cliff side slices, darkness | The lifted layers' sides, drawn as darkened copies stacked between one layer and the next like cliff faces. More slices look smoother and cost a little more each frame. Strands bump into the foot of a cliff, where the map really is |
-| Strand shadows, Shadow distance | Light from the upper left falls through the water, so each strand casts a soft shadow on the ground below it, further off the deeper the ground (and drawn where that ground is, with parallax). Shows most over bright, shallow ground |
-| Caustics, size, speed | The rippled web of light a wavy surface throws on shallow ground: two drifting cell patterns, kept to the shallow layers (fading with depth, none on walls) by a soft mask per chunk |
 | Brightness, Saturation | Applied to every layer's colour. 1 = as set |
 | Colours | The deep colour and each place's colour |
 
