@@ -41,6 +41,11 @@ function create(opts){
   let lobby = false, cutsOn = true, nucTarget = NUC_TARGET;
   /* fragments drift until a Joiner takes them or a black smoker breaks them up; at most FRAG_MAX + 2 at once */
   const EAT_R = 19, HIT_R = 13, FRAG_MAX = 7, FRAG_EVERY = 25, FRAG_LIFE = Infinity;
+  /* people steer with a finger or a mouse, and in a room their head is a few frames behind: their mouth reaches a little
+     further than it looks (bots aim exactly, so they keep EAT_R) */
+  const HUMAN_REACH = 1.45;
+  /* letters keep a little apart: inside REPEL_R of each other they push apart, gently (REPEL_A px/s² at contact) */
+  const REPEL_R = 34, REPEL_A = 70;
   const OPEN_TYPES = MAP.CELLS.map((c, i) => i).filter(i => !MAP.CELLS[i].solid);
   let minStrands = opts.minStrands != null ? opts.minStrands : 10;
 
@@ -297,6 +302,27 @@ function create(opts){
     }
   }
 
+  /* letters push each other apart when closer than REPEL_R, so piles spread into a loose scatter you can swim through and
+     pick from. A grid of REPEL_R squares keeps it cheap: each letter only looks at the nine squares around it */
+  function spreadNucs(dt){
+    const C = REPEL_R, grid = new Map(), key = (i, j) => i * 4096 + j;
+    for (const q of nucs){ const k = key(q.x / C | 0, q.y / C | 0); const l = grid.get(k); if (l) l.push(q); else grid.set(k, [q]); }
+    for (const q of nucs){
+      const i = q.x / C | 0, j = q.y / C | 0;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++){
+        const l = grid.get(key(i + a, j + b)); if (!l) continue;
+        for (const o of l){
+          if (o === q) continue;
+          let dx = q.x - o.x, dy = q.y - o.y; const d2 = dx * dx + dy * dy; if (d2 >= C * C) continue;
+          let d = Math.sqrt(d2);
+          if (d < 0.01){ const t = (q.id * 0.6180339) % 1 * 6.2831853; dx = Math.cos(t); dy = Math.sin(t); d = 1; }
+          const push = REPEL_A * (1 - d / C) * dt;
+          q.vx += dx / d * push; q.vy += dy / d * push;
+        }
+      }
+    }
+  }
+
   /* ---------- the step ---------- */
   function step(dt){
     /* letters drift on the currents, stay near where they formed, bounce off walls, and boil away in smokers */
@@ -310,6 +336,7 @@ function create(opts){
       q.age += dt * q.rate;
       if (q.age >= q.life || q.x < 12 || q.x > W - 12 || q.y < 12 || q.y > H - 12 || MAP.smokerAt(q.x, q.y)) nucs.splice(i, 1);
     }
+    spreadNucs(dt);
     crowdT -= dt; if (crowdT <= 0){ crowdT = 1; crowding(); }
     MAP.update(dt, mapEv, players.filter(p => p.alive).map(p => p.s.head));
     spawnT += dt; while (spawnT > 0.12){ spawnT -= 0.12; if (nucs.length < nucTarget) spawnNuc(); }
@@ -328,7 +355,7 @@ function create(opts){
       swim(p, dt);
       const h = p.s.head;
       /* some ground (clay) grabs letters: you can pick them up from further away */
-      const reach = EAT_R * (MAP.cellAt(h.x, h.y).reach || 1);
+      const reach = EAT_R * (MAP.cellAt(h.x, h.y).reach || 1) * (p.isBot ? 1 : HUMAN_REACH);
       if (p.s.tail.length < MAXLOOSE && p.s.length < RS.MAXLEN && !p.fling){
         for (let i = nucs.length - 1; i >= 0; i--){
           const q = nucs[i];
