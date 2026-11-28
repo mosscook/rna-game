@@ -156,7 +156,7 @@ const UNIT_TEXT = {
   Cleaver:'one long arm that folds into two opposing spikes', Mover:'two arms side by side', Membrane:'three or more arms side by side',
   Joiner:'a cheap 7-letter hairpin with a GGA loop. At the tail it is a mouth that grabs fragments; once one attaches right behind it, it fuses around that segment and adds +1',
   Detector:'pricey like the Repairer: one long run that folds back on itself twice, with ACA at each turn. Its middle pairs with both sides, so the strand arcs out, runs back along the spine and arcs out the other way, closing into a circle',
-  'Self-cutter':'a cheap 7-letter hairpin with a UAG loop. It leaves the strand as a ring, slides up to the structure ahead, squeezes it off, and both burst into loose letters', Repairer:'the priciest: two hairpins with GAC loops side by side, one long and one short. It leaves the strand and its two hairpins become odd-shaped helpers that travel up the strand once, mending damaged structures and clearing away junk and loose letters, then dissolve at the 5′ end'
+  'Self-cutter':'a cheap 7-letter hairpin with a UAG loop. It leaves the strand as a ring, slides up to the nearest damaged structure ahead (or else the structure right ahead), squeezes it off, and both burst into loose letters', Repairer:'two hairpins with GAC loops side by side, one long and one short. It leaves the strand and its two hairpins become odd-shaped helpers that travel up the strand once, mending damaged structures and clearing away junk and loose letters, then dissolve at the 5′ end'
 };
 /* Repairer: two GAC-loop hairpins side by side with different stem lengths (3 to 6 pairs) */
 function repairersOf(s){
@@ -923,12 +923,12 @@ function makeStrand(stage, opts){
       }
     } else if (sticky.size) sticky.clear();
   }
-  /* Self-cutter: forms, pops out as a ring, slides upstrand to the structure ahead, tightens, and both burst into loose bases */
+  /* Self-cutter: forms, pops out as a ring, slides upstrand to the nearest damaged structure ahead (else the one right ahead), tightens, and both burst into loose bases */
   let cut = null, scatter = [];
   function findCutter(){ return (fold.units || []).find(u => BODY(u.fn) === 'ring' && !rangeDamaged(u)) || null; }
-  function targetBefore(idx){
+  function targetBefore(idx, damagedOnly){
     let best = null;
-    for (const u of (fold.units || []).concat(fold.mods || [])) if (u.end < idx && (!best || u.end > best.end || (u.end === best.end && u.start < best.start))) best = u;
+    for (const u of (fold.units || []).concat(fold.mods || [])) if (u.end < idx && (!damagedOnly || rangeDamaged(u)) && (!best || u.end > best.end || (u.end === best.end && u.start < best.start))) best = u;
     return best;
   }
   function removeRange(a, b){
@@ -972,10 +972,12 @@ function makeStrand(stage, opts){
     if (cut.phase === 'form'){
       if (cut.t < 0.9) return;
       if (seq.slice(cut.start, cut.end + 1).join('') !== cut.letters){ cut = null; return; }
-      const tg = targetBefore(cut.start);
+      /* it goes for the nearest damaged structure ahead of it, or else the one right ahead */
+      const near = targetBefore(cut.start), tg = targetBefore(cut.start, true) || near;
       if (tg){
-        /* the cut takes the structure, the loose letters between it and the cutter, and the loose run just before it */
-        const prev = targetBefore(tg.start), lo = prev ? prev.end + 1 : 0, hi = cut.start - 1;
+        /* the cut takes the structure, the loose letters between it and the cutter, and the loose run just before it
+           (a damaged structure further up: only it and the loose run just before it, leaving what follows it) */
+        const prev = targetBefore(tg.start), lo = prev ? prev.end + 1 : 0, hi = tg === near ? cut.start - 1 : tg.end;
         cut.target = {start:lo, end:hi, mid:(tg.start + tg.end) / 2, letters:seq.slice(lo, hi + 1).join(''), core:seq.slice(tg.start, tg.end + 1).join(''), coreAt:tg.start - lo, fn:tg.fn || 'arm', loose:(hi - lo + 1) - (tg.end - tg.start + 1)};
       } else cut.target = null;
       cut.bases = cut.letters.split('');
