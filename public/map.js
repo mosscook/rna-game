@@ -129,8 +129,8 @@ let look = Object.assign({}, LOOK_BASE);
 function setWorldLook(o){
   const recol = o && o.colours && JSON.stringify(o.colours) !== JSON.stringify(look.colours);
   look = Object.assign({}, LOOK_BASE, o || {});
-  if (recol && surf){ surf.recolour(look.colours); mini.dirty = true; }
-  chunks.clear();
+  if (recol && surf) surf.recolour(look.colours);
+  mini.dirty = true; chunks.clear();
 }
 const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
 function generateWorld(s, o){
@@ -504,21 +504,24 @@ function drawBase(g, camX, camY, vw, vh, t){
 }
 const seen = (x, y, pad, camX, camY, vw, vh) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
 function drawOver(g, camX, camY, vw, vh, t){
-  /* currents: arrows drift along each stream */
-  g.lineCap = 'round';
-  for (const f of flows){
-    const P = f.pts;
-    for (let i = 0; i + 1 < P.length; i++){
-      const a = P[i], b = P[i + 1], L = Math.hypot(b.x - a.x, b.y - a.y);
-      if (!seen((a.x + b.x) / 2, (a.y + b.y) / 2, L / 2 + f.w, camX, camY, vw, vh)) continue;
-      const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L, sp = 90, off = (t * f.v * 0.6) % sp;
-      g.strokeStyle = f.kind === 'spill' ? 'rgba(140,220,220,.45)' : f.kind === 'melt' ? 'rgba(180,220,255,.4)' : 'rgba(120,160,210,.32)'; g.lineWidth = 2.2;
-      g.beginPath();
-      for (let d = off; d < L; d += sp) for (const o of [-f.w * 0.25, f.w * 0.25]){
-        const x = a.x + ux * d - uy * o, y = a.y + uy * d + ux * o;
-        g.moveTo(x - ux * 9 - uy * 6, y - uy * 9 + ux * 6); g.lineTo(x, y); g.lineTo(x - ux * 9 + uy * 6, y - uy * 9 - ux * 6);
-      }
-      g.stroke();
+  /* currents: motes that wink into being somewhere along a stream, drift with it for a few seconds and fade away.
+     Stateless: each mote's life is a function of the clock, so nothing is stored and every screen agrees closely enough */
+  for (let fi = 0; fi < flows.length; fi++){
+    const f = flows[fi], P = f.pts;
+    if (!f.cum){ f.cum = [0]; for (let i = 1; i < P.length; i++) f.cum.push(f.cum[i - 1] + Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y)); }
+    const total = f.cum[f.cum.length - 1]; if (total < 1) continue;
+    const n = Math.ceil(total / 55), rgb = f.kind === 'spill' ? '170,235,235' : f.kind === 'melt' ? '200,230,255' : '160,195,235';
+    for (let k = 0; k < n; k++){
+      const life = 2.6 + hash(fi * 977 + k, 3) * 2.4, tt = t / life + hash(fi * 977 + k, 5), cyc = Math.floor(tt), age = tt - cyc;
+      const travel = life * f.v * 0.6, d = hash(fi * 977 + k, cyc * 31 + 7) * total + age * travel;
+      if (d >= total) continue;
+      let i = 1; while (i < f.cum.length - 1 && f.cum[i] < d) i++;
+      const A = P[i - 1], B = P[i], seg = f.cum[i] - f.cum[i - 1] || 1, u = (d - f.cum[i - 1]) / seg;
+      const ux = (B.x - A.x) / seg, uy = (B.y - A.y) / seg, o = (hash(fi * 977 + k, cyc * 31 + 11) - 0.5) * f.w * 0.7;
+      const x = A.x + (B.x - A.x) * u - uy * o, y = A.y + (B.y - A.y) * u + ux * o;
+      if (!seen(x, y, 10, camX, camY, vw, vh)) continue;
+      const fade = Math.sin(Math.PI * age), r = 1.2 + hash(fi * 977 + k, 13) * 1.6;
+      g.fillStyle = `rgba(${rgb},${(0.55 * fade * fade).toFixed(3)})`; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
     }
   }
   /* craters: a warm rim that cools over time */
@@ -590,10 +593,31 @@ function buildMinimap(){
   const g = c.getContext && c.getContext('2d'); if (!g){ mini.dirty = false; return; }   /* no canvas (a server room): nothing to draw */
   const img = g.createImageData(GW, GH);
   if (world){
-    const WG = window.WorldGen, col = [0, 0, 0];
+    /* the world's own look (fill, outlines, walls, colours), with half the bands: wall, shallows (1-2), middle (3-4),
+       deep (5-6) and black. At one pixel per 50 px cell the full seven bands are a blur of rings; four read at a glance */
+    const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT, Lk = look, col = [0, 0, 0], [d0, d1, d2] = Lk.deep;
+    const CUT = [T[0], T[2], T[4], T[6]], REP = [0, 1.5, 3.5, 5.5];
+    const brAt = r => { const k = Math.floor(r), f = r - k, v = BR[k] + (BR[Math.min(6, k + 1)] - BR[k]) * f; return Math.max(0, 1 - (1 - v) * Lk.depth); };
+    const band = new Uint8Array(GW * GH), cols = new Float32Array(GW * GH * 3);
     for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++){
-      const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL, e = surf.elev(x, y), k = WG.bandOf(e), o = (cy * GW + cx) * 4; surf.colour(x, y, col);
-      const m = k === 7 ? 0 : WG.BRIGHT[k] * 1.25; img.data[o] = Math.min(255, col[0] * m + 6); img.data[o + 1] = Math.min(255, col[1] * m + 8); img.data[o + 2] = Math.min(255, col[2] * m + 10); img.data[o + 3] = 255;
+      const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL, e = surf.elev(x, y), n = cy * GW + cx;
+      let b = 0; while (b < 4 && e < CUT[b]) b++; band[n] = b;
+      surf.colour(x, y, col); cols[n * 3] = col[0]; cols[n * 3 + 1] = col[1]; cols[n * 3 + 2] = col[2];
+    }
+    /* a little more fill than the big map, so the overview never goes all black; lines where the coarse band changes */
+    const fill = Math.max(Lk.fill, 0.3), line = Math.max(Lk.line, Lk.fill < 0.5 ? 0.6 : 0);
+    for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++){
+      const n = cy * GW + cx, b = band[n], o = n * 4, cr = cols[n * 3], cg = cols[n * 3 + 1], cb = cols[n * 3 + 2];
+      let r = d0, gg = d1, bb = d2;
+      if (b < 4){
+        const m = brAt(REP[b]) * 1.15;
+        r = d0 + (cr * m - d0) * fill; gg = d1 + (cg * m - d1) * fill; bb = d2 + (cb * m - d2) * fill;
+        if (b === 0 && Lk.wall > fill * m){ r = d0 + (cr * Lk.wall - d0); gg = d1 + (cg * Lk.wall - d1); bb = d2 + (cb * Lk.wall - d2); }
+      }
+      /* an edge: a neighbour (right or below) is a shallower coarse band; the line takes the shallower band's brightness */
+      const nb = Math.min(cx < GW - 1 ? band[n + 1] : b, cy < GH - 1 ? band[n + GW] : b, cx > 0 ? band[n - 1] : b, cy > 0 ? band[n - GW] : b);
+      if (line > 0 && nb < b){ const mm = 1 - Lk.lineFade * (1 - brAt(REP[nb])) * 0.8; r += (cr * mm - r) * line; gg += (cg * mm - gg) * line; bb += (cb * mm - bb) * line; }
+      img.data[o] = Math.min(255, r); img.data[o + 1] = Math.min(255, gg); img.data[o + 2] = Math.min(255, bb); img.data[o + 3] = 255;
     }
     g.putImageData(img, 0, 0); mini.c = c; mini.dirty = false; return;
   }
