@@ -26,7 +26,6 @@ function vnoise(g, x, y){
   return (a(i, j) * (1 - sx) + a(i + 1, j) * sx) * (1 - sy) + (a(i, j + 1) * (1 - sx) + a(i + 1, j + 1) * sx) * sy;
 }
 const fbm = (g, x, y) => vnoise(g, x, y) * 0.55 + vnoise(g, x * 2.03 + 17.1, y * 2.03 + 3.3) * 0.28 + vnoise(g, x * 4.1 + 5.7, y * 4.1 + 29.2) * 0.17;
-const segDist = (x, y, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy; let t = L ? ((x - a.x) * dx + (y - a.y) * dy) / L : 0; t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - a.x - t * dx, ey = y - a.y - t * dy; return Math.sqrt(ex * ex + ey * ey); };
 function blur(a, GX, GY, r){
   const t = new Float32Array(a.length);
   for (let j = 0; j < GY; j++){ let s = 0, c = 0; for (let i = -r; i < GX + r; i++){ if (i + r < GX){ s += a[j * GX + i + r]; c++; } if (i - r - 1 >= 0){ s -= a[j * GX + i - r - 1]; c--; } if (i >= 0 && i < GX) t[j * GX + i] = s / c; } }
@@ -34,7 +33,26 @@ function blur(a, GX, GY, r){
 }
 
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
-const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, texture:1, align:1, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
+const WALL = 0.86, DEFAULTS = {layout:'auto', asymmetry:0.85, offset:1, elongation:1, variance:1, sea:1, lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, pattern:1, contrast:0.6, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
+
+/* ---- the big picture: layout styles ----
+   A style is a recipe for the map's large shapes: how far each trait is pushed, 0 (not at all) to 1 (fully).
+     off     the lagoon sits away from the middle of the map
+     long    the impacts fall in a row, so the lagoon is long or bent instead of round
+     vary    outer places differ in size and shape, and the highland rim is wide on one side and thin on another
+     sea     open water between the outer places (islands) instead of land edge to edge
+     arc     how much of the way round the lagoon the ring channel runs
+     strait  a great channel crossing the whole map past the lagoon
+   'auto' picks a style from the seed. The designer's knobs (asymmetry, offset, elongation, variance, sea) scale these:
+   asymmetry 0 gives the old even layout whatever the style; the others at 1 mean "as the style says". */
+const LAYOUTS = {
+  ring:       {off:0.45, long:0.3,  vary:0.6, sea:0,    arc:0.75, strait:0},
+  crescent:   {off:0.7,  long:1,    vary:0.7, sea:0.2,  arc:0.6,  strait:0},
+  continent:  {off:1,    long:0.45, vary:1,   sea:0,    arc:0.5,  strait:0},
+  archipelago:{off:0.6,  long:0.6,  vary:0.8, sea:1,    arc:0.45, strait:0},
+  strait:     {off:0.8,  long:0.8,  vary:0.7, sea:0.3,  arc:0.45, strait:1}};
+/* 'auto' draws from this list: the ring, the layout closest to the old map, comes up half as often as the others */
+const AUTO = ['ring', 'crescent', 'crescent', 'continent', 'continent', 'archipelago', 'archipelago', 'strait', 'strait'];
 
 /* generate = build, check, and regrow from the next seed if a check fails that can't be fixed in place (at most 4
    tries; then the best try). Deterministic: the same settings and seed always end on the same map */
@@ -43,9 +61,11 @@ function generate(o){
   for (let t = 0; t < 4; t++){
     const w = build(Object.assign({}, o, {seed:(o.seed || 1) + t * 1000}));
     w.checks.tries = t + 1; w.checks.seed = o.seed || 1;
-    if (w.checks.ok) return w;
+    if (w.checks.ok){ best = w; break; }
     if (!best || w.checks.score > best.checks.score) best = w;
   }
+  /* the patterns go on last, over the checked map: they never add walls, so the checks still hold */
+  pattern(best, Object.assign({}, DEFAULTS, o));
   return best;
 }
 function build(o){
@@ -56,40 +76,96 @@ function build(o){
   const w = {lagoon:new Float32Array(N), flats:new Float32Array(N), water:new Float32Array(N)};
   p.outer.forEach(id => w[id] = new Float32Array(N));
 
-  /* ---- world scale, founded by meteors: 1-3 big impacts near the centre. Their merged, worn basins are the lagoon;
-     their raised rims, the craggy highlands around it; everything further out is measured from them. dn(x, y) is the
-     distance from the impact field in basin radii (1 = the old rim): a smooth union of tilted ellipses, roughened by
-     erosion noise, so the lagoon is central but never a plain oval ---- */
-  const S = p.scale || 1, impacts = [];
-  const R1 = p.lagoon * S * (0.85 + 0.15 * r()), mx = W / 2 + (r() - 0.5) * 0.06 * W, my = H / 2 + (r() - 0.5) * 0.06 * H;
+  /* ---- world scale, founded by meteors: 1-3 big impacts. Their merged, worn basins are the lagoon; their raised
+     rims, the craggy highlands around it; everything further out is measured from them. dn(x, y) is the distance from
+     the impact field in basin radii (1 = the old rim): a smooth union of tilted ellipses, roughened by erosion noise.
+     The layout style and the asymmetry knobs decide where the impacts fall: together in the middle (a round, central
+     lagoon), or strung out in a row, bent, and pushed toward one side of the map ---- */
+  const S = p.scale || 1, impacts = [], mix = (a, b, t) => a + (b - a) * t;
+  const pick = AUTO[Math.floor(r() * AUTO.length)], layout = LAYOUTS[p.layout] ? p.layout : pick, LAY = LAYOUTS[layout];
+  const A = Math.max(0, Math.min(1, p.asymmetry)), trait = (k, knob) => Math.max(0, Math.min(1, LAY[k] * knob));
+  const OFF = trait('off', p.offset) * A, LONG = trait('long', p.elongation) * A, VARY = trait('vary', p.variance) * A, SEA = trait('sea', p.sea);
+  const R1 = p.lagoon * S * (0.85 + 0.15 * r()), oa = r() * TAU, om = 0.55 + 0.45 * r();
+  const mx = W / 2 + (r() - 0.5) * 0.06 * W + OFF * om * dcos(oa) * Math.max(0, W / 2 - 1.4 * R1), my = H / 2 + (r() - 0.5) * 0.06 * H + OFF * om * dsin(oa) * Math.max(0, H / 2 - 1.15 * R1);
+  /* the row the impacts fall along: within about 50 degrees of level, since the map is wider than it is tall */
+  const axis = (r() - 0.5) * 1.75, bend = (r() - 0.5) * 2;
   for (let k = 0; k < Math.max(1, p.impacts); k++){
-    const R = k ? R1 * (0.42 + 0.3 * r()) : R1, a = r() * TAU, d = k ? p.ispread * R1 * (0.6 + 0.5 * r()) : p.ispread * R1 * 0.25 * r(), tilt = r() * PI;
-    impacts.push({x:mx + d * dcos(a), y:my + d * dsin(a), R, c:dcos(tilt), s:dsin(tilt), asp:0.78 + 0.2 * r()});
+    const q1 = r(), q2 = r(), q3 = r(), q4 = r(), q5 = r();
+    const R = k ? R1 * mix(0.42 + 0.3 * q1, 0.6 + 0.16 * q1, LONG) : R1 * mix(1, 0.76, LONG);
+    const a = axis * LONG + (k % 2 ? 0 : PI) + (k % 2 ? 1 : -1) * bend * 0.75 * LONG + (q2 - 0.5) * TAU * (1 - LONG);
+    const d = k ? R1 * mix(p.ispread * (0.6 + 0.5 * q3), 0.8 + 0.22 * q3, LONG) : p.ispread * R1 * 0.25 * q3 * (1 - LONG);
+    const tilt = mix(q4 * PI, axis, LONG);
+    impacts.push({x:mx + d * dcos(a), y:my + d * dsin(a), R, c:dcos(tilt), s:dsin(tilt), asp:mix(0.78 + 0.2 * q5, 0.7 + 0.3 * q5, LONG)});
   }
   const dI = (m, x, y) => { const ex = x - m.x, ey = y - m.y, u = (ex * m.c + ey * m.s) / m.R, v = (ey * m.c - ex * m.s) / (m.R * m.asp); return Math.sqrt(u * u + v * v); };
   const KS = 0.2 + 0.4 * p.erosion, EA = 0.08 + 0.16 * p.erosion, EB = 0.03 + 0.09 * p.erosion;
   const smin = (a, b) => { const h = Math.max(KS - Math.abs(a - b), 0) / KS; return Math.min(a, b) - h * h * KS * 0.25; };
-  let cx = 0, cy = 0, sw0 = 0; for (const m of impacts){ const q = m.R * m.R; cx += m.x * q; cy += m.y * q; sw0 += q; } cx /= sw0; cy /= sw0;
-  let RX = 0, RY = 0; for (const m of impacts){ RX = Math.max(RX, Math.abs(m.x - cx) + m.R); RY = Math.max(RY, Math.abs(m.y - cy) + m.R * 0.9); }
+  let cx = 0, cy = 0, RX = 0, RY = 0;
+  const measure = () => { let sw0 = 0; cx = 0; cy = 0; RX = 0; RY = 0; for (const m of impacts){ const q = m.R * m.R; cx += m.x * q; cy += m.y * q; sw0 += q; } cx /= sw0; cy /= sw0;
+    for (const m of impacts){ RX = Math.max(RX, Math.abs(m.x - cx) + m.R); RY = Math.max(RY, Math.abs(m.y - cy) + m.R * 0.9); } };
+  measure();
+  /* keep the whole lagoon on the map: slide the impacts back in if their row runs over an edge */
+  { const sx = Math.max(RX * 1.08 - cx, 0) - Math.max(cx + RX * 1.08 - W, 0), sy = Math.max(RY * 1.08 - cy, 0) - Math.max(cy + RY * 1.08 - H, 0);
+    if (sx || sy){ for (const m of impacts){ m.x += sx; m.y += sy; } measure(); } }
   const dn = (x, y) => { let d = dI(impacts[0], x, y); for (let k = 1; k < impacts.length; k++) d = smin(d, dI(impacts[k], x, y));
     return d + EA * fbm(g[0], x / (1800 * S), y / (1800 * S)) + EB * fbm(g[0], x / (650 * S) + 31, y / (650 * S)); };
-  /* the point at angle a from the centre where dn first reaches d */
-  const at = (a, d) => { const ux = dcos(a), uy = dsin(a); let t = 0; while (t < 9000 && dn(cx + ux * t, cy + uy * t) < d) t += 15; return {x:cx + ux * t, y:cy + uy * t}; };
+  /* the highland rim's outer edge, and the ring channel beyond it, are measured in dz: dn stretched and squeezed by
+     a broad noise, so the rim is wide on one side of the lagoon and thin on another */
+  const RIMV = 0.75 * VARY, dzOf = (x, y, d) => d * (1 + RIMV * fbm(g[1], x / (2300 * S) + 11.3, y / (2300 * S) + 5.1));
+  /* the point at angle a from the centre where dn (or dz) first reaches d */
+  const at = (a, d, z) => { const ux = dcos(a), uy = dsin(a); let t = 0; for (; t < 9000; t += 15){ const x = cx + ux * t, y = cy + uy * t, v = dn(x, y); if ((z ? dzOf(x, y, v) : v) >= d) break; } return {x:cx + ux * t, y:cy + uy * t}; };
   const a0 = r() * TAU, K = p.outer.length;
-  const sites = p.outer.map((id, k) => { const a = a0 + TAU * k / K + (r() - 0.5) * 0.5; return {id, a, ux:dcos(a), uy:dsin(a)}; });
+
+  /* ---- where the outer places go: each gets a seed point out beyond the rim, and owns the land nearest to it. The
+     seeds are spread by always taking the free spot furthest from those already taken (nudged by noise), so places
+     never stack up; each then gets its own size and a stretched, tilted reach, so one place can be a sliver and its
+     neighbour a continent that wraps round it. With more variance, some places get a second, smaller seed elsewhere:
+     an outlying patch of ice inside the ridge, say ---- */
+  const spots = [];
+  for (let y = 0.06 * H; y < 0.95 * H; y += 150) for (let x = 0.05 * W; x < 0.96 * W; x += 150){ const d = dn(x, y); if (dzOf(x, y, d) > 2.15) spots.push({x, y}); }
+  const seeds = [], nExtra = spots.length >= K * 6 ? Math.floor(VARY * 2.999 * r()) : 0;
+  if (spots.length >= K * 3){
+    const taken = [spots[Math.floor(r() * spots.length)]];
+    while (taken.length < K + nExtra){ let best = null, bv = -1;
+      for (const q of spots){ let md = Infinity; for (const t of taken){ const dx = q.x - t.x, dy = q.y - t.y, v = dx * dx + dy * dy; if (v < md) md = v; }
+        const v = Math.sqrt(md) * (1 + 0.5 * VARY * fbm(g[3], q.x / 900, q.y / 900)); if (v > bv){ bv = v; best = q; } }
+      taken.push(best); }
+    /* which place gets which spot: a shuffle from the seed */
+    const order = p.outer.map((_, k) => k); for (let k = K - 1; k > 0; k--){ const j = Math.floor(r() * (k + 1)), t = order[k]; order[k] = order[j]; order[j] = t; }
+    taken.forEach((q, k) => { const tilt = r() * PI, main = k < K;
+      seeds.push({x:q.x, y:q.y, place:main ? order[k] : Math.floor(r() * K), main, size:main ? 1 + VARY * (r() * 1.5 - 0.55) : 0.4 + 0.25 * r(), c:dcos(tilt), s:dsin(tilt), asp:1 - 0.5 * VARY * r()}); });
+  } else {
+    /* a map too small for that (the lobby): evenly round the lagoon, as directions */
+    p.outer.forEach((id, k) => { const a = a0 + TAU * k / K + (r() - 0.5) * 0.5, q = at(a, 2.6, true); seeds.push({x:q.x, y:q.y, place:k, main:true, size:1, c:1, s:0, asp:1}); });
+  }
+  const SL = 1500 * S;
+  const reach = (q, x, y) => { const ex = x - q.x, ey = y - q.y, u = ex * q.c + ey * q.s, v = (ey * q.c - ex * q.s) / q.asp; return Math.sqrt(u * u + v * v) / (q.size * SL); };
 
   /* ---- deep channels, laid down first so the land forms around them ----
-     a ring between the middle ring and the outer areas, three quarters of the way round; spokes from the lagoon's edge
-     to the ring through the gaps between places; and a connector from the ring into every outer place */
-  const lines = [], ringStart = a0 + PI / K + (r() - 0.5) * 0.4, ring = [];
-  for (let k = 0; k <= 54; k++){ const a = ringStart + 1.5 * PI * k / 54; ring.push(at(a, 1.82 * (1 + 0.05 * fbm(g[1], k * 0.3, 1.7)))); }
-  lines.push(ring);
-  const meander = (A, B, n, amp, gi) => { const pts = [], dx = B.x - A.x, dy = B.y - A.y, L = Math.sqrt(dx * dx + dy * dy), nx = -dy / L, ny = dx / L;
-    for (let k = 0; k <= n; k++){ const t = k / n, m = amp * fbm(g[gi], t * 2.3 + gi * 3.1, 0.5) * (1 - (2 * t - 1) * (2 * t - 1)); pts.push({x:A.x + dx * t + nx * m, y:A.y + dy * t + ny * m}); } return pts; };
-  const gaps = sites.map((s, k) => s.a + PI / K).slice(0, 3);
-  gaps.forEach((a, k) => lines.push(meander(at(a, 0.98), at(a + (r() - 0.5) * 0.3, 1.82), 14, 260, 2 + (k % 3))));
-  sites.forEach((s, k) => lines.push(meander(at(s.a + (r() - 0.5) * 0.25, 1.82), at(s.a, 2.45), 10, 200, 3 + (k % 2))));
-  const segs = []; for (const L of lines) for (let k = 0; k + 1 < L.length; k++) segs.push([L[k], L[k + 1]]);
+     a ring beyond the highland rim, part or all of the way round; spokes from the lagoon's edge out to it; a connector
+     from the nearest channel toward every outer place; in some layouts a strait across the whole map, or a fjord
+     running out to the map's edge. Each line has its own width (1 = the channel setting) */
+  const lines = [], ring = [], ARC = Math.min(1, mix(0.75, LAY.arc + 0.5 * r(), A)), ringStart = a0 + (r() - 0.5) * 0.4;
+  for (let k = 0; k <= 54; k++){ const a = ringStart + TAU * ARC * k / 54; ring.push(at(a, 1.82 * (1 + (0.05 + 0.12 * A) * fbm(g[1], k * 0.3, 1.7)), true)); }
+  ring.wf = 1; lines.push(ring);
+  const meander = (A, B, n, amp, gi, wf = 1) => { const pts = [], dx = B.x - A.x, dy = B.y - A.y, L = Math.sqrt(dx * dx + dy * dy) || 1, nx = -dy / L, ny = dx / L;
+    for (let k = 0; k <= n; k++){ const t = k / n, m = amp * fbm(g[gi], t * 2.3 + gi * 3.1, 0.5) * (1 - (2 * t - 1) * (2 * t - 1)); pts.push({x:A.x + dx * t + nx * m, y:A.y + dy * t + ny * m}); } pts.wf = wf; return pts; };
+  const nSpokes = A > 0.3 ? 2 + Math.floor(r() * 2.999) : 3;
+  for (let k = 0; k < nSpokes; k++){ const a = ringStart + TAU * (k + 0.5 + (r() - 0.5) * 0.7 * A) / nSpokes; lines.push(meander(at(a, 0.98), at(a + (r() - 0.5) * 0.3, 1.82, true), 14, 260, 2 + (k % 3))); }
+  if (LAY.strait * A > 0.4){
+    /* the strait: touches the ring at one point and runs on both ways, off the map */
+    const ta = r() * TAU, T0 = at(ta, 1.9, true), tx = -dsin(ta), ty = dcos(ta), lean = (r() - 0.5) * 0.9, ux = tx + lean * dcos(ta), uy = ty + lean * dsin(ta);
+    lines.push(meander({x:T0.x - ux * W * 0.8, y:T0.y - uy * W * 0.8}, {x:T0.x + ux * W * 0.8, y:T0.y + uy * W * 0.8}, 26, 520, 4, 1.5));
+  } else if (r() < 0.6 * A){
+    const fa = r() * TAU, F0 = at(fa, 1.82, true); lines.push(meander(F0, {x:F0.x + dcos(fa) * W * 0.6, y:F0.y + dsin(fa) * W * 0.6}, 14, 380, 4, 1.2));
+  }
+  const trunk = lines.reduce((a, L) => a.concat(L), []);
+  seeds.forEach((q, k) => { if (!q.main) return; let near = trunk[0], nd = Infinity; for (const t of trunk){ const dx = t.x - q.x, dy = t.y - q.y, v = dx * dx + dy * dy; if (v < nd){ nd = v; near = t; } }
+    lines.push(meander(near, {x:near.x + (q.x - near.x) * 0.8, y:near.y + (q.y - near.y) * 0.8}, 10, 200, 3 + (k % 2))); });
+  /* every piece of every line as five plain numbers (ax, ay, bx - ax, by - ay, width), since each cell of the map
+     measures its distance to all of them */
+  let nSeg = 0; for (const L of lines) nSeg += L.length - 1;
+  const segs = new Float64Array(nSeg * 5); { let o = 0; for (const L of lines) for (let k = 0; k + 1 < L.length; k++){ segs[o++] = L[k].x; segs[o++] = L[k].y; segs[o++] = L[k + 1].x - L[k].x; segs[o++] = L[k + 1].y - L[k].y; segs[o++] = L.wf || 1; } }
   const half = p.channel / 2;
 
   /* ---- every point belongs to exactly one place: discrete zones ----
@@ -97,24 +173,36 @@ function build(o){
      weights are close, so a blobby noise per place decides: the two zones interleave in blob-shaped islands ("dither"
      in discrete blobs) instead of blending. Channels are their own place. */
   const PIDS = ['lagoon', 'flats'].concat(p.outer).concat(['water']), pid = new Uint8Array(N), F = new Float32Array(N), EU = new Float32Array(N), DN = new Float32Array(N), L0 = new Float32Array(N), L1 = new Float32Array(N), CH = new Float32Array(N), BK = new Float32Array(N);
-  const blobG = PIDS.map(() => noiseGrid(r));
-  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
-    const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, d = dn(x, y); DN[n] = d;
-    const wL = 1 - smooth(0.74, 1.26, d), wO = smooth(1.45, 2.05, d), wM = Math.max(0, 1 - wL - wO);
-    let ux = (x - cx) / RX, uy = (y - cy) / RY; const ul = Math.sqrt(ux * ux + uy * uy) || 1; ux /= ul; uy /= ul;
-    let bd = -2; const dots = sites.map(s0 => { const v = ux * s0.ux + uy * s0.uy; if (v > bd) bd = v; return v; });
-    let st = 0; const sw = dots.map(v => { const q = Math.max(0, 1 - (bd - v) / 0.45); st += q; return q; });
-    const score = [wL, wM].concat(sw.map(q => wO * q / st));
+  const blobG = PIDS.map(() => noiseGrid(r)), rch = new Float32Array(seeds.length), sw = new Float32Array(K), SEAF = new Float32Array(N);
+  /* one cell's place and channel. A function of its own, called for every cell: small enough for the browser to
+     compile to fast code, which it does not reliably do for a loop inside a function as long as this one */
+  const score = new Float64Array(K + 2), nSc = K + 2, DITHER = p.dither, seaAt = mix(1.6, 0.92, SEA), nSeeds = seeds.length, WATER0 = PIDS.length - 1;
+  function zoneCell(n, x, y){
+    const d = dn(x, y); DN[n] = d;
+    const wL = 1 - smooth(0.74, 1.26, d), wO = smooth(1.45, 2.05, dzOf(x, y, d)), wM = Math.max(0, 1 - wL - wO);
+    /* each outer place's share here: 1 for the place whose seed reaches this spot most easily, fading to 0 for
+       places 0.3 of a reach further off */
+    let vmin = Infinity; for (let k = 0; k < nSeeds; k++){ const v = reach(seeds[k], x, y); rch[k] = v; if (v < vmin) vmin = v; }
+    for (let k = 0; k < K; k++) sw[k] = 0;
+    for (let k = 0; k < nSeeds; k++){ const q = Math.max(0, 1 - (rch[k] - vmin) / 0.3), pl = seeds[k].place; if (q > sw[pl]) sw[pl] = q; }
+    let st = 0; for (let k = 0; k < K; k++) st += sw[k];
+    score[0] = wL; score[1] = wM; for (let k = 0; k < K; k++) score[k + 2] = wO * sw[k] / st;
+    /* open sea: beyond the rim, far from every place's seed (how far, the sea setting decides), with a ragged shore */
+    const sea = SEA > 0 ? wO * smooth(0, 0.14, vmin + 0.22 * fbm(g[2], x / 620 + 3.3, y / 620) - seaAt) : 0;
     let best = 0, bs = -9;
-    for (let k = 0; k < score.length; k++){
+    for (let k = 0; k < nSc; k++){
       const blob = fbm(blobG[k], x / 520, y / 520) * 0.5 + fbm(blobG[k], x / 230 + 40, y / 230) * 0.5;
-      const v = score[k] + p.dither * blob; if (v > bs){ bs = v; best = k; }
+      const v = score[k] + DITHER * blob; if (v > bs){ bs = v; best = k; }
     }
-    let cd = Infinity; for (const [A, B] of segs){ const v = segDist(x, y, A, B); if (v < cd) cd = v; }
-    CH[n] = 1 - smooth(half * 0.55, half, cd); BK[n] = smooth(half * 0.9, half * 1.15, cd) * (1 - smooth(half * 1.15, half * 1.6, cd));
-    pid[n] = CH[n] > 0.5 ? PIDS.length - 1 : best;
+    let cd = Infinity;
+    for (let o = 0; o < segs.length; o += 5){ const ex = x - segs[o], ey = y - segs[o + 1], sx = segs[o + 2], sy = segs[o + 3], L = sx * sx + sy * sy; let t = L ? (ex * sx + ey * sy) / L : 0; t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = ex - t * sx, qy = ey - t * sy, v = Math.sqrt(qx * qx + qy * qy) / segs[o + 4]; if (v < cd) cd = v; }
+    CH[n] = Math.max(1 - smooth(half * 0.55, half, cd), sea); BK[n] = smooth(half * 0.9, half * 1.15, cd) * (1 - smooth(half * 1.15, half * 1.6, cd)) * (1 - sea);
+    SEAF[n] = sea;
+    pid[n] = CH[n] > 0.5 ? WATER0 : best;
     L0[n] = fbm(g[2], x / 1400, y / 1400); L1[n] = fbm(g[3], x / 600, y / 600);
   }
+  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++) zoneCell(j * GX + i, (i + 0.5) * RES, (j + 0.5) * RES);
   /* distance to the nearest border between two land places (two-pass chamfer, in px); channels don't count */
   const WATER = PIDS.length - 1, BIG = 1e9, dist = new Float32Array(N).fill(BIG);
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
@@ -132,7 +220,7 @@ function build(o){
   const OUTER_BASE = {island:0.62, chimneys:0.6, ice:0.62, ridge:0.55};
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
     const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, id = PIDS[pid[n]], n1 = L0[n], n2 = L1[n];
-    let e = id === 'lagoon' ? 0.39 + 0.34 * n1 + 0.1 * n2 : id === 'flats' ? 0.47 + 0.32 * n1 + 0.15 * n2 : id === 'water' ? 0.03 : (OUTER_BASE[id] || 0.6) + 0.28 * n1 + 0.15 * n2;
+    let e = id === 'lagoon' ? 0.39 + 0.34 * n1 + 0.1 * n2 : id === 'flats' ? 0.47 + 0.32 * n1 + 0.15 * n2 : id === 'water' ? 0.03 + SEAF[n] * (0.14 * smooth(-0.1, 0.25, n2) + 0.12 * smooth(0.0, 0.45, n1)) : (OUTER_BASE[id] || 0.6) + 0.28 * n1 + 0.15 * n2;
     const d = DN[n];
     if (id === 'lagoon'){
       /* the impacts' eroded central peaks survive as islands; the floor shallows toward the old rim */
@@ -250,8 +338,9 @@ function build(o){
       vents.push({x:c0.x + d * dcos(a), y:c0.y + d * dsin(a), R, kind:'shield', k:200 + v});
     }
   }
-  if (chimPid >= 0) for (let v = 0, t = 0; v < p.chimneys && t < 400; t++){
-    const R = 120 + r2() * 100, s0 = siteIn(q => q === chimPid, R, (x, y) => far(vents, x, y, R + 60) && far(craters, x, y, R * 0.5), 3);
+  /* chimneys shrink as the tries run out, so a chimney field broken into small patches still gets its share */
+  if (chimPid >= 0) for (let v = 0, t = 0; v < p.chimneys && t < 600; t++){
+    const R = (120 + r2() * 100) * (t < 200 ? 1 : t < 400 ? 0.8 : 0.65), s0 = siteIn(q => q === chimPid, t < 400 ? R : R * 0.6, (x, y) => far(vents, x, y, R + 60) && far(craters, x, y, t < 400 ? R * 0.5 : 0), 3);
     if (s0){ vents.push({x:s0.x, y:s0.y, R, kind:'chimney', k:300 + v}); v++; }
   }
   for (const v of vents){
@@ -278,8 +367,10 @@ function build(o){
   const lavas = [], LD = new Float32Array(N).fill(BIG);
   for (const v of vents) if (v.kind === 'shield') for (let c = 0; c < Math.ceil(p.lava / 2); c++){
     if (lavas.length >= p.lava) break;
+    /* a channel that reaches deep water at once is no channel: try another way down, up to five times */
+    let path = []; for (let go = 0; go < 5 && path.length < 8; go++){
     const a = r2() * TAU; let i = Math.floor((v.x + v.R * 0.15 * dcos(a)) / RES), j = Math.floor((v.y + v.R * 0.15 * dsin(a)) / RES);
-    const path = [], seen = new Set(); let dx = dcos(a), dy = dsin(a);
+    path = []; const seen = new Set(); let dx = dcos(a), dy = dsin(a);
     for (let s = 0; s < 320; s++){
       if (i < 1 || j < 1 || i >= GX - 1 || j >= GY - 1) break;
       const n = j * GX + i; path.push({x:(i + 0.5) * RES, y:(j + 0.5) * RES}); seen.add(n);
@@ -293,6 +384,7 @@ function build(o){
       }
       if (best < 0) break;
       const ni = best % GX, nj = (best - ni) / GX; dx = dx * 0.6 + (ni - i) * 0.4; dy = dy * 0.6 + (nj - j) * 0.4; i = ni; j = nj;
+    }
     }
     if (path.length < 8) continue;
     /* round the grid steps off (Chaikin corner cutting, twice) so the channel curves instead of zig-zagging */
@@ -407,9 +499,30 @@ function build(o){
     }
   }
   const mounds = [], letters = [], spawns = [], BASES = ['A', 'U', 'G', 'C'];
-  for (let k = 0; k < p.mounds; k++){
-    const a = a0 + TAU * k / p.mounds + (r() - 0.5) * 0.3, pos = at(a, 0.56 * (1 + (r() - 0.5) * 0.12)), rin = p.rin * (0.85 + r() * 0.3);
-    mounds.push({x:pos.x, y:pos.y, a, rin, t:p.rim, doors:[], k, door:p.door, warp:rin * 0.28, slopeIn:80, slopeOut:110, top:0.96, floor:0.56, inside:() => 0.08});
+  /* where the mounds go: anywhere in the lagoon's middle belt (a narrow ring when asymmetry is 0, most of the lagoon
+     when it is 1), each new one at the free spot furthest from the others, nudged by noise. So they follow the
+     lagoon's shape, long or bent, sit unevenly, and still keep their distance: fair starts */
+  const pang = (dx, dy) => { const q = dx / ((dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) || 1); return dy < 0 ? 3 + q : 1 - q; };   /* a pseudo-angle: grows with the true angle, plain arithmetic only */
+  {
+    const belt = [], pad = p.rin + p.rim, lo = mix(0.5, 0.2, A), hi = mix(0.62, 0.66, A);
+    /* a spot counts only if it and the ground around it are lagoon: border blobs of other places reach into the
+       lagoon, and a mound can only be raised on lagoon floor */
+    const lagoonAt = (x, y) => zone[cellOf(x, y)] === 0, rr = p.rin * 0.7;
+    const clear = (x, y) => { if (!lagoonAt(x, y)) return false; let hit = 0; for (let k = 0; k < 8; k++) if (lagoonAt(x + rr * dcos(k * PI / 4), y + rr * dsin(k * PI / 4))) hit++; return hit >= 7; };
+    for (let y = pad; y <= H - pad; y += 60) for (let x = pad; x <= W - pad; x += 60){ const d = dn(x, y); if (d > lo && d < hi && lagoonAt(x, y)) belt.push({x, y, clear:clear(x, y)}); }
+    const taken = [];
+    if (belt.length >= p.mounds * 4){
+      { const first = belt.filter(q => q.clear), from = first.length ? first : belt; taken.push(from[Math.floor(r() * from.length)]); }
+      /* spots with clear lagoon all round come first; if none of those is far enough from the mounds already placed
+         (a mound's rim must not land on its neighbour's middle), any lagoon spot will do */
+      while (taken.length < p.mounds){ let best = null, bv = -1, any = null, av = -1;
+        for (const q of belt){ let md = Infinity; for (const t of taken){ const dx = q.x - t.x, dy = q.y - t.y, v = dx * dx + dy * dy; if (v < md) md = v; }
+          const v = Math.sqrt(md) * (1 + 0.3 * A * fbm(g[3], q.x / 400 + 9, q.y / 400)); if (v > av){ av = v; any = q; } if (q.clear && v > bv){ bv = v; best = q; } }
+        taken.push(best && bv > p.rin * 1.9 ? best : any); }
+    } else for (let k = 0; k < p.mounds; k++) taken.push(at(a0 + TAU * k / p.mounds + (r() - 0.5) * 0.3, 0.56 * (1 + (r() - 0.5) * 0.12)));
+    /* in order round the centre, so each mound's neighbour (for doorways and letter pockets) is the next one along */
+    taken.map(q => ({q, a:pang(q.x - cx, q.y - cy)})).sort((u, v) => u.a - v.a).forEach(({q, a}, k) => { const rin = p.rin * (0.85 + r() * 0.3);
+      mounds.push({x:q.x, y:q.y, a, rin, t:p.rim, doors:[], k, door:p.door, warp:rin * 0.28, slopeIn:80, slopeOut:110, top:0.96, floor:0.56, inside:() => 0.08}); });
   }
   const unit = (x, y) => { const l = Math.sqrt(x * x + y * y) || 1; return {x:x / l, y:y / l}; };
   const turn = (u, th) => { const c = dcos(th), s = dsin(th); return {x:u.x * c - u.y * s, y:u.x * s + u.y * c}; };
@@ -500,102 +613,229 @@ function build(o){
     for (let k = letters.length - 1; k >= 0; k--){ const l = letters[k], n = Math.min(GY - 1, Math.max(0, Math.floor(l.y / RES))) * GX + Math.min(GX - 1, Math.max(0, Math.floor(l.x / RES))); if (E[n] >= WALL) letters.splice(k, 1); }
   }
   {
-    /* fair starts: gaps between neighbouring mounds, by angle around the lagoon */
-    /* order by a pseudo-angle (monotonic in the true angle, plain arithmetic only) */
-    const pang = (dx, dy) => { const q = dx / ((dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) || 1); return dy < 0 ? 3 + q : 1 - q; };
-    const ang = spawns.map(sp => ({sp, a:pang(sp.x - cx, sp.y - cy)})).sort((a, b) => a.a - b.a);
-    const gaps = ang.map((q, k) => { const nx = ang[(k + 1) % ang.length].sp; return Math.sqrt((nx.x - q.sp.x) ** 2 + (nx.y - q.sp.y) ** 2); });
+    /* fair starts: how far each mound is from its nearest neighbour. Nobody crowded, nobody out on their own */
+    const gaps = spawns.map(a => { let md = Infinity; for (const b of spawns) if (b !== a) md = Math.min(md, Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2)); return md; });
     const mean = gaps.reduce((a, b) => a + b, 0) / (gaps.length || 1);
     checks.spawnSpread = gaps.length > 1 ? (Math.max(...gaps) - Math.min(...gaps)) / mean : 0;
     /* places linked: an open cell of the place next to a deep channel */
-    checks.unlinked = [];
+    checks.unlinked = []; checks.small = []; checks.layout = layout;
+    /* the landforms the game builds on must be there (when asked for): a shield volcano with a lava channel for the
+       island's lava, and chimneys for the smokers */
+    checks.missing = [];
+    if (p.lava > 0 && pidOf('island') >= 0 && !lavas.length) checks.missing.push('lava');
+    if (p.chimneys >= 2 && pidOf('chimneys') >= 0 && vents.filter(v => v.kind === 'chimney').length < 2) checks.missing.push('chimneys');
     for (const id of p.outer){ const k = PIDS.indexOf(id); let cells = 0, linked = false;
       for (let n = 0; n < N && !linked; n++){ if (pid[n] !== k) continue; cells++;
         if (E[n] < WALL){ const i = n % GX, j = (n - i) / GX;
           for (let b = -3; b <= 3 && !linked; b++) for (let a = -3; a <= 3; a++){ const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < GX && jj < GY && CH[jj * GX + ii] > 0.5){ linked = true; break; } } } }
-      if (cells > 200 && !linked) checks.unlinked.push(id); }
+      if (cells > 200 && !linked) checks.unlinked.push(id);
+      /* and every outer place must be there, with room to play in: at least 2.5% of the map */
+      let all = 0; for (let n = 0; n < N; n++) if (pid[n] === k) all++;
+      if (all < N * 0.025) checks.small.push(id); }
     /* lagoon mix */
     let lag = 0, mid = 0; for (let n = 0; n < N; n++) if (zone[n] === 0){ lag++; if (E[n] >= 0.14 && E[n] < 0.62) mid++; }
     checks.lagoonMid = lag ? mid / lag : 0;
     checks.mounds = mounds.length;
-    checks.ok = checks.unlinked.length === 0 && checks.lagoonMid >= 0.35 && checks.spawnSpread < 0.8 && mounds.length === p.mounds;
-    checks.score = (checks.ok ? 10 : 0) - checks.unlinked.length * 2 + checks.lagoonMid - checks.spawnSpread;
+    /* no start may be walled in by its neighbour's rim, or pushed off the lagoon */
+    checks.badStarts = spawns.filter(sp => { const n = cellOf(sp.x, sp.y); return E[n] >= WALL || zone[n] !== 0; }).length;
+    checks.ok = checks.unlinked.length === 0 && checks.small.length === 0 && checks.missing.length === 0 && checks.badStarts === 0 && checks.lagoonMid >= 0.35 && checks.spawnSpread < 0.8 && mounds.length === p.mounds;
+    checks.score = (checks.ok ? 10 : 0) - checks.unlinked.length * 2 - checks.small.length * 2 - checks.missing.length + checks.lagoonMid - checks.spawnSpread;
   }
   /* lanes: deep channels, streams and lava channels. Textures fade out over them so travel lanes stay open */
   const lane = new Float32Array(N);
   for (let n = 0; n < N; n++) lane[n] = Math.max(CH[n], Math.min(1, LW[n] * 8), LD[n] < 2 ? 1 - smooth(1, 1.8, LD[n]) : 0);
-  return {E, E0:Float32Array.from(E), checks, zone, pid, PIDS, ramp:F, lane, seed:p.seed, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY, RES};
+  return {E, E0:Float32Array.from(E), checks, zone, pid, PIDS, ramp:F, lane, seed:p.seed, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, layout, seeds, centre:{x:cx, y:cy, RX, RY}, GX, GY, RES};
 }
 
-/* ---- place scale: reaction-diffusion textures, steered by the landforms (lab step 3) ----
-   Gray-Scott on the world grid. Each place grows its own preset (feed, kill, size). Diffusion is anisotropic: stronger
-   along the contours (across the slope), so on slopes the patterns stretch into terraces and ridges that follow the
-   land, while on flat ground they stay round. The pattern only reshapes the land inside each zone: it fades to nothing
-   at the black borders and over channels, streams and lava lanes, never makes new walls or new black, and leaves the
-   mounds' walls and deep water alone. Basic arithmetic only, so every device grows the same texture */
-const TEXTURES = {
-  water:{F:0.02, k:0.075, s:0.5, amp:0, aniso:0},
-  lagoon:{F:0.03, k:0.062, s:0.5, amp:0.16, aniso:0.3},       /* spots */
-  flats:{F:0.029, k:0.057, s:0.45, amp:0.3, aniso:0.8},      /* maze -> terraces on the highland rim */
-  island:{F:0.0545, k:0.062, s:0.45, amp:0.26, aniso:0.5},    /* coral */
-  chimneys:{F:0.039, k:0.058, s:0.4, amp:0.28, aniso:0.2},    /* holes */
-  ice:{F:0.029, k:0.057, s:0.35, amp:0.3, aniso:0.6},        /* maze -> crevasses */
-  ridge:{F:0.078, k:0.061, s:0.4, amp:0.28, aniso:0.9}};      /* worms -> rift-parallel */
-function texture(world, o = {}){
-  const {GX, GY} = world, N = GX * GY, E0 = world.E0, amp = o.amp ?? 1, an = o.aniso ?? 1;
-  /* where the texture may act: inside each zone, off the lanes, blurred so it fades in */
-  const M = new Float32Array(N); for (let n = 0; n < N; n++) M[n] = world.ramp[n] * (1 - world.lane[n]); blur(M, GX, GY, 2);
-  const Fp = new Float32Array(N), Kp = new Float32Array(N), Sp = new Float32Array(N), A = new Float32Array(N);
-  const none = TEXTURES.water;
-  for (let n = 0; n < N; n++){
-    const t = TEXTURES[world.PIDS[world.pid[n]]] || none, m = M[n] * (t.amp > 0 ? 1 : 0);
-    Fp[n] = none.F + (t.F - none.F) * m; Kp[n] = none.k + (t.k - none.k) * m; Sp[n] = t.s; A[n] = t.amp * amp * M[n];
-  }
-  /* anisotropy from the slope of the land (blurred), as 8 neighbour weights per cell that still sum to 1 */
-  const Eb = Float32Array.from(E0); blur(Eb, GX, GY, 3);
-  const OFF = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]], BASE = [0.2, 0.2, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05];
-  const Wt = new Float32Array(N * 8);
-  for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
-    const n = j * GX + i, gx = (Eb[j * GX + Math.min(GX - 1, i + 1)] - Eb[j * GX + Math.max(0, i - 1)]) / 2, gy = (Eb[Math.min(GY - 1, j + 1) * GX + i] - Eb[Math.max(0, j - 1) * GX + i]) / 2;
-    const g = Math.sqrt(gx * gx + gy * gy), t = TEXTURES[world.PIDS[world.pid[n]]] || none, a = Math.min(0.95, t.aniso * an * smooth(0.002, 0.012, g));
-    const cxv = g > 0 ? -gy / g : 1, cyv = g > 0 ? gx / g : 0;
-    for (let k = 0; k < 8; k++){ const [ox, oy] = OFF[k], l2 = ox * ox + oy * oy, d = (cxv * ox + cyv * oy), al = d * d / l2; Wt[n * 8 + k] = BASE[k] * (1 + a * (2 * al - 1)); }
-  }
-  /* seeds: small squares scattered where texture can grow */
-  const r = rng((world.seed || 1) * 7919 + 13);
+/* ---- place scale: patterns. Each place has its own kind of small-scale relief, picked by name ----
+   A pattern is a rule that gives every spot a value from 0 (lowered) to 1 (raised). It reshapes the land a little
+   inside each place: it fades to nothing at the black borders and over channels, streams and lava lanes, never makes
+   a new wall or new black water, and leaves existing walls and deep water alone. So the map's connections, checked
+   before the pattern goes on, still hold.
+
+   Different places use different kinds of rule, each chosen for how it reads, and all of them cheap: one pass over
+   the map, no growing. They take their direction from the land itself, never from painting:
+     wave   stripes. Ripples run across a fixed direction and bend to the contours; terraces ARE the contours.
+     cell   scattered points, each owning the ground nearest it (Voronoi): cracks between plates, pits, pebbles.
+            Stretched along the contour lines on slopes.
+     flow   streaks that run downhill, the way water and lava do (noise smeared along the slope).
+     rd     reaction-diffusion (Gray-Scott), the look of the old texture: spots, labyrinths, coral, holes, worms.
+            Grown once on a small square that repeats (48 x 48 cells, about a tenth of a second the first time a
+            pattern is used, then kept), and read
+            off through a gentle warp so the repeats don't show. Each name is a known sweet spot of the feed and kill
+            numbers, so nobody has to steer by those.
+   Basic arithmetic only, like the rest of this file. */
+const PATTERNS = {
+  none:     {kind:'none', label:'None', about:'Leave the land as it is'},
+  ripples:  {kind:'wave', label:'Ripples', about:'Soft parallel swells, like sand under shallow water'},
+  terraces: {kind:'wave', steps:true, label:'Terraces', about:'Steps along the contour lines'},
+  cracks:   {kind:'cell', mode:'cracks', label:'Cracks', about:'Plates split by cracks; on slopes the cracks run along the contours'},
+  pits:     {kind:'cell', mode:'pits', label:'Pits', about:'A plateau pocked with round pits'},
+  pebbles:  {kind:'cell', mode:'pebbles', label:'Pebbles', about:'Round bumps packed side by side'},
+  ridges:   {kind:'grain', label:'Ridges', about:'Long sharp crests side by side, forking and merging, like the hills along a rift'},
+  streaks:  {kind:'flow', label:'Streaks', about:'Grooves running downhill, like lava flows or gullies'},
+  spots:    {kind:'rd', F:0.03, k:0.062, sparse:true, label:'Spots', about:'Leopard spots (reaction-diffusion)'},
+  labyrinth:{kind:'rd', F:0.029, k:0.057, label:'Labyrinth', about:'A maze of winding ridges (reaction-diffusion)'},
+  stripes:  {kind:'rd', F:0.029, k:0.057, comb:0.6, label:'Stripes', about:'Labyrinth ridges combed straight; they turn to follow the contours (reaction-diffusion)'},
+  coral:    {kind:'rd', F:0.0545, k:0.062, label:'Coral', about:'Branching, brain-coral ridges (reaction-diffusion)'},
+  holes:    {kind:'rd', F:0.039, k:0.058, label:'Holes', about:'A sheet with holes eaten through it (reaction-diffusion)'},
+  worms:    {kind:'rd', F:0.078, k:0.061, label:'Worms', about:'Short wriggling ridges (reaction-diffusion)'}};
+/* each place's pattern, and the three knobs:
+     scale     the size of the pattern's features (1 = about 250 px from one to the next)
+     strength  how much it raises and lowers the land (0.3 = up to 0.3 of the whole depth range, two or three bands)
+     follow    how much it bends to the land: along the contours, or for streaks how far they run downhill */
+const PLACE_PATTERNS = {
+  lagoon:  {type:'ripples', scale:0.8, strength:0.3, follow:0.6},
+  flats:   {type:'terraces', scale:1, strength:0.4, follow:1},
+  island:  {type:'streaks', scale:1, strength:0.45, follow:1},
+  chimneys:{type:'pits', scale:0.8, strength:0.45, follow:0.2},
+  ice:     {type:'cracks', scale:1, strength:0.5, follow:0.7},
+  ridge:   {type:'ridges', scale:1, strength:0.45, follow:0.4}};
+
+const hash2 = (i, j, s) => { let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(s, 1274126177)) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+/* a reaction-diffusion square that repeats: grown once per pattern name, then kept for the rest of the session.
+   comb > 0 lets the chemicals spread faster one way than the other, which straightens a labyrinth into stripes */
+const RDN = 48, rdCache = {};
+function rdTile(name){
+  if (rdCache[name]) return rdCache[name];
+  const P = PATTERNS[name], n = RDN, N = n * n, r = rng(9176 + name.length * 131 + name.charCodeAt(0));
   let U = new Float32Array(N).fill(1), V = new Float32Array(N), U2 = new Float32Array(N), V2 = new Float32Array(N);
-  for (let j = 1; j < GY - 1; j++) for (let i = 1; i < GX - 1; i++){ const n = j * GX + i;
-    if (r() < 0.03 * M[n]) for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++){ U[n + b * GX + a] = 0.5; V[n + b * GX + a] = 0.25 + r() * 0.25; } }
-  let iter = 0;
-  function step(times){
-    for (let it = 0; it < times; it++){
-      for (let j = 0; j < GY; j++){
-        const jm = (j > 0 ? j - 1 : j) * GX, j0 = j * GX, jp = (j < GY - 1 ? j + 1 : j) * GX;
-        for (let i = 0; i < GX; i++){
-          const im = i > 0 ? i - 1 : i, ip = i < GX - 1 ? i + 1 : i, n = j0 + i, w8 = n * 8, u = U[n], v = V[n];
-          const nb0 = j0 + ip, nb1 = j0 + im, nb2 = jp + i, nb3 = jm + i, nb4 = jp + ip, nb5 = jm + im, nb6 = jm + ip, nb7 = jp + im;
-          const lu = Wt[w8] * U[nb0] + Wt[w8 + 1] * U[nb1] + Wt[w8 + 2] * U[nb2] + Wt[w8 + 3] * U[nb3] + Wt[w8 + 4] * U[nb4] + Wt[w8 + 5] * U[nb5] + Wt[w8 + 6] * U[nb6] + Wt[w8 + 7] * U[nb7] - u;
-          const lv = Wt[w8] * V[nb0] + Wt[w8 + 1] * V[nb1] + Wt[w8 + 2] * V[nb2] + Wt[w8 + 3] * V[nb3] + Wt[w8 + 4] * V[nb4] + Wt[w8 + 5] * V[nb5] + Wt[w8 + 6] * V[nb6] + Wt[w8 + 7] * V[nb7] - v;
-          const s = Sp[n], uvv = u * v * v;
-          U2[n] = u + s * lu - uvv + Fp[n] * (1 - u);
-          V2[n] = v + s * 0.5 * lv + uvv - (Fp[n] + Kp[n]) * v;
-        }
+  /* starting specks: spots need a few small ones with room to divide into; the rest fill in fastest from many */
+  const sq = P.sparse ? 3 : 5, specks = Math.round(N / (P.sparse ? 100 : 90));
+  for (let q = 0; q < specks; q++){ const i = Math.floor(r() * n), j = Math.floor(r() * n); for (let b = 0; b < sq; b++) for (let a = 0; a < sq; a++){ const m = ((j + b) % n) * n + (i + a) % n; U[m] = 0.5; V[m] = 0.25 + r() * 0.25; } }
+  const c = P.comb || 0, D = 0.6, wx = 0.2 * (1 + c), wy = 0.2 * (1 - c), wd = 0.05, F = P.F, FK = P.F + P.k;
+  for (let it = 0; it < 1500; it++){
+    for (let j = 0; j < n; j++){ const j0 = j * n, jm = ((j + n - 1) % n) * n, jp = ((j + 1) % n) * n;
+      for (let i = 0; i < n; i++){ const im = (i + n - 1) % n, ip = (i + 1) % n, m = j0 + i, u = U[m], v = V[m];
+        const lu = wx * (U[j0 + im] + U[j0 + ip]) + wy * (U[jm + i] + U[jp + i]) + wd * (U[jm + im] + U[jm + ip] + U[jp + im] + U[jp + ip]) - u;
+        const lv = wx * (V[j0 + im] + V[j0 + ip]) + wy * (V[jm + i] + V[jp + i]) + wd * (V[jm + im] + V[jm + ip] + V[jp + im] + V[jp + ip]) - v;
+        const uvv = u * v * v; U2[m] = u + D * lu - uvv + F * (1 - u); V2[m] = v + D * 0.5 * lv + uvv - FK * v; } }
+    let t = U; U = U2; U2 = t; t = V; V = V2; V2 = t;
+  }
+  const out = new Float32Array(N); for (let m = 0; m < N; m++) out[m] = smooth(0.08, 0.28, V[m]);
+  return rdCache[name] = out;
+}
+/* patternField: the values 0..1 of one pattern over a grid. f describes the ground it lies on:
+     GX, GY, RES   the grid
+     Eb            the land's height, blurred (the pattern follows the broad slope, not every bump)
+     seed          so each map gets its own cracks and streaks
+     want(n)       optional: only cells where this is true are worked out
+   o is the place's knobs: scale, follow. Returns a Float32Array; cells not wanted stay 0.5 */
+function patternField(name, f, o = {}){
+  const P = PATTERNS[name] || PATTERNS.none, {GX, GY, RES, Eb} = f, N = GX * GY, out = new Float32Array(N).fill(0.5);
+  if (P.kind === 'none') return out;
+  const sc = Math.max(0.3, o.scale ?? 1), fo = Math.max(0, o.follow ?? 0.5), seed = (f.seed || 1) | 0, want = f.want;
+  const g = f.noise || (f.noise = noiseGrid(rng(seed * 31 + 7)));
+  /* a direction of its own for each pattern on each map (for ripples, and for the pull along the slope) */
+  const da = hash2(seed, name.length, name.charCodeAt(0)) * PI, dx = dcos(da), dy = dsin(da);
+  const grad = (i, j) => { const n = j * GX + i; return [(Eb[j * GX + Math.min(GX - 1, i + 1)] - Eb[j * GX + Math.max(0, i - 1)]) / (2 * RES), (Eb[Math.min(GY - 1, j + 1) * GX + i] - Eb[Math.max(0, j - 1) * GX + i]) / (2 * RES)]; };
+  if (P.kind === 'wave'){
+    /* L: the distance from one crest to the next on level ground. K: how many crests one unit of height is worth.
+       Where the slope would pack the crests closer than the grid can show, they fade out instead of turning to noise */
+    const L = 250 * sc, K = (P.steps ? 9 : 5 * fo) / sc;
+    for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const n = j * GX + i; if (want && !want(n)) continue;
+      const x = (i + 0.5) * RES, y = (j + 0.5) * RES, [gx, gy] = grad(i, j), wob = fbm(g, x / 420, y / 420);
+      let ph, fx, fy;
+      if (P.steps){ const loose = Math.max(0, 1 - fo); ph = Eb[n] * K + loose * (x * dx + y * dy) / L + (0.25 + 0.6 * loose) * wob; fx = gx * K + loose * dx / L; fy = gy * K + loose * dy / L; }
+      else { ph = (x * dx + y * dy) / L + Eb[n] * K + 0.5 * wob; fx = dx / L + gx * K; fy = dy / L + gy * K; }
+      const tight = 1 / (Math.sqrt(fx * fx + fy * fy) + 1e-6), keep = smooth(55, 120, tight), u = ph - Math.floor(ph);
+      /* ripples: a smooth swell. terraces: a long tread that rises to a lip, then a short drop */
+      const v = P.steps ? (u < 0.78 ? u / 0.78 : (1 - u) / 0.22) : 0.5 + 0.5 * dsin(TAU * u);
+      out[n] = 0.5 + (v - 0.5) * keep;
+    }
+  } else if (P.kind === 'cell' || P.kind === 'rd'){
+    /* both read a flat pattern at a point q. q is the spot itself, wobbled a little, and pulled sideways by the
+       land's height: neighbours across a slope get pulled by different amounts, which squeezes the pattern across
+       the slope and so stretches it along the contours. Steeper slope, stronger stretch */
+    const cell = (P.kind === 'rd' ? 30 : 230) * sc, pull = 600 * fo, tile = P.kind === 'rd' ? rdTile(name) : null;
+    /* stripes lie along the square's x axis, so they are pulled across it, which lines them up with the contours */
+    const px = P.comb ? 0 : dx, py = P.comb ? 1 : dy, rc = P.comb ? 1 : dy, rs = P.comb ? 0 : dx;
+    for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const n = j * GX + i; if (want && !want(n)) continue;
+      const x = (i + 0.5) * RES, y = (j + 0.5) * RES, e = Eb[n] * pull;
+      const wx = x + 70 * sc * fbm(g, x / 380 + 3.1, y / 380), wy = y + 70 * sc * fbm(g, x / 380, y / 380 + 8.7);
+      /* turned to the pattern's own direction, so repeats and stripes don't line up with the map's edges */
+      const qx = (wx * rc - wy * rs + e * px) / cell, qy = (wx * rs + wy * rc + e * py) / cell;
+      if (tile){
+        const fi = Math.floor(qx), fj = Math.floor(qy), tx = qx - fi, ty = qy - fj, i0 = ((fi % RDN) + RDN) % RDN, j0 = ((fj % RDN) + RDN) % RDN, i1 = (i0 + 1) % RDN, j1 = (j0 + 1) % RDN;
+        out[n] = (tile[j0 * RDN + i0] * (1 - tx) + tile[j0 * RDN + i1] * tx) * (1 - ty) + (tile[j1 * RDN + i0] * (1 - tx) + tile[j1 * RDN + i1] * tx) * ty;
+      } else {
+        /* nearest and second-nearest point: one point per grid square, anywhere inside it */
+        const ci = Math.floor(qx), cj = Math.floor(qy); let f1 = 9, f2 = 9;
+        for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++){ const ex = ci + a + hash2(ci + a, cj + b, seed) - qx, ey = cj + b + hash2(cj + b, ci + a, seed + 77) - qy, d = Math.sqrt(ex * ex + ey * ey);
+          if (d < f1){ f2 = f1; f1 = d; } else if (d < f2) f2 = d; }
+        out[n] = P.mode === 'cracks' ? smooth(0.04, 0.34, f2 - f1) : P.mode === 'pits' ? smooth(0.22, 0.5, f1) : 1 - smooth(0.12, 0.62, f1);
       }
-      let t = U; U = U2; U2 = t; t = V; V = V2; V2 = t;
     }
-    iter += times; return iter;
-  }
-  /* write the texture into world.E: raise where the pattern is, lower between, within the band range */
-  function apply(){
-    const E = world.E;
-    for (let n = 0; n < N; n++){
-      const e = E0[n]; if (e < 0.2 || e >= WALL || A[n] <= 0.001){ E[n] = e; continue; }
-      const t = V[n], d = A[n] * (smooth(0.06, 0.22, t) - 0.4);
-      E[n] = Math.max(0.2, Math.min(WALL - 0.02, e + d));
+  } else if (P.kind === 'grain'){
+    /* ridges: noise read five times finer across the pattern's direction than along it, and folded at its middle
+       value so the folds become sharp crests. The land's height pulls it sideways, as above, so on slopes the crests
+       swing round toward the contours */
+    const L = 210 * sc, pull = 500 * fo;
+    for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const n = j * GX + i; if (want && !want(n)) continue;
+      const x = (i + 0.5) * RES, y = (j + 0.5) * RES, across = (x * dx + y * dy + Eb[n] * pull) / L, along = (y * dx - x * dy) / (L * 5);
+      const v = vnoise(g, across * 1.6 + 0.6 * fbm(g, x / 500 + 5.5, y / 500), along) * 0.8 + vnoise(g, across * 3.3 + 9.2, along * 2.1 + 4.4) * 0.2;
+      out[n] = 1 - smooth(0.04, 0.5, Math.abs(v));
     }
-    return E;
+  } else if (P.kind === 'flow'){
+    /* streaks: start from a fine speckle and, at every spot, average it along the line water would take through
+       that spot, uphill and down (line integral convolution). Along the slope the speckle smears into long streaks;
+       across it, it stays fine. On level ground there is no line to follow, and the streaks fade out */
+    const grain = 55 * sc, reach = Math.round(3 + 9 * Math.min(1.5, fo));
+    const speck = (x, y) => { const u = x / grain, v = y / grain, i = Math.floor(u), j = Math.floor(v), tx = u - i, ty = v - j;
+      return (hash2(i, j, seed) * (1 - tx) + hash2(i + 1, j, seed) * tx) * (1 - ty) + (hash2(i, j + 1, seed) * (1 - tx) + hash2(i + 1, j + 1, seed) * tx) * ty; };
+    for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){ const n = j * GX + i; if (want && !want(n)) continue;
+      const x0 = (i + 0.5) * RES, y0 = (j + 0.5) * RES; let sum = speck(x0, y0), cnt = 1, steep = 0;
+      for (let dir = -1; dir <= 1; dir += 2){ let x = x0, y = y0;
+        for (let s = 0; s < reach; s++){ const ci = Math.min(GX - 1, Math.max(0, Math.floor(x / RES))), cj = Math.min(GY - 1, Math.max(0, Math.floor(y / RES))), [gx, gy] = grad(ci, cj), gl = Math.sqrt(gx * gx + gy * gy);
+          if (!s && dir < 0) steep = gl; if (gl < 1e-6) break;
+          x += dir * gx / gl * RES; y += dir * gy / gl * RES; if (x < 0 || y < 0 || x >= GX * RES || y >= GY * RES) break;
+          sum += speck(x, y); cnt++; } }
+      /* an average of many speckles is nearly grey: stretch it back out to the full range */
+      const v = 0.5 + (sum / cnt - 0.5) * Math.sqrt(cnt) * 1.5;
+      out[n] = 0.5 + (Math.max(0, Math.min(1, v)) - 0.5) * (0.35 + 0.65 * smooth(0.00006, 0.0003, steep));
+    }
   }
-  return {step, apply, get iter(){ return iter; }, get V(){ return V; }};
+  return out;
+}
+/* pattern(world, o): lay each place's pattern over the land (world.E0, the land before patterns) and write world.E.
+   Can be called again with new settings, without regrowing the world: the terrain lab does this on every slider move.
+     o.pattern   0..2  every place's strength times this (0: no patterns at all)
+     o.contrast  0..1  0: soft, rolling relief; 1: crisp, flat-topped shapes with sharp edges
+     o.patterns  {place: {type, scale, strength, follow}} to differ from PLACE_PATTERNS */
+function pattern(world, o = {}){
+  const {GX, GY, RES, E0, E} = world, N = GX * GY, all = o.pattern ?? DEFAULTS.pattern, con = Math.max(0, Math.min(1, o.contrast ?? DEFAULTS.contrast));
+  E.set(E0); world.patterns = {};
+  if (!(all > 0)) return E;
+  /* where a pattern may act: inside each place, off the lanes, blurred so it fades in */
+  const M = new Float32Array(N); for (let n = 0; n < N; n++) M[n] = world.ramp[n] * (1 - world.lane[n]); blur(M, GX, GY, 2);
+  for (let n = 0; n < N; n++) M[n] = Math.min(M[n], world.ramp[n] * (1 - world.lane[n]));   /* the blur must not leak onto a lane or a border */
+  /* chimneys keep their shape: a chimney is a tall ring by rule, so patterns stay off it */
+  for (const v of world.vents) if (v.kind === 'chimney'){ const R = v.R * 1.45, i0 = Math.max(0, Math.floor((v.x - R) / RES)), i1 = Math.min(GX - 1, Math.floor((v.x + R) / RES)), j0 = Math.max(0, Math.floor((v.y - R) / RES)), j1 = Math.min(GY - 1, Math.floor((v.y + R) / RES));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++){ const ex = (i + 0.5) * RES - v.x, ey = (j + 0.5) * RES - v.y; M[j * GX + i] *= smooth(1.05, 1.45, Math.sqrt(ex * ex + ey * ey) / v.R); } }
+  /* the land the patterns follow: its broad shape only. Blurred, and with the black gaps and lanes filled in to the
+     level of the low ground first, since their steep banks would otherwise drag every pattern near a border */
+  const Eb = new Float32Array(N); for (let n = 0; n < N; n++) Eb[n] = E0[n] < 0.34 ? 0.34 : E0[n]; blur(Eb, GX, GY, 4);
+  const f = {GX, GY, RES, Eb, seed:world.seed};
+  world.PIDS.forEach((id, q) => {
+    const set = Object.assign({}, PLACE_PATTERNS[id], o.patterns && o.patterns[id]);
+    if (!set.type || !PATTERNS[set.type] || PATTERNS[set.type].kind === 'none' || !(set.strength > 0)) return;
+    world.patterns[id] = set;
+    f.want = n => world.pid[n] === q && M[n] > 0.001 && E0[n] >= 0.2 && E0[n] < WALL;
+    const t = patternField(set.type, f, set), amp = set.strength * all, w = 0.5 - 0.42 * con;
+    /* sharpen by the contrast setting, then centre on the place's own average, so a pattern reshapes a place
+       without making the whole of it shallower or deeper */
+    let sum = 0, cnt = 0; for (let n = 0; n < N; n++) if (f.want(n)){ t[n] = smooth(0.5 - w, 0.5 + w, t[n]); sum += t[n] * M[n]; cnt += M[n]; }
+    const mean = cnt ? sum / cnt : 0.5;
+    for (let n = 0; n < N; n++) if (f.want(n)) E[n] = Math.max(0.2, Math.min(WALL - 0.02, E0[n] + amp * M[n] * (t[n] - mean)));
+  });
+  return E;
+}
+/* a small picture of one pattern, for the editor's pattern pickers: its values over an n x n patch of made-up
+   ground, a dome that is steep on one side and nearly level on the other, so how it follows the land shows */
+function patternSwatch(name, n = 48, o = {}){
+  const Eb = new Float32Array(n * n), RES = 25;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++){ const ex = (i - n * 0.3) / n, ey = (j - n * 0.35) / n; Eb[j * n + i] = 0.75 - 0.75 * Math.sqrt(ex * ex + ey * ey * 1.6); }
+  return patternField(name, {GX:n, GY:n, RES, Eb, seed:o.seed || 5}, o);
 }
 /* ---- reading a world, shared by the lab and the game ----
    surface(world): the depth field read through a grid twice as fine (cubic B-spline), so band edges are smooth curves;
@@ -651,5 +891,5 @@ function surface(world){
   return {elev, colour, colour2, refresh, recolour, Ef, FX, FY};
 }
 
-return {generate, texture, surface, TEXTURES, DEFAULTS, WALL, T, BRIGHT, SPEED, PLACE_COL, bandOf, speedOf, dsin, dcos};
+return {generate, pattern, patternField, patternSwatch, surface, PATTERNS, PLACE_PATTERNS, LAYOUTS, DEFAULTS, WALL, T, BRIGHT, SPEED, PLACE_COL, bandOf, speedOf, dsin, dcos};
 })();

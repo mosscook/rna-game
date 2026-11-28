@@ -230,6 +230,10 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .dev .tk button{all:unset;cursor:pointer;color:var(--muted);text-align:center;font-size:12px}
 .dev .tk button:hover{color:var(--ink)}
 .dev .tk:not(.changed) button{visibility:hidden}
+.dev .swatches{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:4px 0}
+.dev .swatches button{all:unset;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;padding:2px;border:1px solid transparent;border-radius:6px;font-size:9.5px;color:var(--muted)}
+.dev .swatches button[aria-pressed="true"]{border-color:var(--ink);color:var(--ink)}
+.dev .swatches img,.dev .swatches i{width:100%;aspect-ratio:1;border-radius:4px;image-rendering:pixelated;background:#0c1614;display:block}
 .dev .tuneHead{font:700 10.5px var(--font-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:4px}
 .dev .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11px}
 .dev .cols label{display:flex;align-items:center;gap:6px}
@@ -1402,40 +1406,60 @@ function wireTunePanel(){
     else if (b.id === 'tuCopy'){ const txt = JSON.stringify(SEG.tuneChanged()); navigator.clipboard && navigator.clipboard.writeText(txt).then(() => say('Segment settings copied.'), () => say(txt)); }
   });
 }
-/* ---------- dev panel: Terrain. The generated world's settings (worldgen.js DEFAULTS) and the reaction-diffusion texture,
-   for all places (global) and each place (local: worldgen.js TEXTURES). They take effect when the map is rebuilt, and
-   only in single player: a room grows the server's map. Remembered on this device ---------- */
-const WGN = window.WorldGen, TEX_DEF = JSON.parse(JSON.stringify(WGN.TEXTURES));
+/* ---------- dev panel: Terrain. The generated world's settings (worldgen.js DEFAULTS): the big picture (layout style
+   and its knobs), the landforms, and each place's pattern (worldgen.js PLACE_PATTERNS), picked by name from small
+   pictures. They take effect when the map is rebuilt, and only in single player: a room grows the server's map.
+   Remembered on this device. The terrain lab (/lab/terrain.html) has the same settings with a live preview ---------- */
+const WGN = window.WorldGen;
+const LAYOUT_SLIDERS = [['asymmetry', 'Asymmetry (0: the old even layout)', 0, 1, 0.05], ['offset', 'Lagoon off-centre', 0, 2, 0.1], ['elongation', 'Lagoon long or bent', 0, 2, 0.1], ['variance', 'Place sizes differ', 0, 2, 0.1], ['sea', 'Open sea', 0, 2, 0.1]];
 const TERRAIN_GROUPS = [
   ['Lagoon and channels', [['impacts', 'Meteor impacts', 1, 3, 1], ['ispread', 'Impact spread', 0, 1, 0.05], ['erosion', 'Erosion', 0, 1, 0.05], ['lagoon', 'Lagoon size', 1200, 2100, 50], ['channel', 'Channel width', 180, 440, 10]]],
   ['Mounds', [['mounds', 'Mounds', 5, 12, 1], ['rin', 'Mound size', 130, 280, 10], ['rim', 'Rim', 40, 110, 2], ['door', 'Doorway', 50, 160, 5], ['rosettes', 'Rosettes', 0, 60, 2]]],
   ['Borders between places', [['gap', 'Border gap', 0, 120, 5], ['slope', 'Border slope', 30, 240, 10], ['dither', 'Border blobs', 0, 2.4, 0.1]]],
   ['Features', [['craters', 'Craters', 0, 90, 2], ['basins', 'Basins', 0, 3, 1], ['calderas', 'Big volcanoes', 0, 3, 1], ['chimneys', 'Chimneys', 0, 14, 1], ['lava', 'Lava channels', 0, 6, 1], ['rivers', 'Waterways', 0, 1, 0.05], ['riverDepth', 'River depth', 0, 1, 0.05]]],
   ['Letters', [['spread', 'Letter spread', 0, 160, 10]]]];
-const TEX_SLIDERS = [['texture', 'Texture strength (all places)', 0, 2, 0.1], ['align', 'Texture follows slope (all places)', 0, 1.5, 0.1]];
-const TEX_LOCAL = [['amp', 'Strength', 0, 0.6, 0.01], ['s', 'Pattern size', 0.2, 1, 0.01], ['F', 'Feed (F)', 0.01, 0.09, 0.0005], ['k', 'Kill (k)', 0.04, 0.075, 0.0005], ['aniso', 'Follows slope', 0, 1.5, 0.05]];
-const TEX_PLACES = ['lagoon', 'flats', 'island', 'chimneys', 'ice', 'ridge'];
-let terrain = {settings:{}, texture:false, iters:3000, places:{}, place:'lagoon'}, terrainMs = null;
-try { const v = JSON.parse(localStorage.getItem('soup2.terrain') || 'null'); if (v) terrain = Object.assign(terrain, v); } catch(e){}
-for (const id in terrain.places) if (WGN.TEXTURES[id]) Object.assign(WGN.TEXTURES[id], terrain.places[id]);
-const saveTerrain = () => { try { localStorage.setItem('soup2.terrain', JSON.stringify(terrain)); } catch(e){} };
-function terrainOpt(){ return {size:0.7, settings:Object.assign({}, terrain.settings), texture:!!terrain.texture, textureIters:terrain.iters}; }
+const PAT_SLIDERS = [['pattern', 'Pattern strength (all places; 0: none)', 0, 2, 0.05], ['contrast', 'Soft … crisp (all places)', 0, 1, 0.05]];
+const PAT_LOCAL = [['scale', 'Size', 0.4, 2.5, 0.05], ['strength', 'Strength', 0, 0.8, 0.01], ['follow', 'Follows the land', 0, 1.5, 0.05]];
+const PAT_PLACES = ['lagoon', 'flats', 'island', 'chimneys', 'ice', 'ridge'];
+const freshTerrain = () => ({settings:{}, patterns:{}, place:'lagoon'});
+let terrain = freshTerrain(), terrainMs = null;
+try { const v = JSON.parse(localStorage.getItem('soup3.terrain') || 'null'); if (v) terrain = Object.assign(terrain, v); } catch(e){}
+const saveTerrain = () => { try { localStorage.setItem('soup3.terrain', JSON.stringify(terrain)); } catch(e){} };
+function terrainOpt(){ return {size:0.7, settings:Object.assign({}, terrain.settings, {patterns:terrain.patterns})}; }
 const terrVal = k => terrain.settings[k] != null ? terrain.settings[k] : WGN.DEFAULTS[k];
+const patVal = (p, k) => terrain.patterns[p] && terrain.patterns[p][k] != null ? terrain.patterns[p][k] : WGN.PLACE_PATTERNS[p][k];
+function patSet(p, k, v){
+  const q = terrain.patterns[p] = Object.assign({}, terrain.patterns[p], {[k]:v});
+  if (v === WGN.PLACE_PATTERNS[p][k]) delete q[k];
+  if (!Object.keys(q).length) delete terrain.patterns[p];
+}
 const fmtStep = (v, st) => (+v).toFixed(st >= 1 ? 0 : st >= 0.1 ? 1 : st >= 0.01 ? 2 : 4);
+/* a small picture of each pattern, drawn once (reaction-diffusion ones take a moment the first time) and kept */
+const swatchURL = {};
+function paintSwatches(){
+  const todo = [...$('dev').querySelectorAll('img[data-sw]')]; if (!todo.length) return;
+  const next = () => { const im = todo.shift(); if (!im) return; const name = im.dataset.sw;
+    if (!swatchURL[name]){ const n = 40, t = WGN.patternSwatch(name, n, {follow:0.7}), c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'), d = g.createImageData(n, n);
+      for (let k = 0; k < n * n; k++){ const b = Math.floor(t[k] * 3.999) / 3; d.data[k * 4] = 20 + 50 * b; d.data[k * 4 + 1] = 45 + 150 * b; d.data[k * 4 + 2] = 55 + 110 * b; d.data[k * 4 + 3] = 255; }
+      g.putImageData(d, 0, 0); swatchURL[name] = c.toDataURL(); }
+    im.src = swatchURL[name]; setTimeout(next, 0); };
+  next();
+}
 function terrainPanel(){
   if (net) return '<p class="fine">Terrain changes only single-player maps: a room grows the server\'s map.</p>';
   const row = (attr, k, label, a, b, st, v, def) => `<label class="lk tk${v !== def ? ' changed' : ''}" title="Shipped value: ${fmtStep(def, st)}"><span>${label}</span><input type="range" ${attr}="${k}" min="${a}" max="${b}" step="${st}" value="${v}"><output>${fmtStep(v, st)}</output><button type="button" data-${attr.slice(5)}-reset="${k}" aria-label="Back to the shipped value">↺</button></label>`;
-  const p = terrain.place;
-  return `<p class="fine">Changes take effect when you rebuild the map (same seed; the round restarts).${terrainMs != null ? ` Last build: ${(terrainMs / 1000).toFixed(1)} s.` : ''}</p>`
-    + `<div class="row"><button class="btn" type="button" id="trBuild">Rebuild map</button><button class="btn" type="button" id="trNew">New seed</button><button class="btn" type="button" id="trReset">Reset terrain</button></div>`
+  const p = terrain.place, lay = terrVal('layout'), built = MAP.world && MAP.world.layout;
+  return `<p class="fine">Changes take effect when you rebuild the map (same seed; the round restarts).${terrainMs != null ? ` Last build: ${(terrainMs / 1000).toFixed(1)} s.` : ''} The <a href="/lab/terrain.html" target="_blank" rel="noopener">terrain lab</a> shows them live.</p>`
+    + `<div class="row"><button class="btn" type="button" id="trBuild">Rebuild map</button><button class="btn" type="button" id="trNew">New seed</button><button class="btn" type="button" id="trReset">Reset terrain</button><button class="btn" type="button" id="trCopy">Copy settings</button></div>`
+    + `<div class="tuneHead">Layout${built ? ` (this map: ${built})` : ''}</div><div class="row">${['auto'].concat(Object.keys(WGN.LAYOUTS)).map(id => `<button class="btn" type="button" data-tlayout="${id}" aria-pressed="${id === lay}">${id}</button>`).join('')}</div>`
+    + LAYOUT_SLIDERS.map(([k, t, a, b, st]) => row('data-terr', k, t, a, b, st, terrVal(k), WGN.DEFAULTS[k])).join('')
     + TERRAIN_GROUPS.map(([h, list]) => `<div class="tuneHead">${h}</div>` + list.map(([k, t, a, b, st]) => row('data-terr', k, t, a, b, st, terrVal(k), WGN.DEFAULTS[k])).join('')).join('')
-    + `<div class="tuneHead">Diffusion texture</div><div class="row"><button class="btn" type="button" id="trTex" aria-pressed="${!!terrain.texture}">Texture ${terrain.texture ? 'on' : 'off'}</button><span class="note">adds build time on every device</span></div>`
-    + TEX_SLIDERS.map(([k, t, a, b, st]) => row('data-terr', k, t, a, b, st, terrVal(k), WGN.DEFAULTS[k])).join('')
-    + row('data-titer', 'iters', 'Growth steps', 300, 6000, 100, terrain.iters, 3000)
-    + `<div class="tuneHead">Texture in one place</div><div class="row">${TEX_PLACES.map(id => `<button class="btn" type="button" data-tplace="${id}" aria-pressed="${id === p}">${PLACE_LABEL[id]}${terrain.places[id] ? ' •' : ''}</button>`).join('')}</div>`
-    + TEX_LOCAL.map(([k, t, a, b, st]) => row('data-tloc', k, t, a, b, st, WGN.TEXTURES[p][k], TEX_DEF[p][k])).join('');
+    + `<div class="tuneHead">Patterns</div>` + PAT_SLIDERS.map(([k, t, a, b, st]) => row('data-terr', k, t, a, b, st, terrVal(k), WGN.DEFAULTS[k])).join('')
+    + `<div class="tuneHead">Pattern in one place</div><div class="row">${PAT_PLACES.map(id => `<button class="btn" type="button" data-tplace="${id}" aria-pressed="${id === p}">${PLACE_LABEL[id]}${terrain.patterns[id] ? ' •' : ''}</button>`).join('')}</div>`
+    + `<div class="swatches">${Object.keys(WGN.PATTERNS).map(id => `<button type="button" data-tpat="${id}" aria-pressed="${id === patVal(p, 'type')}" title="${WGN.PATTERNS[id].about}">${id === 'none' ? '<i></i>' : `<img data-sw="${id}" alt="">`}<span>${WGN.PATTERNS[id].label}</span></button>`).join('')}</div>`
+    + PAT_LOCAL.map(([k, t, a, b, st]) => row('data-tloc', k, t, a, b, st, patVal(p, k), WGN.PLACE_PATTERNS[p][k])).join('');
 }
-function syncTerrainPanel(){ const d = $('dev').querySelector('[data-sec="terrain"] .body'); if (d) d.innerHTML = terrainPanel(); }
+function syncTerrainPanel(){ const d = $('dev').querySelector('[data-sec="terrain"] .body'); if (d){ d.innerHTML = terrainPanel(); paintSwatches(); } }
 function rebuildMap(newSeed){
   if (net || !WANT_WORLD) return;
   const playing = sim.state === 'play', t0 = performance.now();
@@ -1445,12 +1469,11 @@ function rebuildMap(newSeed){
   syncTerrainPanel();
 }
 function wireTerrainPanel(){
-  const d = $('dev');
+  const d = $('dev'); paintSwatches();
   d.addEventListener('input', e => {
     const t = e.target, out = t.nextElementSibling;
     if (t.dataset.terr){ const k = t.dataset.terr; if (+t.value === WGN.DEFAULTS[k]) delete terrain.settings[k]; else terrain.settings[k] = +t.value; }
-    else if (t.dataset.titer){ terrain.iters = +t.value; }
-    else if (t.dataset.tloc){ const p = terrain.place, k = t.dataset.tloc; WGN.TEXTURES[p][k] = +t.value; terrain.places[p] = Object.assign({}, terrain.places[p], {[k]:+t.value}); if (WGN.TEXTURES[p][k] === TEX_DEF[p][k]){ delete terrain.places[p][k]; if (!Object.keys(terrain.places[p]).length) delete terrain.places[p]; } }
+    else if (t.dataset.tloc) patSet(terrain.place, t.dataset.tloc, +t.value);
     else return;
     if (out) out.textContent = fmtStep(t.value, +t.step); t.closest('.tk').classList.add('changed'); saveTerrain();
   });
@@ -1458,22 +1481,22 @@ function wireTerrainPanel(){
     const b = e.target.closest('button'); if (!b) return;
     if (b.id === 'trBuild') rebuildMap(false);
     else if (b.id === 'trNew') rebuildMap(true);
-    else if (b.id === 'trTex'){ terrain.texture = !terrain.texture; saveTerrain(); syncTerrainPanel(); }
-    else if (b.id === 'trReset'){ terrain = {settings:{}, texture:false, iters:3000, places:{}, place:terrain.place}; for (const id in TEX_DEF) Object.assign(WGN.TEXTURES[id], TEX_DEF[id]); saveTerrain(); syncTerrainPanel(); }
+    else if (b.id === 'trReset'){ terrain = Object.assign(freshTerrain(), {place:terrain.place}); saveTerrain(); syncTerrainPanel(); }
+    else if (b.id === 'trCopy'){ const txt = JSON.stringify({settings:terrain.settings, patterns:terrain.patterns}); navigator.clipboard && navigator.clipboard.writeText(txt).then(() => say('Terrain settings copied.'), () => say(txt)); }
+    else if (b.dataset.tlayout){ if (b.dataset.tlayout === WGN.DEFAULTS.layout) delete terrain.settings.layout; else terrain.settings.layout = b.dataset.tlayout; saveTerrain(); syncTerrainPanel(); }
     else if (b.dataset.tplace){ terrain.place = b.dataset.tplace; saveTerrain(); syncTerrainPanel(); }
+    else if (b.dataset.tpat){ patSet(terrain.place, 'type', b.dataset.tpat); saveTerrain(); syncTerrainPanel(); }
     else if (b.dataset.terrReset){ delete terrain.settings[b.dataset.terrReset]; saveTerrain(); syncTerrainPanel(); }
-    else if (b.dataset.titerReset){ terrain.iters = 3000; saveTerrain(); syncTerrainPanel(); }
-    else if (b.dataset.tlocReset){ const p = terrain.place, k = b.dataset.tlocReset; WGN.TEXTURES[p][k] = TEX_DEF[p][k]; if (terrain.places[p]){ delete terrain.places[p][k]; if (!Object.keys(terrain.places[p]).length) delete terrain.places[p]; } saveTerrain(); syncTerrainPanel(); }
+    else if (b.dataset.tlocReset){ patSet(terrain.place, b.dataset.tlocReset, WGN.PLACE_PATTERNS[terrain.place][b.dataset.tlocReset]); saveTerrain(); syncTerrainPanel(); }
   });
 }
 /* ---------- dev panel: every setting at once (looks, segments, terrain), to copy out or paste back in ---------- */
-function allSettings(){ return {looks:{filled:looks.filled, lines:looks.lines}, segments:SEG.tuneChanged(), terrain:{settings:terrain.settings, texture:terrain.texture, iters:terrain.iters, places:terrain.places}}; }
+function allSettings(){ return {looks:{filled:looks.filled, lines:looks.lines}, segments:SEG.tuneChanged(), terrain:{settings:terrain.settings, patterns:terrain.patterns}}; }
 function applyAllSettings(o){
   if (o.looks){ for (const k of ['filled', 'lines']) if (o.looks[k]) looks[k] = Object.assign(freshLooks()[k], o.looks[k]); applyLook(); syncLookPanel(); }
   else if (o.lines || o.filled){ for (const k of ['filled', 'lines']) if (o[k]) looks[k] = Object.assign(freshLooks()[k], o[k]); applyLook(); syncLookPanel(); }
   if (o.segments){ SEG.tuneReset(); SEG.tuneApply(o.segments); saveTune(); syncTunePanel(); }
-  if (o.terrain){ for (const id in TEX_DEF) Object.assign(WGN.TEXTURES[id], TEX_DEF[id]); terrain = Object.assign({settings:{}, texture:false, iters:3000, places:{}, place:terrain.place}, o.terrain);
-    for (const id in terrain.places) if (WGN.TEXTURES[id]) Object.assign(WGN.TEXTURES[id], terrain.places[id]); saveTerrain(); syncTerrainPanel(); }
+  if (o.terrain){ terrain = Object.assign(freshTerrain(), {place:terrain.place}, {settings:o.terrain.settings || {}, patterns:o.terrain.patterns || {}}); saveTerrain(); syncTerrainPanel(); }
 }
 function wireAllSettings(){
   $('allCopy').addEventListener('click', () => { const txt = JSON.stringify(allSettings()); navigator.clipboard && navigator.clipboard.writeText(txt).then(() => say('All settings copied.'), () => say(txt)); });
