@@ -558,11 +558,28 @@ function drawBase(g, camX, camY, vw, vh, t){
     g.globalAlpha = 0.12 + 0.3 * k; g.fillStyle = '#6f9a5c'; g.beginPath(); g.arc(p.x, p.y, p.r * 0.85, 0, TAU); g.fill();
     g.globalAlpha = 0.5 + 0.4 * k; g.setLineDash([3, 6]); g.strokeStyle = '#8fc07a'; g.lineWidth = 2; g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
   }
-  /* the UV shallows shimmer */
-  const sh = 0.05 + 0.04 * Math.sin(t * 1.3);
-  g.globalAlpha = sh; g.fillStyle = '#9fb8ff'; g.beginPath();
-  for (let cy = cy0; cy <= cy1; cy += 1) for (let cx = cx0; cx <= cx1; cx += 1) if (grid[cy * GW + cx] === K.UV){ const x = cx * CELL, y = cy * CELL; g.rect(x, y, CELL, CELL); }
-  g.fill(); g.globalAlpha = 1;
+  /* the UV shallows: on the classic map a soft shimmer over their squares. In the generated world, sunlight glints
+     instead: a few points in each shallow cell twinkle briefly, so the shallows read as bright, sunlit water without
+     drawing the cell grid. Stateless (a function of the clock), so nothing is stored */
+  if (!world){
+    const sh = 0.05 + 0.04 * Math.sin(t * 1.3);
+    g.globalAlpha = sh; g.fillStyle = '#9fb8ff'; g.beginPath();
+    for (let cy = cy0; cy <= cy1; cy += 1) for (let cx = cx0; cx <= cx1; cx += 1) if (grid[cy * GW + cx] === K.UV){ const x = cx * CELL, y = cy * CELL; g.rect(x, y, CELL, CELL); }
+    g.fill(); g.globalAlpha = 1;
+  } else {
+    g.fillStyle = '#dfe8ff';
+    for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++){
+      if (grid[cy * GW + cx] !== K.UV) continue;
+      {
+        const id = cy * GW + cx, per = 3 + hash(id, 1) * 4, ph = (t / per + hash(id, 2)) % 1;
+        if (ph > 0.1) continue;
+        const cyc = Math.floor(t / per + hash(id, 2)), a = Math.sin(Math.PI * ph / 0.1);
+        const x = (cx + hash(id, cyc * 7 + 3)) * CELL, y = (cy + hash(id, cyc * 7 + 5)) * CELL, r = 0.6 + 0.9 * a;
+        g.globalAlpha = 0.32 * a; g.fillRect(x - r * 2, y - 0.5, r * 4, 1); g.fillRect(x - 0.5, y - r * 2, 1, r * 4);
+      }
+    }
+    g.globalAlpha = 1;
+  }
 }
 const seen = (x, y, pad, camX, camY, vw, vh) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
 function drawOver(g, camX, camY, vw, vh, t){
