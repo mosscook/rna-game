@@ -305,7 +305,7 @@ function create(opts){
       for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) n += grid.get(key(i + a, j + b)) || 0;
       /* a fresh meteorite crater's letters are its prize, so crowding there does not count until it cools */
       const crowd = MAP.zoneAt(q.x, q.y) === 'crater' ? 1 : 1 + Math.max(0, n - CROWD_FREE) * CROWD_RATE;
-      q.rate = crowd * (MAP.cellAt(q.x, q.y).key === 'BRINE' ? COLD_RATE : 1);
+      q.rate = crowd * ((MAP.cellAt(q.x, q.y).key === 'BRINE' || MAP.cellAt(q.x, q.y).key === 'SLUSH') ? COLD_RATE : 1);
     }
   }
 

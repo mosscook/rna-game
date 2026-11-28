@@ -49,7 +49,7 @@ The world's places reuse the classic map's ground types:
 | Highlands | tidal flats in the shallows (slow at low tide), ridge walls |
 | Volcanic island | UV shallows near the top, clay lower down |
 | Chimneys | nursery pockets and pores; each vent pit is a black smoker |
-| Ice | brine (cold, slow, shelter) between ice walls |
+| Ice | slush (cold, slow, shelter) between ice walls; only the higher ice (elevation 0.62 and up, `MEND_E` in `map.js`) is brine that mends damage, so mending means a trip deep in |
 | Big volcanoes | hot springs in the caldera, with a geyser |
 | Bigger streams | currents toward deep water |
 

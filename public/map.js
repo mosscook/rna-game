@@ -134,6 +134,7 @@ function setWorldLook(o){
   mini.dirty = true; chunks.clear();
 }
 const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
+const MEND_E = 0.62;   /* the generated world's ice mends at this elevation and above (the top two swimmable bands) */
 function generateWorld(s, o){
   const WG = window.WorldGen, size = Math.max(0.4, Math.min(1, o.size || 0.7));
   W = Math.round(BASE_W * size / 100) * 100; H = Math.round(BASE_H * size / 100) * 100; GW = W / CELL; GH = H / CELL;
@@ -157,7 +158,7 @@ function generateWorld(s, o){
     else if (id === 'flats') t = e >= 0.5 ? K.FLATS : K.OCEAN;
     else if (id === 'island') t = e >= 0.62 ? K.UV : e >= 0.38 ? K.CLAY : K.OCEAN;
     else if (id === 'chimneys') t = e >= 0.62 ? K.POCKET : K.PORE;
-    else if (id === 'ice') t = K.BRINE;
+    else if (id === 'ice') t = e >= MEND_E ? K.BRINE : K.SLUSH;   /* only the higher ice mends, so mending means a trip deep in */
     else t = K.OCEAN;
     grid[cy * GW + cx] = t;
   }

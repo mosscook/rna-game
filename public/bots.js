@@ -314,7 +314,7 @@ const MODES = {
     score:(p, i) => i.warn ? 12 : 0,
     act(p, i){
       const w = i.warn, h = i.h;
-      const sh = (w.kind !== 'geyser' && p.mind.traits.caution > 0.4) ? MAP.nearestOf([K.POCKET, K.BRINE], h.x, h.y, 400) : null;
+      const sh = (w.kind !== 'geyser' && p.mind.traits.caution > 0.4) ? MAP.nearestOf([K.POCKET, K.BRINE, K.SLUSH], h.x, h.y, 400) : null;
       p.ai.label = sh ? `hiding from ${w.kind}` : `dodging ${w.kind}`;
       if (sh) return sh;
       const d = dist(h.x, h.y, w.x, w.y) || 1;
@@ -329,7 +329,7 @@ const MODES = {
     },
     act(p, i){
       const h = i.h, tr = p.mind.traits;
-      const sh = MAP.nearestOf([K.POCKET, K.BRINE, K.PORE], h.x, h.y, 700 + 400 * tr.caution);
+      const sh = MAP.nearestOf([K.POCKET, K.BRINE, K.SLUSH, K.PORE], h.x, h.y, 700 + 400 * tr.caution);
       p.ai.label = `fleeing ${i.threat ? i.threat.name : ''}`.trim();
       const fx = i.fx, fy = i.fy, fl = Math.hypot(fx, fy) || 1;
       if (sh && (sh.x - h.x) * fx + (sh.y - h.y) * fy > -200){ p.ai.label += ' to shelter'; return sh; }
