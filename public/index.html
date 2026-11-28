@@ -1037,7 +1037,11 @@ function missNote(fn, pr){
 function wantedLetters(){
   const out = {}; if (!me || !me.alive || watchId != null) return out;
   const tail = me.s.tail, tr = track(tail);
-  if (tr && tr.p.k < recipeLen(tr.fn)){ const need = RS.recipeNeed(tr.p.t, tr.fn, tr.p.k); if (need) out[need] = true; }
+  if (tr && tr.p.k < recipeLen(tr.fn)){
+    const need = RS.recipeNeed(tr.p.t, tr.fn, tr.p.k);
+    /* the first two letters of a recipe can be anything: highlight every letter then, not none */
+    if (need) out[need] = true; else if (tr.p.k < 2) for (const b of 'AUGC') out[b] = true;
+  }
   return out;
 }
 function slotsHtml(fn, pr){
