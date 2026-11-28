@@ -113,7 +113,7 @@ const LIST = [
      if (c.n){ c.want *= 0.3 + 0.7 * c.tr.opportunism; if (!free) c.gain *= 0.5; }
    }},
 
-  {fn:'Repairer', core:'GACGACGAC', body:'helpers',
+  {fn:'Repairer', core:'ACU', body:'helpers',
    does:'Leaves the strand as two helpers that travel up it once, mending damage and clearing junk.',
    tag:'Game idea', sci:'Cells today repair RNA and DNA with protein enzymes. Whether early RNA could mend itself is an open question.',
    tune:[['S.repSpeed', 'Helper speed (how fast it travels and mends)', 2, 60, 0.5, '', 'game']],

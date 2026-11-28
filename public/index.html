@@ -364,8 +364,10 @@ const zoneAt = (x, y) => MAP.zoneAt(x, y);
 /* the name of each place, shown at the top left (biomes.js) */
 const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
 const stage = RS.createStage($('sv'));
+stage.canvasOutline = true;   /* the goo's outline is drawn on the map canvas (drawOutlines), not as an SVG mask per strand */
 /* the microscope look: ?lens=vignette,bokeh,... picks effects (lens.js); ?lens=off for none */
-const LENS = window.SoupLens.create({pond:$('pond'), under:$('top'), MAP, low:() => RS.S.goo === 'off'});
+let lowOn = false;   /* low detail (see setLowDetail) */
+const LENS = window.SoupLens.create({pond:$('pond'), under:$('top'), MAP, low:() => lowOn});
 { const q = new URLSearchParams(location.search).get('lens'); if (q != null) LENS.set(q === 'off' ? [] : q.split(',')); }
 let me = null, fx = [], paused = false, clockT = 0;
 let uiDirty = true, pointer = null, showThoughts = true;
@@ -476,7 +478,7 @@ const HEALTH = /^https?:$/.test(location.protocol);
 let errorsSent = 0, slowSent = false, playSecs = 0, frameN = 0, frameT = 0, worstFps = 999;
 const sentErrors = new Set();
 const sysInfo = () => ({v:VERSION || 'dev', mode:net ? (watchOnly ? 'watch' : 'room') : 'solo', screen:`${innerWidth}x${innerHeight}`, dpr:window.devicePixelRatio || 1,
-  cros:/CrOS/.test(navigator.userAgent), low:RS.S.goo === 'off', px:Math.round(cw * dpr) * Math.round(ch * dpr), secs:Math.round(playSecs)});
+  cros:/CrOS/.test(navigator.userAgent), low:lowOn, px:Math.round(cw * dpr) * Math.round(ch * dpr), secs:Math.round(playSecs)});
 function sendReport(r){
   if (!HEALTH) return;
   const body = JSON.stringify(Object.assign(sysInfo(), r));
@@ -945,6 +947,32 @@ function label(c, text, x, y, col, size){
   }
   c.drawImage(sp.c, x - sp.w / 2, y - sp.base, sp.w, sp.h);
 }
+/* ---------- the strands' goo outlines, on the map canvas ----------
+   Every visible strand's goo path (the same one the SVG body uses) is stroked wide in its colour on one shared layer,
+   then a slightly narrower stroke of the same path is erased, leaving the rim; the layer is pasted under the strands.
+   Two strokes per strand and one paste a frame, where an SVG mask per strand cost far more. Half resolution in low detail */
+const olCan = document.createElement('canvas'), olCtx = olCan.getContext('2d');
+let OL_RES = 0.6;   /* the outline layer's resolution (a little soft, which reads well, and cheaper) */
+let defaultGoo = null;
+function drawOutlines(camX, camY, vw, vh){
+  const list = [];
+  for (const p of L.players) if (p.alive && p.s.visible && p.s.outline.on && p.s.outline.d) list.push(p.s);
+  for (const f of L.frags) if (f.s.visible && f.s.outline.on && f.s.outline.d) list.push(f.s);
+  if (!list.length) return;
+  const r = isLow() ? 0.5 : OL_RES, w = Math.max(1, Math.round(cw * dpr * r)), h = Math.max(1, Math.round(ch * dpr * r));
+  if (olCan.width !== w || olCan.height !== h){ olCan.width = w; olCan.height = h; }
+  if (!defaultGoo) defaultGoo = getComputedStyle(document.documentElement).getPropertyValue('--goo').trim() || RS.S.cGoo || '#fff';
+  const k = w / vw, g = olCtx;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.clearRect(0, 0, w, h);
+  g.setTransform(k, 0, 0, k, -camX * k, -camY * k); g.lineCap = 'round'; g.lineJoin = 'round';
+  /* a polyline through the nodes: cheaper to stroke than the smooth curve, and the softness hides the corners */
+  const paths = list.map(s => { const q = new Path2D(), h = s.head, n = s.nodes; q.moveTo(h.x, h.y); for (let i = 0; i < n.length; i++) q.lineTo(n[i].x, n[i].y); if (!n.length) q.lineTo(h.x + 0.1, h.y); return q; });
+  list.forEach((s, i) => { const o = s.outline; g.globalAlpha = Math.max(0, Math.min(1, o.alpha)); g.strokeStyle = o.col || defaultGoo; g.lineWidth = o.w; g.stroke(paths[i]); });
+  g.globalCompositeOperation = 'destination-out'; g.globalAlpha = 1;
+  list.forEach((s, i) => { g.lineWidth = s.outline.inner; g.stroke(paths[i]); });
+  g.globalCompositeOperation = 'source-over';
+  ctx.drawImage(olCan, camX, camY, vw, vh);
+}
 function draw(t){
   scale = clamp(Math.min(cw, ch) / 620, 0.75, 1.15);
   const fp = focusP(), vw = cw / scale, vh = ch / scale, mh = fp.s.head;
@@ -961,6 +989,7 @@ function draw(t){
   /* the ground: cached chunks in view only, then the tide, currents, smokers, geysers, craters and rafts */
   MAP.drawBase(ctx, camX, camY, vw, vh, t);
   MAP.drawOver(ctx, camX, camY, vw, vh, still ? 0 : t);
+  drawOutlines(camX, camY, vw, vh);
   if (devBiomes) drawBiomes(ctx, vw, vh);
   LENS.drawBack(ctx, camX, camY, cw, ch, scale, t, dpr);
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);
@@ -1227,10 +1256,11 @@ function drawStick(){
 }
 function togglePause(){ if (net || sim.state !== 'play') return; paused = !paused; $('bPause').setAttribute('aria-pressed', paused); if (paused) say('Paused.'); }
 $('bPause').addEventListener('click', togglePause);
-/* low detail: no goo, a lighter lens, and flat ground. The Lo button sets it (remembered either way);
+/* low detail: the goo's outline only (no fill), a lighter lens, and flat ground. The Lo button sets it (remembered either way);
    on a device that stays under about 22 frames a second for 5 seconds of play, it switches on by itself, once */
-const isLow = () => RS.S.goo === 'off';
-function setLowDetail(low){ RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo'); LENS.refresh(); MAP.setLow(low); $('bLow').setAttribute('aria-pressed', low); }
+const isLow = () => lowOn;
+/* low detail keeps the goo's outline (cheap now: drawn on the canvas, at half resolution) but drops its fill */
+function setLowDetail(low){ lowOn = !!low; RS.S.goo = low ? 'outline' : 'memFill'; RS.restyle('goo'); LENS.refresh(); MAP.setLow(low); $('bLow').setAttribute('aria-pressed', low); }
 $('bLow').addEventListener('click', () => {
   const low = !isLow(); setLowDetail(low);
   try { localStorage.setItem('soup2.low', low ? '1' : '0'); } catch(e){}

@@ -659,7 +659,7 @@ function drawBase(g, camX, camY, vw, vh, t){
   at(top, () => {
     for (let ky = j0; ky <= j1; ky++) for (let kx = k0; kx <= k1; kx++){
       const c = chunk(kx, ky);
-      if (c) g.drawImage(c.floor || c, kx * S, ky * S, S, S);
+      if (c) g.drawImage(c.floor || c, kx * S, ky * S, S + 1, S + 1);   /* a pixel of overlap hides seams when the floor is drawn scaled */
       else { g.fillStyle = COL[K.OCEAN]; g.fillRect(kx * S, ky * S, S, S); }
     }
   });
@@ -671,7 +671,7 @@ function drawBase(g, camX, camY, vw, vh, t){
       const k = L - 1 - i, d1 = top - hOf(i), d0 = i ? top - hOf(i - 1) : top;
       for (let s2 = 0; s2 < slices; s2++){ const dd = d0 + (d1 - d0) * s2 / slices;
         at(dd, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q && q.side) g.drawImage(q.side, kx * S + q.x, ky * S + q.y, q.w, q.h); } }); }
-      at(d1, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q) g.drawImage(q.c, kx * S + q.x, ky * S + q.y, q.w, q.h); } });
+      at(d1, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q) g.drawImage(q.c, kx * S + q.x, ky * S + q.y, q.w + 1, q.h + 1); } });
     }
   }
   /* warm the cache just outside the view so swimming into new ground does not stutter */

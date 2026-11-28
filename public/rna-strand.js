@@ -156,7 +156,7 @@ const UNIT_TEXT = {
   Cleaver:'one long arm that folds into two opposing spikes', Mover:'two arms side by side', Membrane:'three or more arms side by side',
   Joiner:'a cheap 7-letter hairpin with a GGA loop. At the tail it is a mouth that grabs fragments; once one attaches right behind it, it fuses around that segment and adds +1',
   Detector:'pricey like the Repairer: one long run that folds back on itself twice, with ACA at each turn. Its middle pairs with both sides, so the strand arcs out, runs back along the spine and arcs out the other way, closing into a circle',
-  'Self-cutter':'a cheap 7-letter hairpin with a UAG loop. It leaves the strand as a ring, slides up to the structure ahead, squeezes it off, and both burst into loose letters', Repairer:'the priciest: two hairpins with GAC loops side by side, one long and one short. It leaves the strand and its two hairpins become odd-shaped helpers that travel up the strand once, mending damaged structures and clearing away junk and loose letters, then dissolve at the 5′ end'
+  'Self-cutter':'a cheap 7-letter hairpin with a UAG loop. It leaves the strand as a ring, slides up to the structure ahead, squeezes it off, and both burst into loose letters', Repairer:'a cheap 7-letter hairpin with an ACU loop, as cheap as a Joiner. It leaves the strand and splits into two odd-shaped helpers that travel up the strand once, mending damaged structures and clearing away junk and loose letters, then dissolve at the 5′ end'
 };
 /* Repairer: two GAC-loop hairpins side by side with different stem lengths (3 to 6 pairs) */
 function repairersOf(s){
@@ -508,7 +508,11 @@ function makeStrand(stage, opts){
   const $ = id => E[id];
   const groups = () => [E.gooFL, E.gooL, E.main, E.helperGoo, E.helpers];
   let visible = true;
-  function tint(spine, goo){ for (const g of groups()){ if (spine) g.style.setProperty('--spine', spine); if (goo) g.style.setProperty('--goo', goo); } }
+  function tint(spine, goo){ for (const g of groups()){ if (spine) g.style.setProperty('--spine', spine); if (goo) g.style.setProperty('--goo', goo); } if (goo) outline.col = goo; }
+  /* with stage.canvasOutline the goo's outline is not SVG (a mask per strand, redrawn every frame, was the biggest
+     drawing cost): the page draws it on its canvas from this. d is the same path the SVG outline uses; w the outline's
+     full width and inner the body's, so the rim is the difference; col its colour, alpha the strand's opacity */
+  const outline = {on:false, d:'', w:0, inner:0, col:null, alpha:1};
   if (opts.tint) tint(opts.tint.spine, opts.tint.goo);
 
   let seq = null, N = [], fold = {mods:[], partner:[], loopOf:[], role:[]}, pairs = new Map(), sticky = new Map();
@@ -1083,7 +1087,7 @@ function makeStrand(stage, opts){
         helpers.push({kind:0, pos, dir:-1, phi:0, wait:0, life:Infinity, cool:0, letters:L.slice(H[0][0], H[0][1] + 1)},
                      {kind:1, pos, dir:-1, phi:Math.PI, wait:1.2, life:Infinity, cool:0, letters:L.slice(H[1][0], H[1][1] + 1)});
         while (helpers.length > 6) helpers.shift();
-        hint('repairerLaunched', `The Repairer left the strand. Its two hairpins are now helpers working their way up the strand once before they dissolve.`);
+        hint('repairerLaunched', `The Repairer left the strand and split into two helpers, working their way up the strand once before they dissolve.`);
       } else repEv = null;
     }
     const n = N.length;
@@ -1275,7 +1279,8 @@ function makeStrand(stage, opts){
     for (const k of ['gooBody', 'gooBody2', 'gooBody3']){ $(k).setAttribute('stroke-width', f1(gw)); $(k).setAttribute('opacity', S.gooOpacity); }
     $('gooIn').setAttribute('stroke-width', f1(gw)); $('gooOut').setAttribute('stroke-width', f1(gw + edge * 2));
     $('gooFL').style.display = fillOn && gooAny ? '' : 'none';
-    $('gooL').style.display = outOn && gooAny ? '' : 'none';
+    $('gooL').style.display = outOn && gooAny && !stage.canvasOutline ? '' : 'none';
+    outline.on = outOn && gooAny; outline.w = gw + edge * 2; outline.inner = gw;
     labelEls.forEach((t, k) => { const m = fold.tags[k]; t.textContent = !m || !m.fn ? '' : m.fused ? 'Joiner fused +1' : m.bonus ? m.fn + ' +' + m.bonus : m.fn; });
     $('labels').style.display = S.labels || (S.pairing === 'parts' && S.decor) ? '' : 'none';
     $('hull').style.display = S.pairing === 'parts' && S.decor ? '' : 'none';
@@ -1357,7 +1362,7 @@ function makeStrand(stage, opts){
     if ($('labels').getAttribute('font-size') !== fs) $('labels').setAttribute('font-size', fs);
     const core = $('core'); core.setAttribute('cx', f1(head.x)); core.setAttribute('cy', f1(head.y));
     if (!n){ ['bb','bbRibbon','rungs','bands','decoFill','decoLine','hull','bbNick'].forEach(id => $(id).setAttribute('d', ''));
-      const hd = `M${f1(head.x)} ${f1(head.y)}h0.1`; $('gooOut').setAttribute('d', hd); $('gooIn').setAttribute('d', hd); $('gooBody').setAttribute('d', ''); $('gooBody2').setAttribute('d', ''); $('gooBody3').setAttribute('d', ''); renderHelpers(); return; }
+      const hd = `M${f1(head.x)} ${f1(head.y)}h0.1`; outline.d = hd; if (!stage.canvasOutline){ $('gooOut').setAttribute('d', hd); $('gooIn').setAttribute('d', hd); } $('gooBody').setAttribute('d', ''); $('gooBody2').setAttribute('d', ''); $('gooBody3').setAttribute('d', ''); renderHelpers(); return; }
     let rung = '';
     const info = new Array(n), spk = new Array(n).fill(null);
     if (S.cleaverSpikes) for (const m of fold.mods) if (isCleaver(m)) for (let i = m.start; i <= m.end; i++) spk[i] = m;
@@ -1390,7 +1395,7 @@ function makeStrand(stage, opts){
       /* runs of covered letters, each drawn as one smooth stroke (the whole strand from the head when it all has goo) */
       const runs = cov => { let d = ''; for (let i = 0; i < n; i++){ if (!cov[i]) continue; let j = i; while (j + 1 < n && cov[j + 1]) j++; d += smoothPath((i === 0 ? [head] : []).concat(N.slice(i, j + 1))) || `M${f1(N[i].x)} ${f1(N[i].y)}h0.1`; i = j; } return d; };
       const outD = S.gooCover === 'all' ? path || `M${f1(head.x)} ${f1(head.y)}h0.1` : runs(gooCov);
-      $('gooOut').setAttribute('d', outD); $('gooIn').setAttribute('d', outD);
+      outline.d = outD; if (!stage.canvasOutline){ $('gooOut').setAttribute('d', outD); $('gooIn').setAttribute('d', outD); }
       $('gooBody').setAttribute('d', S.goo === 'memFill' ? runs(memCov) : outD);
       $('gooBody2').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 2)) : '');
       $('gooBody3').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 3)) : '');
@@ -1531,7 +1536,8 @@ function makeStrand(stage, opts){
       return {fn:st ? st.fn || 'arm' : null, tail, tailNodes, tailSegs};
     },
     tint,
-    setOpacity(o){ for (const g of groups()) g.setAttribute('opacity', o); },
+    setOpacity(o){ for (const g of groups()) g.setAttribute('opacity', o); outline.alpha = +o; },
+    get outline(){ return outline; },
     move(dx, dy){ head.x += dx; head.y += dy; },
     /* put the head somewhere without dragging the body (walls push it back); the body follows its path as usual */
     setHead(x, y, h){ head.x = x; head.y = y; if (h != null) heading = h; const t0 = trail[0]; if (t0){ t0.x = x; t0.y = y; } },
