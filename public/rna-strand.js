@@ -1215,8 +1215,13 @@ function makeStrand(stage, opts){
   let useEls = [], letterEls = [], gooEls = [], labelEls = [], styleDirty = true;
   function buildPools(){
     const n = seq.length, gl = $('glyphs'), lt = $('letters'), go = $('gooL'), lb = $('labels');
-    while (useEls.length < n){ const u = el('use', {}, gl); u.dataset.i = useEls.length; useEls.push(u); letterEls.push(el('text', {}, lt)); }
-    while (useEls.length > n){ useEls.pop().remove(); letterEls.pop().remove(); }
+    while (useEls.length < n){ const u = el('use', {}, gl); u.dataset.i = useEls.length; useEls.push(u); }
+    while (useEls.length > n) useEls.pop().remove();
+    /* letter text only exists while letters are shown (glyph 'letter' or 'structLetter'): hidden, they were still made
+       and moved every frame for every base */
+    const wantL = S.glyph === 'letter' || S.glyph === 'structLetter', nl = wantL ? n : 0;
+    while (letterEls.length < nl) letterEls.push(el('text', {}, lt));
+    while (letterEls.length > nl) letterEls.pop().remove();
     while (labelEls.length < fold.tags.length) labelEls.push(el('text', {}, lb));
     while (labelEls.length > fold.tags.length) labelEls.pop().remove();
     styleDirty = true;
@@ -1365,8 +1370,9 @@ function makeStrand(stage, opts){
       const zn = S.twist && S.motion === 'trail' ? clamp((p.z || 0) / (3 * LB), -1, 1) * S.depthShade : 0, sc = 1 + 0.25 * zn;
       useEls[i].setAttribute('transform', `translate(${f1(p.x)} ${f1(p.y)}) rotate(${f1(p.ang * 180 / Math.PI)}) scale(${sc.toFixed(3)} ${(g.flip ? -sc : sc).toFixed(3)})`);
       const op = (1 - 0.6 * (1 - zn) / 2 * S.depthShade).toFixed(2);
-      if (useEls[i].getAttribute('opacity') !== op){ useEls[i].setAttribute('opacity', op); letterEls[i].setAttribute('opacity', op); }
-      letterEls[i].setAttribute('x', f1(p.x + ca * G.rc)); letterEls[i].setAttribute('y', f1(p.y + sa * G.rc));
+      const te = letterEls[i];
+      if (useEls[i].getAttribute('opacity') !== op){ useEls[i].setAttribute('opacity', op); if (te) te.setAttribute('opacity', op); }
+      if (te){ te.setAttribute('x', f1(p.x + ca * G.rc)); te.setAttribute('y', f1(p.y + sa * G.rc)); }
     }
     if (S.rungs) for (let i = 0; i < n; i++){
       const j = info[i].pj; if (j < i) continue;
@@ -1539,6 +1545,7 @@ function makeStrand(stage, opts){
     remove(){ for (const k of ['gooFL', 'gooL', 'main', 'helperGoo', 'helpers', 'mask']) E[k].remove(); const i = stage.strands.indexOf(api); if (i >= 0) stage.strands.splice(i, 1); },
     _restyle(k){
       if (k == null || k === 'minStem' || k === 'glyphSize' || k === 'lineW' || k === 'pairing'){ computeFold(); buildPools(); }
+      else if (k === 'glyph') buildPools();
       if (k === 'motion' && S.motion === 'trail') seedTrailFromNodes();
       if (k === 'motion' && S.motion === 'physics') N.forEach(p => { p.px = p.x; p.py = p.y; p.z = 0; p.inward = false; });
       styleDirty = true;

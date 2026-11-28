@@ -18,7 +18,7 @@ const TAU = Math.PI * 2;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const dist = (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); };   /* Math.hypot is much slower in hot loops */
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const RECIPES = RS.RECIPES;
 const recipeLen = fn => RECIPES[fn].length + 4;

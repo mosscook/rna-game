@@ -35,6 +35,13 @@ A last card covers what the lesson didn't show: scoring, the other segments, bot
 
 A room opens in a lobby: a mini version of the generated world (a small two-impact lagoon with three ring mounds, rosettes and a highland rim, 0.4 of the classic map across), drawn in the world's look, with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows the whole mini world while in the lobby, and humans start one per mound. If the host leaves, whoever has been there next longest takes over.
 
+## Speed on slow devices
+
+- **Low detail** (the **Lo** button): no goo, a lighter lens, and flat ground (no parallax, no caustics). The button's choice is remembered on that device. On a device that stays under about 22 frames a second for 5 seconds of play, it switches on by itself once, with a note; pressing **Lo** to turn it off stops that for good on that device.
+- When frames are slow the game takes fewer, bigger steps (up to 1/30 s, the server's rate, at most three a frame), instead of catching up with many small ones.
+- The ground is drawn a few rows at a time within about 6 ms a frame, and around your strand while the start screen shows, so a round starts without gaps and swimming into new ground does not freeze. The cache is capped at about 40 MB.
+- The current at a point comes from a 25 px grid filled in as it is asked for; names over the map are drawn once and reused, and only on screen; letter text in strands exists only when letters are shown.
+
 ## The map
 
 The map is a world grown from a seed by `public/worldgen.js`, and tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a central lagoon, with ring mounds inside it and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. The world is 0.7 of the classic map across, about half the area.

@@ -66,13 +66,13 @@ function generateLobby(){
 /* opt.lobby: build the lobby instead of the world */
 function generate(s, opt){
   seed = s >>> 0 || 1; world = null; surf = null;
-  cmask.clear();
-  if (opt && opt.lobby && !opt.classic){ chunks.clear(); return generateMiniLobby(s >>> 0 || 1); }
-  if (opt && opt.world){ chunks.clear(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
+  cmask.clear(); flowCache = null;
+  if (opt && opt.lobby && !opt.classic){ clearChunks(); return generateMiniLobby(s >>> 0 || 1); }
+  if (opt && opt.world){ clearChunks(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
   W = BASE_W; H = BASE_H; GW = W / CELL; GH = H / CELL; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
   grid = new Uint8Array(GW * GH).fill(K.OCEAN);
   flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
-  lavas = []; melted = new Set(); chunks.clear(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
+  lavas = []; melted = new Set(); clearChunks(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
   lobby = !!(opt && opt.lobby); lobbyClumps = [];
   if (lobby) return generateLobby();
   const setC = (cx, cy, t) => { cx = Math.floor(cx); cy = Math.floor(cy); if (cx >= 0 && cy >= 0 && cx < GW && cy < GH) grid[cellIdx(cx, cy)] = t; };
@@ -150,7 +150,7 @@ function setWorldLook(o){
   const key = L => JSON.stringify([L.colours || {}, L.coloursLow || {}, L.hueShift || 0]), recol = key(Object.assign({}, LOOK_BASE, o || {})) !== key(look);
   look = Object.assign({}, LOOK_BASE, o || {});
   if (recol && surf) surf.recolour(look.colours, lowsOf(look));
-  mini.dirty = true; chunks.clear();
+  mini.dirty = true; clearChunks();
 }
 const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
 const MEND_E = 0.62;   /* the generated world's ice mends at this elevation and above (the top two swimmable bands) */
@@ -322,7 +322,17 @@ function zoneAt(x, y){
   return CELLS[t].zone || 'ocean';
 }
 /* water flow at a point: spillways, seeps, meltwater and the gyre */
+/* the current at a point, from a 25 px grid filled in as it is asked for: the streams do not change during a round,
+   and testing every stream for every letter and strand each step was the biggest cost in the sim (browser and server) */
+const FC = 25; let flowCache = null, flowGW = 0, flowGH = 0;
 function flowAt(x, y){
+  if (!flows.length) return {x:0, y:0};
+  if (!flowCache){ flowGW = Math.ceil(W / FC) + 1; flowGH = Math.ceil(H / FC) + 1; flowCache = new Float32Array(flowGW * flowGH * 2).fill(NaN); }
+  const i = Math.max(0, Math.min(flowGW - 1, Math.floor(x / FC))), j = Math.max(0, Math.min(flowGH - 1, Math.floor(y / FC))), o = (j * flowGW + i) * 2;
+  if (flowCache[o] !== flowCache[o]){ const r = flowRaw((i + 0.5) * FC, (j + 0.5) * FC); flowCache[o] = r.x; flowCache[o + 1] = r.y; }
+  return {x:flowCache[o], y:flowCache[o + 1]};
+}
+function flowRaw(x, y){
   let fx = 0, fy = 0;
   for (const f of flows){
     const P = f.pts;
@@ -443,13 +453,22 @@ function update(dt, ev, heads){
 }
 
 /* ---------- drawing: cached terrain chunks, plus what moves ---------- */
-const chunks = new Map(); let renderBudget = 0;
-function dirty(cx, cy){ chunks.delete(Math.floor(cx / CH) + ',' + Math.floor(cy / CH)); mini.dirty = true; }
+/* the ground's chunks, newest last. The cache is capped by bytes (raised parallax layers make chunks bigger), and a
+   generated-world chunk is drawn a few rows at a time within each frame's time budget, so no frame freezes on it */
+const chunks = new Map(), jobs = new Map(); let renderBudget = 0, chunkBytes = 0, chunkDeadline = 0;
+const CHUNK_BYTES = 40e6, CHUNK_MS = 6;
+const chunkSize = c => { const f = c.floor || c; let b = f.width * f.height * 4; if (c.layers) for (const q of c.layers) if (q) b += q.c.width * q.c.height * 4 * (q.side ? 2 : 1); return b; };
+function storeChunk(key, c){
+  c.__b = chunkSize(c); chunks.set(key, c); chunkBytes += c.__b;
+  while ((chunkBytes > CHUNK_BYTES || chunks.size > 64) && chunks.size > 1){ const k = chunks.keys().next().value; chunkBytes -= chunks.get(k).__b || 0; chunks.delete(k); }
+}
+function clearChunks(){ chunks.clear(); jobs.clear(); chunkBytes = 0; }
+function dirty(cx, cy){ const k = Math.floor(cx / CH) + ',' + Math.floor(cy / CH), c = chunks.get(k); if (c){ chunkBytes -= c.__b || 0; chunks.delete(k); } jobs.delete(k); mini.dirty = true; }
 const hash = (a, b) => { let h = Math.imul(a, 374761393) + Math.imul(b, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
 /* the microscope look (lens.js) can draw the ground out of focus: each chunk is blurred once, when it is made.
    It is drawn with a margin first, so neighbouring chunks blur into each other without seams */
 let softPx = 0, softMode = 'low';
-function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode) return; softPx = px; softMode = mode || softMode; chunks.clear(); }
+function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode) return; softPx = px; softMode = mode || softMode; clearChunks(); }
 /* a generated world is drawn from its depth field: each pixel takes its place's colour at its band's brightness, black
    in the depths, with a soft one-pixel edge between bands (the lab's look, without the raised layers) */
 /* ---------- the generated world's ground, one chunk at a time ----------
@@ -458,15 +477,20 @@ function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode
    top bands are pictures of their own: the floor is drawn with everything above band L shown as band L, and each raised
    band k (L-1 up to the walls, band 0) gets a transparent picture of just its shape, so drawBase can lift it toward the
    eye. Their 'sides' are the same shapes darkened, stacked between one layer and the next like cliff faces */
-const parallaxLayers = Lk => Lk.gap > 0 ? Math.max(1, Math.min(4, Math.round(Lk.layers || 3))) : 0;
-function renderWorldChunk(kx, ky){
+/* low detail (the Lo button, or switched on by itself on a slow device) draws the ground flat and without caustics */
+let lowDetail = false;
+function setLow(v){ v = !!v; if (v === lowDetail) return; lowDetail = v; clearChunks(); }
+const parallaxLayers = Lk => !lowDetail && Lk.gap > 0 ? Math.max(1, Math.min(4, Math.round(Lk.layers || 3))) : 0;
+function renderWorldChunk(kx, ky){ const j = worldChunkJob(kx, ky); j.run(Infinity); return j.result; }
+function worldChunkJob(kx, ky){
   const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT, Lk = look, L = parallaxLayers(Lk);
   /* drawn a little under screen resolution when filled (the bands are smooth curves); at full resolution with outlines */
   const R = softPx && softMode === 'low' ? 0.34 : Lk.line > 0 ? CR : 0.6, S = CH * CELL, pad = softPx && !L ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
   const c = document.createElement('canvas'); c.width = c.height = n;
   const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0], low = [0, 0, 0], bc = [0, 0, 0], hs = shifting(Lk);
   const x0 = kx * S - pad, y0 = ky * S - pad, m = n + 1, ev = new Float32Array(m * m);
-  for (let py = 0; py < m; py++) for (let px = 0; px < m; px++) ev[py * m + px] = surf.elev(x0 + (px + 0.5) * step, y0 + (py + 0.5) * step);
+  /* elevation rows are read as the pixel rows that need them are drawn */
+  let evRow = 0; const fillEv = upto => { for (; evRow <= upto && evRow < m; evRow++) for (let px = 0; px < m; px++) ev[evRow * m + px] = surf.elev(x0 + (px + 0.5) * step, y0 + (evRow + 0.5) * step); };
   const [d0, d1, d2] = Lk.deep, fill = Lk.fill, sp = Lk.depth, lineA = Lk.line, lw = Math.max(0.3, Lk.lineW) * 0.8, fade = Lk.lineFade, wallB = Lk.wall, wl = Lk.wallLine == null ? 1 : Lk.wallLine;
   const brt = Lk.bright == null ? 1 : Lk.bright, sat = Lk.sat == null ? 1 : Lk.sat, tone = brt !== 1 || sat !== 1;
   const bright = BR.map(v => Math.max(0, 1 - (1 - v) * sp)), lineM = BR.map(v => 1 - fade * (1 - v));
@@ -510,7 +534,9 @@ function renderWorldChunk(kx, ky){
       } }
     out[0] = r; out[1] = gg; out[2] = b; return out;
   }
-  for (let py = 0; py < n; py++) for (let px = 0; px < n; px++){
+  function row(py){
+  fillEv(py + 1);
+  for (let px = 0; px < n; px++){
     const x = x0 + (px + 0.5) * step, y = y0 + (py + 0.5) * step, o = (py * n + px) * 4;
     if (x < 0 || y < 0 || x >= W || y >= H){ d[o] = d0; d[o + 1] = d1; d[o + 2] = d2; d[o + 3] = 255; continue; }
     const i = py * m + px, ex = ev[i + 1] - ev[i], ey = ev[i + m] - ev[i]; e = ev[i]; grad = Math.sqrt(ex * ex + ey * ey) + 1e-6;
@@ -525,6 +551,15 @@ function renderWorldChunk(kx, ky){
       if (px < q.x0) q.x0 = px; if (px > q.x1) q.x1 = px; if (py < q.y0) q.y0 = py; if (py > q.y1) q.y1 = py;
     }
   }
+  }
+  let py = 0;
+  const job = {result:null, run(deadline){
+    do { row(py); py++; } while (py < n && performance.now() < deadline);
+    if (py < n) return false;
+    job.result = finish(); return true;
+  }};
+  return job;
+  function finish(){
   g.putImageData(img, 0, 0);
   if (L){
     /* each raised band as a picture of just its box, with a darkened copy for its sides */
@@ -544,6 +579,7 @@ function renderWorldChunk(kx, ky){
   const q = o2.getContext('2d'); q.filter = `blur(${(softPx * R * (softMode === 'low' ? 0.5 : 1)).toFixed(2)}px)`;
   q.drawImage(c, -pad * R, -pad * R);
   return o2;
+  }
 }
 function renderChunk(kx, ky){
   if (world) return renderWorldChunk(kx, ky);
@@ -583,10 +619,16 @@ function chunk(kx, ky){
   const key = kx + ',' + ky;
   let c = chunks.get(key);
   if (c){ chunks.delete(key); chunks.set(key, c); return c; }
+  /* the generated world: continue (or start) this chunk's drawing until the frame's time budget runs out */
+  if (world){
+    if (performance.now() > chunkDeadline) return null;
+    let j = jobs.get(key); if (!j){ j = worldChunkJob(kx, ky); jobs.set(key, j); }
+    if (!j.run(chunkDeadline)) return null;
+    jobs.delete(key); storeChunk(key, j.result); return j.result;
+  }
   if (renderBudget <= 0) return null;
   renderBudget--;
-  c = renderChunk(kx, ky); chunks.set(key, c);
-  while (chunks.size > 48) chunks.delete(chunks.keys().next().value);
+  c = renderChunk(kx, ky); storeChunk(key, c);
   return c;
 }
 /* draw the ground under everything: only the chunks in view, at most a few new ones per frame */
@@ -653,7 +695,7 @@ function causticMask(kx, ky){
   return m;
 }
 function drawCaustics(g, camX, camY, vw, vh, t){
-  const k = look.caustics || 0; if (!world || k <= 0 || !surf) return;
+  const k = look.caustics || 0; if (!world || k <= 0 || !surf || lowDetail) return;
   if (!causticTex) causticTex = makeCausticTex();
   const cr = 0.5, ow = Math.ceil(vw * cr), oh = Math.ceil(vh * cr);
   if (!causticCan) causticCan = document.createElement('canvas');
@@ -680,8 +722,16 @@ function drawCaustics(g, camX, camY, vw, vh, t){
 }
 let maskCan = null;
 const maskCanvas = (w, h) => { if (!maskCan) maskCan = document.createElement('canvas'); if (maskCan.width !== w || maskCan.height !== h){ maskCan.width = w; maskCan.height = h; } return maskCan; };
+/* draw the chunks around a point ahead of time (the start screen calls this, so a round starts without black squares) */
+function warm(x, y, ms, rad){
+  if (!world) return; chunkDeadline = performance.now() + ms; const S = CH * CELL, r = rad || 1, cx = Math.floor(x / S), cy = Math.floor(y / S);
+  for (let d = 0; d <= r; d++) for (let ky = cy - d; ky <= cy + d; ky++) for (let kx = cx - d; kx <= cx + d; kx++){
+    if (Math.max(Math.abs(kx - cx), Math.abs(ky - cy)) !== d || kx < 0 || ky < 0 || kx * S >= W || ky * S >= H) continue;
+    if (!chunks.has(kx + ',' + ky)){ chunk(kx, ky); if (performance.now() > chunkDeadline) return; }
+  }
+}
 function drawBase(g, camX, camY, vw, vh, t){
-  renderBudget = 3;
+  renderBudget = 3; chunkDeadline = performance.now() + CHUNK_MS;
   /* parallax, as a camera above the water sees it: the strands swim at the surface, and the ground lies below it, each
      layer deeper than the one above. A layer at depth d is drawn scaled about the middle of the view by 1 / (1 + d x gap),
      as a pinhole camera would see it: the walls (which reach the surface, and are where strands collide) are drawn as
@@ -715,7 +765,7 @@ function drawBase(g, camX, camY, vw, vh, t){
     }
   }
   /* warm the cache just outside the view so swimming into new ground does not stutter */
-  for (let ky = j0 - 1; ky <= j1 + 1 && renderBudget > 0; ky++) for (let kx = k0 - 1; kx <= k1 + 1 && renderBudget > 0; kx++){
+  for (let ky = j0 - 1; ky <= j1 + 1 && renderBudget > 0 && performance.now() < chunkDeadline; ky++) for (let kx = k0 - 1; kx <= k1 + 1 && renderBudget > 0; kx++){
     if (kx < 0 || ky < 0 || kx * S >= W || ky * S >= H || chunks.has(kx + ',' + ky)) continue; chunk(kx, ky);
   }
   /* the tide: water floods the flats and drains away again */
@@ -991,7 +1041,7 @@ function randomOf(types){
 return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, get worldLook(){ return JSON.parse(JSON.stringify(look)); }, setWorldLook, LOOK_BASE, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
-  get lavas(){ return lavas; }, lavaAt, lavaNear, lowsOf, drawShadows, drawCaustics,
+  get lavas(){ return lavas; }, lavaAt, lavaNear, lowsOf, drawShadows, drawCaustics, warm, setLow,
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
   get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }, setSoft, renderChunk};
 };

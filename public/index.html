@@ -927,9 +927,23 @@ function nucGlyph(c, q, t, need){
   if (need){ c.beginPath(); c.arc(q.x, q.y, r + 4, 0, TAU); c.lineWidth = 1.6; c.strokeStyle = T.ink; c.globalAlpha = 0.6 * k; c.stroke(); }
   c.globalAlpha = 1;
 }
+/* a name or note over the map. Stroked text is slow to draw, so each label is drawn once into a small picture at the
+   screen's resolution and that picture is reused (the most recent 300 are kept) */
+const labelCache = new Map();
 function label(c, text, x, y, col, size){
-  c.font = `700 ${size || 13}px ${T.font}`; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
-  c.lineWidth = 4; c.strokeStyle = T.pond; c.strokeText(text, x, y); c.fillStyle = col; c.fillText(text, x, y);
+  size = size || 13; const k = c.getTransform().a, key = text + '|' + col + '|' + size + '|' + k.toFixed(2);
+  let sp = labelCache.get(key);
+  if (sp){ labelCache.delete(key); labelCache.set(key, sp); }
+  else {
+    const font = `700 ${size}px ${T.font}`; c.font = font;
+    const w = c.measureText(text).width + 10, h = size * 1.6 + 8, base = size * 1.15 + 4, cv2 = document.createElement('canvas');
+    cv2.width = Math.max(1, Math.ceil(w * k)); cv2.height = Math.max(1, Math.ceil(h * k));
+    const g2 = cv2.getContext('2d'); g2.scale(k, k); g2.font = font; g2.textAlign = 'center'; g2.textBaseline = 'alphabetic';
+    g2.lineWidth = 4; g2.lineJoin = 'round'; g2.strokeStyle = T.pond; g2.strokeText(text, w / 2, base); g2.fillStyle = col; g2.fillText(text, w / 2, base);
+    sp = {c:cv2, w, h, base}; labelCache.set(key, sp);
+    if (labelCache.size > 300) labelCache.delete(labelCache.keys().next().value);
+  }
+  c.drawImage(sp.c, x - sp.w / 2, y - sp.base, sp.w, sp.h);
 }
 function draw(t){
   scale = clamp(Math.min(cw, ch) / 620, 0.75, 1.15);
@@ -960,7 +974,7 @@ function draw(t){
   ctx.lineWidth = 2; ctx.strokeStyle = T.line; ctx.strokeRect(0, 0, W, H);
 
   /* the strand layer follows the same camera; strands far off screen keep swimming but are not drawn */
-  const pad = 700;
+  const pad = 250;
   for (const p of L.players) p.s.setVisible(p.alive && strandSeen(p.s, pad));
   for (const f of L.frags) f.s.setVisible(strandSeen(f.s, pad));
   function strandSeen(sn, pd){ const h = sn.head, n = sn.nodes, e = n[n.length - 1] || h; return seen(h.x, h.y, pd) || seen(e.x, e.y, pd); }
@@ -974,7 +988,7 @@ function draw(t){
   tx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);
   for (const p of L.players){
     if (!p.alive) continue;
-    const h = p.s.head;
+    const h = p.s.head; if (!seen(h.x, h.y, 80)) continue;   /* names off screen are not drawn */
     if (p.inv > 0 && Math.floor(t * 8) % 2){ tx.beginPath(); tx.arc(h.x, h.y, 9, 0, TAU); tx.lineWidth = 1.5; tx.strokeStyle = T[p.col]; tx.stroke(); }
     label(tx, p.name, h.x, h.y - 18, T[p.col]);
     if (p.isBot && showThoughts && p.ai.label && seen(h.x, h.y, 100)) label(tx, p.ai.label, h.x, h.y - 32, T.muted, 10);
@@ -1216,12 +1230,24 @@ function drawStick(){
 }
 function togglePause(){ if (net || sim.state !== 'play') return; paused = !paused; $('bPause').setAttribute('aria-pressed', paused); if (paused) say('Paused.'); }
 $('bPause').addEventListener('click', togglePause);
+/* low detail: no goo, a lighter lens, and flat ground without caustics. The Lo button sets it (remembered either way);
+   on a device that stays under about 22 frames a second for 5 seconds of play, it switches on by itself, once */
+const isLow = () => RS.S.goo === 'off';
+function setLowDetail(low){ RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo'); LENS.refresh(); MAP.setLow(low); $('bLow').setAttribute('aria-pressed', low); }
 $('bLow').addEventListener('click', () => {
-  const low = RS.S.goo !== 'off';
-  RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo'); LENS.refresh();
-  $('bLow').setAttribute('aria-pressed', low);
-  try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
+  const low = !isLow(); setLowDetail(low);
+  try { localStorage.setItem('soup2.low', low ? '1' : '0'); } catch(e){}
 });
+let slowSecs = 0, autoLowDone = false;
+function watchSpeed(){
+  if (autoLowDone || isLow()) return;
+  let pref = null; try { pref = localStorage.getItem('soup2.low'); } catch(e){}
+  if (pref === '0') return;
+  const playing = net ? net.state === 'play' : sim.state === 'play';
+  if (!playing || paused || document.hidden) return;
+  slowSecs = (window.__fps || 60) < 22 ? slowSecs + 1 : 0;
+  if (slowSecs >= 5){ autoLowDone = true; setLowDetail(true); say('Switched to low detail to keep things smooth. The Lo button switches it back.'); }
+}
 /* ---------- the generated world's look ----------
    Two looks, Filled and Lines, each fully adjustable in ?dev (Map look) and remembered in this browser. The ◯ button
    or O switches between them; ?look=lines or ?look=filled picks one. Presets load starting values into the look being
@@ -1472,7 +1498,7 @@ function start(){
   /* the lab's look, a little larger so strands read at game scale */
   RS.S.glyphSize = 4; RS.S.gooSize = 30; RS.restyle();
   readTokens(); buildList(); devSetup();
-  try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); LENS.refresh(); } } catch(e){}
+  try { if (localStorage.getItem('soup2.low') === '1') setLowDetail(true); } catch(e){}
   applyLook();
   if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
   reset(); resize();
@@ -1481,13 +1507,17 @@ function start(){
   if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
   let last = performance.now(), fpsT = 0, fpsN = 0, acc = 0;
   (function frame(now){
-    const dt = Math.min(0.1, (now - last) / 1000); last = now; W = MAP.W; H = MAP.H;
+    const raw = (now - last) / 1000, dt = Math.min(0.1, raw); last = now; W = MAP.W; H = MAP.H;
     if ($('bLook').hidden === !!MAP.world){ $('bLook').hidden = !MAP.world; syncLookPanel(); }   /* only the generated world has these looks */
-    fpsT += dt; fpsN++; if (fpsT >= 1){ window.__fps = fpsN / fpsT; fpsT = 0; fpsN = 0; }
-    /* fixed 1/60 s steps, as in the specimen, so swimming feels the same at any frame rate */
+    fpsT += raw; fpsN++; if (fpsT >= 1)   /* real time, so a frame rate under 10 is reported as it is */{ window.__fps = fpsN / fpsT; fpsT = 0; fpsN = 0; watchSpeed(); }
+    /* steps of 1/60 s, as in the specimen, so swimming feels the same at any frame rate. When frames are slow, steps of
+       up to 1/30 s (the server's rate) and at most three a frame, so a slow device does not spend each frame catching
+       up with four small steps (which made it slower still) */
     acc += dt; let n = 0;
-    while (acc >= 1 / 60 && n < 4){ if (!paused) step(1 / 60); acc -= 1 / 60; n++; }
-    if (n === 4) acc = 0;
+    while (acc >= 1 / 60 && n < 3){ const h = Math.min(1 / 30, acc); if (!paused) step(h); acc -= h; n++; }
+    if (n === 3) acc = 0;
+    /* while the start screen shows, draw the ground around your strand ahead of time, so the round starts without gaps */
+    if (me && !$('overlay').hidden && MAP.world) MAP.warm(me.s.head.x, me.s.head.y, 12, 2);
     /* a watcher has no strand: follow someone as soon as the room's strands arrive */
     if (watchOnly && watchId == null && others().length) watch(others()[0]);
     /* the tour moves on every 15 seconds */
@@ -1498,7 +1528,7 @@ function start(){
       const d0 = performance.now();
       draw(now / 1000);
       drawMs += (performance.now() - d0 - drawMs) * 0.05;
-      trackHealth(dt);
+      trackHealth(Math.min(1, raw));
     }
     requestAnimationFrame(frame);
   })(last);
