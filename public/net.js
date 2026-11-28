@@ -25,7 +25,7 @@ function create(o){
   const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}, outdated(){}, host(){}}, o.hooks || {});
   /* o.version: the page's own version, or a function returning it (the page learns it from /version after loading) */
   const pageVersion = () => typeof o.version === 'function' ? o.version() : o.version;
-  let lobby = false, isHost = false, hostName = '', auto = false, autoEnd = 0, worldSize = 0, mapKind = 'classic';   /* the room's lobby before a game, and who can start it */
+  let lobby = false, isHost = false, hostName = '', auto = false, autoEnd = 0, worldSize = 0, mapKind = 'world';   /* the room's lobby before a game, and who can start it */
   let ws = null, meId = null, seed = null, state = 'connecting', tl = 0, tlAt = 0, offset = null, rtt = 0.08, url = '', name = '', watchOnly = false, watchId = null;
   let lastSend = 0, lastAim = null, retry = 0, closedByUs = false;
   /* a random token for this tab only (gone when the tab closes): lets a refresh or a dropped connection take your strand back */
@@ -105,7 +105,7 @@ function create(o){
       case 'e': state = 'over'; hooks.end(m.rows.map(([id, nm, col, sc, bot, st]) => ({p:P.get(id) || {id, name:nm, col, isBot:!!bot, s:{length:0}}, score:sc,
         stats:st ? {letters:st[0], folds:st[1], cuts:st[2], cutsTaken:st[3], hits:st[4], hitsTaken:st[5], joins:st[6], deaths:st[7]} : null}))); break;
       case 'pong': rtt = rtt * 0.8 + (now() - m.at) * 0.2; break;
-      case 'h': isHost = !!m.you; hostName = m.name || ''; auto = !!m.auto; mapKind = m.mp || 'classic'; autoEnd = m.in ? now() + m.in : 0; hooks.host(); break;
+      case 'h': isHost = !!m.you; hostName = m.name || ''; auto = !!m.auto; mapKind = m.mp || 'world'; autoEnd = m.in ? now() + m.in : 0; hooks.host(); break;
       case 'full': hooks.status(m.watch ? 'Too many people are watching this room.' : 'This room is full. Try another room name.'); closedByUs = true; break;
     }
   }
@@ -134,7 +134,9 @@ function create(o){
     for (const [x, y, col, r, dur, flash] of m.X || []) hooks.fx({x, y, col, r, dur, flash:!!flash});
     /* strands that left your view: hide them until they come back */
     for (const mm of P.values()) if (mm.last != null && mm.last < st - 0.4 && mm.id !== meId){ mm.shown = false; mm.alive = false; }
-    for (const f of F.values()) if (t - f.seen > 0.6){ f.shown = false; if (t - f.seen > 90) dropMirror(F, f.id); }
+    /* fragments the server stopped sending (taken in by a Joiner, burst, or out of view): hide them at once, not just
+       stop moving them, and forget them after a while */
+    for (const f of F.values()) if (t - f.seen > 0.3){ if (f.shown){ f.shown = false; f.s.setVisible(false); } if (t - f.seen > 90) dropMirror(F, f.id); }
   }
 
   /* ---------- your own strand: predicted here, corrected by the server ---------- */
@@ -263,7 +265,7 @@ function create(o){
     inRoster:id => roster.has(id),
     get watchOnly(){ return watchOnly; },
     debug:obj => send(Object.assign({t:'debug'}, obj)),   /* ignored by real servers; local testing only */
-    get me(){ return meId != null ? P.get(meId) || null : null; }, get players(){ return players; }, get frags(){ return frags; }, get nucs(){ return nucs; },
+    get me(){ return meId != null ? P.get(meId) || null : null; }, get players(){ return players; }, get frags(){ return frags.filter(f => f.shown); }, get nucs(){ return nucs; },
     get mini(){ return mini; }, get state(){ return state; }, get timeLeft(){ return Math.max(0, tl - (state === 'play' ? now() - tlAt : 0)); },
     get rtt(){ return rtt; }, get seed(){ return seed; }};
 }

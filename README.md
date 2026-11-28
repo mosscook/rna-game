@@ -33,13 +33,15 @@ A last card covers what the lesson didn't show: scoring, the other segments, bot
 
 ## Lobby
 
-A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
+A room opens in a lobby: a mini version of the generated world (a small two-impact lagoon with three ring mounds, rosettes and a highland rim, 0.4 of the classic map across), drawn in the world's look, with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows the whole mini world while in the lobby, and humans start one per mound. If the host leaves, whoever has been there next longest takes over.
 
-## Generated world (test)
+## The map
 
-A new map is on its way: a world grown from a seed by `public/worldgen.js`, tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a central lagoon with ring mounds and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. It is 0.7 of the classic map across, about half the area.
+The map is a world grown from a seed by `public/worldgen.js`, and tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a central lagoon, with ring mounds inside it and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. The world is 0.7 of the classic map across, about half the area.
 
-To try it, the host ticks **New map (test)** in the lobby, or opens the room with `?map=world`. Solo play also takes `?map=world`. The classic map stays the default. The world's places reuse the classic ground types:
+**Fallback:** the old painted map is still there. In a room, the host ticks **Classic map** in the lobby, or opens the room with `?map=classic`. Solo play takes `?map=classic` too. Use it if the world runs slowly on a device.
+
+The world's places reuse the classic map's ground types:
 
 | World place | Plays as |
 |---|---|
@@ -51,7 +53,24 @@ To try it, the host ticks **New map (test)** in the lobby, or opens the room wit
 | Big volcanoes | hot springs in the caldera, with a geyser |
 | Bigger streams | currents toward deep water |
 
+The world has two looks, **Filled** and **Lines**, switched with the ◯ button in the bottom bar, the O key, or `?look=lines` / `?look=filled`. Lines is the default: thin coloured band edges over a faint fill, so the strands stand out while depth (and so speed) stays readable. Both looks can be adjusted in the dev panel (`?dev`, **Map look**), and each browser remembers its own:
+
+| Setting | What it does |
+|---|---|
+| Fill | How strongly each band is filled with its place's colour (0: the deep colour everywhere) |
+| Depth steps | How much darker each deeper band gets |
+| Outline, Line width | The line where each band starts, and its width |
+| Line fade | How much the lines dim with depth |
+| Wall tint | The least brightness walls keep, so they read as solid |
+| Colours | The deep colour and each place's colour |
+
+Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default.
+
 The server and every browser build the same map from the seed: the generator uses only basic arithmetic. The room also sends a fingerprint of the map, and a browser that grew a different one says so in its console. `node test/world.mjs` plays a round on a world. `node test/room-world.mjs` checks a world room against `wrangler dev`. The reaction-diffusion textures are off in the game for now: they take 2-3 s to grow.
+
+## Picking up letters
+
+A strand's head picks up a letter within 19 px (more on clay). People's heads reach 45% further than that, about 28 px, without it showing: they steer with a finger or a mouse, and in a room their head is a few frames behind the server's. Bots keep the plain reach. Letters also push each other apart when they're closer than 34 px, so piles spread into a loose scatter you can swim through and pick from. That costs about 0.15 ms a step for 280 letters. The constants are `HUMAN_REACH`, `REPEL_R` and `REPEL_A` at the top of `public/sim.js`.
 
 ## Letters break down
 
@@ -59,19 +78,19 @@ Free letters don't last forever, as real nucleotides break down in water (hydrol
 
 ## Microscope look
 
-`public/lens.js` adds optional effects that make the soup look like a view down a microscope. Only `motes` is on by default; choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
+`public/lens.js` adds optional effects that make the soup look like a view down a microscope. On by default: `motes`, `eyepiece`, `grain` and `bokeh`. The Lo button turns off the two that cost every frame (`grain`, and `edge` if picked). choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
 
 | Effect | What it does | Cost |
 | --- | --- | --- |
-| `motes` (on by default) | Floating grains, clay flakes and fatty-acid vesicles in four parallax layers: three below the strands (hidden behind rock and ice) sliding slower than the ground, one above them sliding faster | About 1 ms of drawing a frame on a slowed-down processor; half as many in low detail |
+| `motes` (on) | Floating grains, clay flakes and fatty-acid vesicles in four parallax layers: three below the strands (hidden behind rock and ice) sliding slower than the ground, one above them sliding faster | About 1 ms of drawing a frame on a slowed-down processor; half as many in low detail |
 | `vignette` | Light falls off toward the corners | None measurable (a CSS gradient on a layer that never changes) |
-| `eyepiece` | A round field of view; corners go dark | None measurable, but it hides strands coming from the corners |
+| `eyepiece` (on) | A round field of view; corners go dark | None measurable, but it hides strands coming from the corners |
 | `rim` | A faint blue and magenta fringe near the edge, like a cheap lens | None measurable |
-| `bokeh` | Out-of-focus specks drifting above and below the focal plane, with parallax | None measurable (27 soft discs a frame) |
+| `bokeh` (on) | Out-of-focus specks drifting above and below the focal plane, with parallax | None measurable (27 soft discs a frame) |
 | `soft` | The ground out of focus, so only strands and letters are sharp | Slightly cheaper than normal: ground tiles are drawn at lower resolution and blurred once |
 | `scale` | A scale bar in nanometres above the minimap (letters are about 0.6 nm apart) | None measurable |
-| `grain` | Sensor noise | About 25% of frame rate in a slowed-down test |
-| `edge` | Real blur around the edge (backdrop-filter); for testing on a real Chromebook only | Every frame, on the graphics chip |
+| `grain` (on; off in low detail) | Sensor noise | About 25% of frame rate in a slowed-down test |
+| `edge` (off; off in low detail too) | Real blur around the edge of the view (CSS backdrop-filter), round with the eyepiece, so only the middle is sharp | Every frame, on the graphics chip |
 
 Recommended set: `?lens=motes,vignette,rim,bokeh,soft,scale`.
 
@@ -132,7 +151,7 @@ Moving hazards (the tide, geysers, shifting ice, meteorites, UV flashes, rafts) 
 
 ## Dev mode
 
-Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). A panel shows the frame rate and how long each step and frame take, the counts of strands, letters and fragments, the seed and tide, and the ground type, zone, speed and letter richness under the pointer. **Ground map** (or B) tints every cell by its ground type, with a key.
+Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). The panel's sections fold open and closed (remembered per browser): **Map look**, **Microscope effects**, **Test tools** and **Reference**. At the top it shows the frame rate and how long each step and frame take, the counts of strands, letters and fragments, the seed and tide, and the ground type, zone, speed and letter richness under the pointer. **Ground map** (or B) tints every cell by its ground type, with a key.
 
 In single-player the panel also has test buttons: add any segment to your strand; make a fragment, meteorite or UV flash where the pointer is; damage your strand; run time 4× faster; skip a minute; end the round; clear the bots. In rooms it only shows information, so nobody can cheat in a shared game.
 

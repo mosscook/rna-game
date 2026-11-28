@@ -2,7 +2,7 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>RNA Strand Soup v2</title>
 <style>
 :root{
@@ -60,6 +60,10 @@ button{font-family:inherit;color:inherit}
 #cv,#sv,#top{position:absolute;inset:0;width:100%;height:100%;display:block}
 #sv{pointer-events:none;overflow:hidden}
 #top{touch-action:none;cursor:crosshair}
+/* phones and tablets: no text selection, long-press menus, tap flashes or double-tap zoom while playing (typing fields
+   and the dev panel's text stay selectable) */
+html,body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+input,textarea,[contenteditable],.dev pre{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
 .hud,.trk,.fab,.panel,.acts .btn{background:var(--glass);border:1px solid var(--edge);box-shadow:0 2px 10px rgb(0 0 0 / .18)}
 
 /* top left: time, your complexity, your place, where you are */
@@ -130,7 +134,19 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .sheet .alt:hover{color:var(--ink)}
 
 /* start and end screens */
-.overlay{position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--pond) 55%,transparent);overflow:auto;z-index:5}
+/* the start screen's logo: RNA written by three live strands, GAME in plain type beneath */
+.logo{display:grid;justify-items:center;pointer-events:none;user-select:none}
+.logo svg{width:min(300px,78vw,42vh);height:auto;overflow:visible}
+.logoWord{font:800 clamp(22px,min(6vw,5vh),36px)/1 var(--font-display);letter-spacing:.42em;margin:-6px 0 6px .42em;color:var(--ink);opacity:.92}
+.sheet.start{gap:8px;padding:14px 16px;max-width:400px}
+.sheet.start h2{font-size:17px}
+.sheet.start > p{font-size:13.5px;margin:0}
+.sheet.start .mode{padding:8px 12px}
+.sheet.start .mode b{font-size:16px}
+.sheet.start .mode small{font-size:12px}
+.sheet.start .room{margin:6px 0 2px}
+.sheet.start .fine{margin:0;font-size:11.5px}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;align-content:safe center;gap:4px;padding:16px;background:color-mix(in srgb,var(--pond) 55%,transparent);overflow:auto;z-index:5}
 .sheet{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;max-width:440px;display:grid;gap:10px;box-shadow:0 8px 30px rgb(0 0 0 / .25)}
 .sheet h2{font-size:20px}
 .sheet .fine{font-size:12px;color:var(--muted)}
@@ -201,6 +217,17 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .dev .btn{height:24px;padding:0 8px;font:700 11px var(--font-body)}
 .dev .legend{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
 .dev .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;background:var(--c);vertical-align:-1px}
+.dev{width:320px}
+.dev details.sec{border-top:1px solid var(--line);padding-top:6px}
+.dev details.sec > summary{cursor:pointer;font:800 11px var(--font-body);text-transform:uppercase;letter-spacing:.07em;color:var(--ink);list-style-position:inside}
+.dev details.sec .body{display:grid;gap:6px;margin-top:6px}
+.dev .lk{display:grid;grid-template-columns:84px minmax(90px,1fr) 34px;align-items:center;gap:6px;font-size:11px;width:100%;box-sizing:border-box}
+.dev .lk input{width:100%;margin:0}
+.dev .lk output{font:11px var(--font-mono);text-align:right;color:var(--ink)}
+.dev .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11px}
+.dev .cols label{display:flex;align-items:center;gap:6px}
+.dev .cols input{width:30px;height:20px;padding:0;border:1px solid var(--line);border-radius:4px;background:none}
+.dev .note{font-size:11px;color:var(--muted)}
 .dev h3{margin:2px 0 0;font:700 10px var(--font-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 /* the microscope look (lens.js): layers between the strands and the top canvas */
 .lens,.edgeblur{position:absolute;inset:0;pointer-events:none;overflow:hidden}
@@ -274,10 +301,11 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn" type="button" id="bDrop">Drop<kbd>X</kbd></button>
     <button class="btn" type="button" id="bWatch" aria-pressed="false" title="Watch other strands (V)">Watch<kbd>V</kbd></button>
     <button class="btn sm" type="button" id="bLow" aria-pressed="false" aria-label="Low detail" title="Low detail">Lo</button>
+    <button class="btn sm" type="button" id="bLook" aria-pressed="false" aria-label="Outline map" title="Outline map: black ground with coloured edges, so strands stand out (O)" hidden>&#9711;</button>
     <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
   </div>
 
-  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><label class="auto" id="mapWrap" title="Try the new generated world: meteor-made lagoon, highlands, volcanoes, streams. Still being tuned"><input type="checkbox" id="mapBox"> New map (test)</label><button class="btn go" type="button" id="bStart">Start game</button></div>
+  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><label class="auto" id="mapWrap" title="Play the old painted map instead of the generated world, as a fallback (for example if a Chromebook runs slowly)"><input type="checkbox" id="mapBox"> Classic map</label><button class="btn go" type="button" id="bStart">Start game</button></div>
   <div class="coach" id="coach" role="status" aria-live="polite" hidden><span class="n" id="coachN"></span><div><b id="coachT"></b><p id="coachX"></p><p class="note" id="coachNote"></p><p class="tip" id="coachTip" hidden></p></div><button class="alt" type="button" id="coachSkip">Skip</button></div>
   <aside class="dev" id="dev" aria-label="Developer tools" hidden></aside>
   <div class="watch" id="watchBar" role="group" aria-label="Spectating" hidden>
@@ -288,7 +316,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn sm" type="button" id="wStop" aria-label="Stop watching" title="Back to your strand (V)">&times;</button>
   </div>
   <p class="toast" id="toast" aria-live="polite"></p>
-  <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+  <div class="overlay" id="overlay"><div class="logo" id="logo" hidden aria-label="RNA game"><svg id="logoSvg" viewBox="-24 -26 348 176" aria-hidden="true"></svg><div class="logoWord" aria-hidden="true">GAME</div></div><div class="sheet" id="sheet"></div></div>
 </div>
 
 <script src="segments.js"></script>
@@ -322,8 +350,9 @@ const recipeLen = fn => RECIPES[fn].length + 4;
 /* ---------- the game runs in sim.js; this file draws it and handles the page ---------- */
 const MAP = window.SoupMap, MK = MAP.K, BOTS = window.SoupBots;
 let W = MAP.W, H = MAP.H;   /* a generated world can be smaller: refreshed every frame */
-/* ?map=world tries the generated world (worldgen.js): in solo play, and for a room's host, who can also pick it in the lobby */
-const WANT_WORLD = new URLSearchParams(location.search).get('map') === 'world';
+/* the generated world (worldgen.js) is the map; ?map=classic falls back to the old painted one, in solo play and for a
+   room's host (who can also tick Classic map in the lobby) */
+const WANT_CLASSIC = new URLSearchParams(location.search).get('map') === 'classic', WANT_WORLD = !WANT_CLASSIC;
 const zoneAt = (x, y) => MAP.zoneAt(x, y);
 /* the name of each place, shown at the top left (biomes.js) */
 const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
@@ -465,22 +494,29 @@ let healthFrames = 0, healthSecs = 0;
 
 /* ---------- ?dev: frame and step times, what is under the pointer, a ground-type map, and (single-player) test buttons ---------- */
 const DEV = new URLSearchParams(location.search).has('dev');
-let devBiomes = false, devFast = 1, stepMs = 0, drawMs = 0;
+let devBiomes = false, devFast = 1, stepMs = 0, drawMs = 0, devOpen = {};
+try { devOpen = JSON.parse(localStorage.getItem('soup2.devOpen') || '{}') || {}; } catch(e){}
 const BIO = window.SoupBiomes;
 const devCol = i => `hsl(${(i * 137.5) % 360} 75% 55%)`;
 function devSetup(){
   if (!DEV) return;
   const solo = !net, seg = SEG.LIST.map(s => `<button class="btn" type="button" data-add="${s.fn}">+${s.fn}</button>`).join('');
+  /* sections fold away; which ones are open is remembered */
+  const sec = (id, title, body, open) => `<details class="sec" data-sec="${id}"${(devOpen[id] ?? open) ? ' open' : ''}><summary>${title}</summary><div class="body">${body}</div></details>`;
+  const lucky = SEG.LIST.map(s => { const out = []; for (let i = 0; i < s.core.length; i++) for (const b of 'AUGC') if (b !== s.core[i] && RS.mutationEffect(s.fn, i, b) > 1) out.push(`${s.core[i]}${i + 3}${b}`); return `${s.fn}: ${out.join(' ') || 'none'}`; }).join('\n');
   $('dev').innerHTML = `<pre id="devStats"></pre>`
-    + `<div class="row"><button class="btn" type="button" id="dBio" aria-pressed="false">Ground map <kbd>B</kbd></button></div>`
-    + `<h3>Microscope look</h3><div class="row">${LENS.ALL.map(k => `<button class="btn" type="button" data-lens="${k}" aria-pressed="${LENS.has(k)}">${k}</button>`).join('')}</div>`
-    + (solo ? `<h3>Add to your strand</h3><div class="row">${seg}</div>`
+    + sec('look', 'Map look', lookPanel(), true)
+    + sec('lens', 'Microscope effects', `<div class="row">${LENS.ALL.map(k => `<button class="btn" type="button" data-lens="${k}" aria-pressed="${LENS.has(k)}">${k}</button>`).join('')}</div>`, false)
+    + (solo ? sec('test', 'Test tools', `<h3>Add to your strand</h3><div class="row">${seg}</div>`
       + `<h3>Make it happen here</h3><div class="row"><button class="btn" type="button" data-do="frag">Fragment</button><button class="btn" type="button" data-do="meteor">Meteorite</button>`
       + `<button class="btn" type="button" data-do="uv">UV flash</button><button class="btn" type="button" data-do="damage">Damage me</button></div>`
       + `<h3>Round</h3><div class="row"><button class="btn" type="button" id="dFast" aria-pressed="false">Speed ×4</button><button class="btn" type="button" data-do="minute">−1 min</button>`
-      + `<button class="btn" type="button" data-do="end">End round</button><button class="btn" type="button" id="dBots" aria-pressed="false">No bots</button></div>` : '')
-    + `<h3>Lucky mistakes (answer key)</h3><pre>${SEG.LIST.map(s => { const out = []; for (let i = 0; i < s.core.length; i++) for (const b of 'AUGC') if (b !== s.core[i] && RS.mutationEffect(s.fn, i, b) > 1) out.push(`${s.core[i]}${i + 3}${b}`); return `${s.fn}: ${out.join(' ') || 'none'}`; }).join('\n')}</pre>`
-    + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`;
+      + `<button class="btn" type="button" data-do="end">End round</button><button class="btn" type="button" id="dBots" aria-pressed="false">No bots</button></div>`, false) : '')
+    + sec('ref', 'Reference', `<div class="row"><button class="btn" type="button" id="dBio" aria-pressed="false">Ground map <kbd>B</kbd></button></div>`
+      + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`
+      + `<h3>Lucky mistakes (answer key)</h3><pre>${lucky}</pre>`, false);
+  $('dev').addEventListener('toggle', e => { const d = e.target.closest('[data-sec]'); if (!d) return; devOpen[d.dataset.sec] = d.open; try { localStorage.setItem('soup2.devOpen', JSON.stringify(devOpen)); } catch(err){} }, true);
+  wireLookPanel();
   $('dev').hidden = false;
   $('dBio').addEventListener('click', toggleBiomes);
   $('dev').addEventListener('click', e => {
@@ -587,7 +623,7 @@ function modeButtons(play, watchText, learnText){
   </div>`;
 }
 function showStart(){
-  $('overlay').hidden = false;
+  $('overlay').hidden = false; $('sheet').classList.add('start');
   if (net){
     $('sheet').innerHTML = `<h2>Room ${ROOM}</h2>
       <p>Everyone who opens <b>${location.host}/${ROOM}</b> plays in the same soup.</p>
@@ -597,8 +633,7 @@ function showStart(){
     $('mWatch').addEventListener('click', watchRoom);
     $('mLearn').addEventListener('click', () => { location.href = '/?learn=' + ROOM; });
   } else {
-    $('sheet').innerHTML = `<h2>RNA Strand Soup</h2>
-      <p>Before DNA and proteins, strands of RNA may have done everything. Grow the most complex strand in five minutes.</p>
+    $('sheet').innerHTML = `<p>Before DNA and proteins, strands of RNA may have done everything. Grow the most complex strand in five minutes.</p>
       ${modeButtons('A five-minute round against nine bots', 'Watch the bots build, and see what they are thinking', 'About two minutes, one step at a time')}
       <form class="room" id="roomForm"><label for="roomName">Play together:</label><span class="host">${location.host}/</span><input id="roomName" placeholder="period3" maxlength="32" autocomplete="off" spellcheck="false" aria-label="Room name"><button class="btn" type="submit">Join room</button></form>
       ${HOW}
@@ -614,6 +649,64 @@ function showStart(){
   }
   (learned ? $('mPlay') : $('mLearn')).focus();
 }
+/* no long-press menu, text selection or pinch zoom on touch screens (except in typing fields): they get in the way of
+   steering with a finger. CSS handles double-tap zoom (touch-action) and selection; these catch what CSS can't, on iOS */
+{
+  const typing = t => t && t.closest && t.closest('input, textarea, [contenteditable], .dev pre');
+  document.addEventListener('contextmenu', e => { if (!typing(e.target)) e.preventDefault(); });
+  document.addEventListener('selectstart', e => { if (!typing(e.target)) e.preventDefault(); });
+  for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, e => e.preventDefault());
+  document.addEventListener('dblclick', e => { if (!typing(e.target)) e.preventDefault(); }, {passive:false});
+  document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, {passive:false});
+}
+/* ---------- the start screen's logo ----------
+   R, N and A are each one live strand laid along the letter's stroke (A's crossbar is a fourth, short one), using the
+   same engine and look as the strands in the soup. The strokes drift on slow, out-of-step waves and the strands keep
+   their own ripple and helical twist, so the word never quite holds still. It only runs while the start card shows,
+   and holds almost still for people who ask for less motion. */
+const logo = (() => {
+  const svg = $('logoSvg'), box = $('logo'), st = RS.createStage(svg), still = matchMedia('(prefers-reduced-motion: reduce)');
+  const seg = (a, b, out) => { const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3)); for (let k = out.length ? 1 : 0; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); return out; };
+  const arc = (cx, cy, r, a0, a1, out) => { const n = Math.ceil(Math.abs(a1 - a0) * r / 3); for (let k = 1; k <= n; k++){ const a = a0 + (a1 - a0) * k / n; out.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } return out; };
+  const line = (...p) => { const out = []; for (let k = 0; k + 1 < p.length; k++) seg(p[k], p[k + 1], out); return out; };
+  /* letters 80 wide and 120 tall, 30 apart; each stroke starts where its strand's head goes */
+  const R = (() => { const o = line([0, 120], [0, 0], [42, 0]); arc(42, 30, 30, -Math.PI / 2, Math.PI / 2, o); seg([42, 60], [6, 60], o); seg([6, 60], [80, 120], o); return o; })();
+  const N = line([110, 120], [110, 0], [190, 120], [190, 0]);
+  const A = line([220, 120], [260, 0], [300, 120]);
+  const BAR = line([238, 72], [282, 72]);
+  const PATHS = [R, N, A, BAR], SEQ = 'GGAUCCUAGCAUGGCUUAACGGUCAUAGCCGUAUGCAAUCGGAUC';
+  let strands = null, t = 0, last = 0, raf = 0;
+  const lengthOf = p => { let L = 0; for (let k = 1; k < p.length; k++) L += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); return L; };
+  function make(){
+    strands = PATHS.map((p, k) => {
+      const s = st.addStrand({seq:'A', x:p[0][0], y:p[0][1]}), sp = s.spacing;
+      const n = Math.max(2, Math.floor((lengthOf(p) - sp.lead) / sp.gap) + 1);
+      s.setSeq(Array.from({length:n}, (_, i) => SEQ[(i * 7 + k * 11) % SEQ.length]).join(''));
+      return {s, p, k};
+    });
+  }
+  /* each point drifts on two slow waves that run along the stroke, a little out of step between letters */
+  const wobble = (p, k, amp) => p.map((q, i) => ({x:q[0] + amp * (Math.sin(t * 0.9 + i * 0.11 + k * 1.7) + 0.5 * Math.sin(t * 1.7 - i * 0.07 + k)),
+    y:q[1] + amp * (Math.cos(t * 0.7 + i * 0.09 + k * 2.3) + 0.5 * Math.sin(t * 1.3 + i * 0.13 - k))}));
+  function frame(now){
+    raf = 0;
+    if (box.hidden || $('overlay').hidden) return;
+    const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016); last = now;
+    const calm = still.matches; t += dt * (calm ? 0.05 : 1);
+    for (const q of strands) q.s.lay(calm ? dt * 0.05 : dt, wobble(q.p, q.k, calm ? 0.6 : 2.6), {moving:calm ? 0 : 0.55});
+    st.render();
+    raf = requestAnimationFrame(frame);
+  }
+  function sync(){
+    const on = !$('overlay').hidden && !!$('sheet').querySelector('#mPlay');
+    box.hidden = !on;
+    if (on){ if (!strands) make(); if (!raf){ last = 0; raf = requestAnimationFrame(frame); } }
+    else $('sheet').classList.remove('start');
+  }
+  new MutationObserver(sync).observe($('sheet'), {childList:true});
+  new MutationObserver(sync).observe($('overlay'), {attributes:true, attributeFilter:['hidden']});
+  return {sync};
+})();
 /* ---------- Learn: a guided first round in the small practice pool ----------
    Five steps, each finished by doing it: swim, pick a recipe, collect its letters, fold, cut. The pool starts empty so
    stray letters do not get in the way of the first recipe; once the recipe is picked, letters fill in and the next one
@@ -1017,8 +1110,8 @@ function renderLobby(){
   $('lobbyText').innerHTML = left ? `<b>Lobby</b> · ${here} · next round starts in <b>${left}</b>`
     : net.isHost ? `<b>Lobby</b> · ${here} · practise, then start when everyone is ready` : `<b>Lobby</b> · ${here} · waiting for <b>${net.hostName}</b> to start`;
   $('bStart').hidden = !net.isHost; $('autoWrap').hidden = !net.isHost; $('autoBox').checked = net.auto;
-  $('mapWrap').hidden = !net.isHost; $('mapBox').checked = net.mapKind === 'world';
-  if (net.isHost && WANT_WORLD && !renderLobby.asked){ renderLobby.asked = true; if (net.mapKind !== 'world') net.setMap('world'); }
+  $('mapWrap').hidden = !net.isHost; $('mapBox').checked = net.mapKind === 'classic';
+  if (net.isHost && WANT_CLASSIC && !renderLobby.asked){ renderLobby.asked = true; if (net.mapKind !== 'classic') net.setMap('classic'); }
   bar.classList.toggle('wait', !net.isHost);
 }
 function renderClock(){
@@ -1108,14 +1201,77 @@ function togglePause(){ if (net || sim.state !== 'play') return; paused = !pause
 $('bPause').addEventListener('click', togglePause);
 $('bLow').addEventListener('click', () => {
   const low = RS.S.goo !== 'off';
-  RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo');
+  RS.S.goo = low ? 'off' : 'memFill'; RS.restyle('goo'); LENS.refresh();
   $('bLow').setAttribute('aria-pressed', low);
   try { localStorage.setItem('soup2.low', low ? '1' : ''); } catch(e){}
 });
+/* ---------- the generated world's look ----------
+   Two looks, Filled and Lines, each fully adjustable in ?dev (Map look) and remembered in this browser. The ◯ button
+   or O switches between them; ?look=lines or ?look=filled picks one. Presets load starting values into the look being
+   edited. Copy settings puts the current look on the clipboard, to make it everyone's default. */
+const LOOK_PRESETS = {
+  filled:{fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0},
+  'lines + depth':{fill:0.3, depth:1.1, line:0.9, lineW:1, lineFade:0.35, wall:0.22},
+  lines:{fill:0, depth:1, line:1, lineW:1, lineFade:0.5, wall:0.16},
+  'dim fill':{fill:0.5, depth:1.2, line:0, lineW:1, lineFade:0.5, wall:0.3}};
+const LOOK_SLOTS = {filled:'Filled', lines:'Lines'};
+const PLACE_IDS = ['lagoon', 'flats', 'island', 'chimneys', 'ice', 'ridge', 'water'];
+const PLACE_LABEL = {lagoon:'lagoon', flats:'highlands', island:'island', chimneys:'chimneys', ice:'ice', ridge:'ridge', water:'channels', deep:'deep'};
+/* everyone's default: the Lines look as Moss tuned it (27 Nov 2026) */
+const freshLooks = () => ({slot:'lines', filled:Object.assign({colours:{}}, LOOK_PRESETS.filled, {deep:[3, 5, 7]}),
+  lines:{colours:{lagoon:[79, 85, 4]}, fill:0.2, depth:1.4, line:0.4, lineW:1, lineFade:1, wall:0.4, deep:[3, 5, 7]}});
+let looks = freshLooks();
+try {
+  const v = JSON.parse(localStorage.getItem('soup2.looks') || 'null');
+  if (v && v.filled && v.lines) looks = Object.assign(freshLooks(), v);
+  else if (localStorage.getItem('soup2.look') === 'outline') looks.slot = 'lines';
+} catch(e){}
+{ const q = new URLSearchParams(location.search).get('look'); if (q) looks.slot = /^(lines|outline)$/.test(q) ? 'lines' : 'filled'; }
+const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+const unhex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+function applyLook(){
+  MAP.setWorldLook(looks[looks.slot]); $('bLook').setAttribute('aria-pressed', looks.slot === 'lines');
+  try { localStorage.setItem('soup2.looks', JSON.stringify(looks)); } catch(e){}
+}
+const toggleLook = () => { if (!MAP.world) return; looks.slot = looks.slot === 'filled' ? 'lines' : 'filled'; applyLook(); syncLookPanel(); };
+$('bLook').addEventListener('click', toggleLook);
+const LOOK_SLIDERS = [['fill', 'Fill', 0, 1, 0.05], ['depth', 'Depth steps', 0, 1.5, 0.05], ['line', 'Outline', 0, 1, 0.05], ['lineW', 'Line width', 0.5, 3, 0.25], ['lineFade', 'Line fade', 0, 1, 0.05], ['wall', 'Wall tint', 0, 0.6, 0.02]];
+function lookPanel(){
+  return `<p class="note" id="lkNote" hidden>Only the generated world uses these; this is the classic map.</p>`
+    + `<div class="row">${Object.entries(LOOK_SLOTS).map(([k, t]) => `<button class="btn" type="button" data-slot="${k}">${t}</button>`).join('')}<span class="note">editing this look · ◯ / O switches</span></div>`
+    + `<div class="row">${Object.keys(LOOK_PRESETS).map(k => `<button class="btn" type="button" data-preset="${k}">${k}</button>`).join('')}</div>`
+    + LOOK_SLIDERS.map(([k, t, a, b, st]) => `<label class="lk"><span>${t}</span><input type="range" data-look="${k}" min="${a}" max="${b}" step="${st}"><output data-out="${k}"></output></label>`).join('')
+    + `<h3>Colours</h3><div class="cols">${['deep'].concat(PLACE_IDS).map(id => `<label><input type="color" data-col="${id}">${PLACE_LABEL[id]}</label>`).join('')}</div>`
+    + `<div class="row"><button class="btn" type="button" id="lkCopy">Copy settings</button><button class="btn" type="button" id="lkReset">Reset this look</button></div>`;
+}
+function syncLookPanel(){
+  if (!DEV || !$('lkNote')) return;
+  const L = looks[looks.slot], base = window.WorldGen.PLACE_COL;
+  $('lkNote').hidden = !!MAP.world;
+  for (const b of $('dev').querySelectorAll('[data-slot]')) b.setAttribute('aria-pressed', b.dataset.slot === looks.slot);
+  for (const i of $('dev').querySelectorAll('[data-look]')){ i.value = L[i.dataset.look]; $('dev').querySelector(`[data-out="${i.dataset.look}"]`).textContent = (+L[i.dataset.look]).toFixed(2); }
+  for (const i of $('dev').querySelectorAll('[data-col]')){ const id = i.dataset.col; i.value = hex(id === 'deep' ? L.deep : L.colours[id] || base[id] || base.water); }
+}
+function wireLookPanel(){
+  const d = $('dev');
+  d.addEventListener('input', e => {
+    const L = looks[looks.slot], t = e.target;
+    if (t.dataset.look){ L[t.dataset.look] = +t.value; d.querySelector(`[data-out="${t.dataset.look}"]`).textContent = (+t.value).toFixed(2); applyLook(); }
+    else if (t.dataset.col){ if (t.dataset.col === 'deep') L.deep = unhex(t.value); else L.colours = Object.assign({}, L.colours, {[t.dataset.col]:unhex(t.value)}); applyLook(); }
+  });
+  d.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.slot){ looks.slot = b.dataset.slot; applyLook(); syncLookPanel(); }
+    else if (b.dataset.preset){ Object.assign(looks[looks.slot], LOOK_PRESETS[b.dataset.preset]); applyLook(); syncLookPanel(); }
+    else if (b.id === 'lkReset'){ looks[looks.slot] = freshLooks()[looks.slot]; applyLook(); syncLookPanel(); }
+    else if (b.id === 'lkCopy'){ const txt = JSON.stringify({[looks.slot]:looks[looks.slot]}); navigator.clipboard && navigator.clipboard.writeText(txt).then(() => say('Look settings copied.'), () => say(txt)); }
+  });
+  syncLookPanel();
+}
 $('bRec').addEventListener('click', () => openPanel(true));
 $('bStart').addEventListener('click', () => { if (net && net.isHost) net.start(); });
 $('autoBox').addEventListener('change', e => { if (net && net.isHost) net.setAuto(e.target.checked); });
-$('mapBox').addEventListener('change', e => { if (net && net.isHost) net.setMap(e.target.checked ? 'world' : 'classic'); });
+$('mapBox').addEventListener('change', e => { if (net && net.isHost) net.setMap(e.target.checked ? 'classic' : 'world'); });
 $('bWatch').addEventListener('click', () => { if (watchId == null) cycle(1); else stopWatching(); });
 $('wPrev').addEventListener('click', () => { setTour(false); cycle(-1); });
 $('wNext').addEventListener('click', () => { setTour(false); cycle(1); });
@@ -1145,6 +1301,7 @@ document.addEventListener('keydown', e => {
     if (world.state === 'play' && me && !paused && !doFold(me)) say('Nothing to fold yet.');
   } else if (e.key === 'x' || e.key === 'X' || e.key === 'Backspace'){ e.preventDefault(); if (world.state === 'play' && me && !paused) doDrop(me); }
   else if (e.key === 'p' || e.key === 'P') togglePause();
+  else if (e.key === 'o' || e.key === 'O') toggleLook();
   else if (e.key === 'r' || e.key === 'R') openPanel();
   else if (e.key === 'Escape' && panelOpen) openPanel(false);
   else if ((e.key === 'v' || e.key === 'V') && !lesson){ if (watchId == null) cycle(1); else stopWatching(); }
@@ -1160,7 +1317,8 @@ function start(){
   /* the lab's look, a little larger so strands read at game scale */
   RS.S.glyphSize = 4; RS.S.gooSize = 30; RS.restyle();
   readTokens(); buildList(); devSetup();
-  try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); } } catch(e){}
+  try { if (localStorage.getItem('soup2.low')){ RS.S.goo = 'off'; RS.restyle('goo'); $('bLow').setAttribute('aria-pressed', 'true'); LENS.refresh(); } } catch(e){}
+  applyLook();
   if (net) $('bPause').hidden = true;   /* a shared room cannot pause */
   reset(); resize();
   if (LEARN_ROOM != null && !net) startLesson();
@@ -1169,6 +1327,7 @@ function start(){
   let last = performance.now(), fpsT = 0, fpsN = 0, acc = 0;
   (function frame(now){
     const dt = Math.min(0.1, (now - last) / 1000); last = now; W = MAP.W; H = MAP.H;
+    if ($('bLook').hidden === !!MAP.world){ $('bLook').hidden = !MAP.world; syncLookPanel(); }   /* only the generated world has these looks */
     fpsT += dt; fpsN++; if (fpsT >= 1){ window.__fps = fpsN / fpsT; fpsT = 0; fpsN = 0; }
     /* fixed 1/60 s steps, as in the specimen, so swimming feels the same at any frame rate */
     acc += dt; let n = 0;

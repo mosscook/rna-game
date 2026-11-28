@@ -37,6 +37,7 @@ const pick = a => a[Math.floor(Math.random() * a.length)];
 const wrapA = a => ((a + Math.PI * 3) % TAU) - Math.PI;
 const f1 = v => v.toFixed(1);
 const MAXLEN = 240;
+let MASK_N = 0;
 /* segment types and their body plans live in segments.js */
 const SEG = window.SoupSegments, BODY = fn => SEG.bodyOf(fn);
 
@@ -492,7 +493,8 @@ function makeStrand(stage, opts){
   E.cutRing = el('g', {}, E.main); E.cutPath = el('path', {fill:'none', stroke:'var(--spine)', 'stroke-linejoin':'round'}, E.cutRing);
   E.scatterL = el('g', {}, E.main);
   E.helperGoo = el('g', {}, stage.layers.helperGoo); E.helpers = el('g', {}, stage.layers.helpers);
-  const mid = 'rs-m' + (stage.nextId++);
+  /* mask ids are page-wide: two stages on one page (the soup and the start-screen logo) must not share one */
+  const mid = 'rs-m' + (MASK_N++);
   E.gooBody = el('path', {fill:'none', stroke:'var(--goo)', 'stroke-linecap':'round', 'stroke-linejoin':'round'}, E.gooFL);
   E.mask = el('mask', {id:mid, maskUnits:'userSpaceOnUse', x:-1e5, y:-1e5, width:2e5, height:2e5}, stage.defs);
   el('rect', {x:-1e5, y:-1e5, width:2e5, height:2e5, fill:'#fff'}, E.mask);
@@ -1452,6 +1454,17 @@ function makeStrand(stage, opts){
     step, cruise,
     /* drive the strand from outside: put the head at (x, y) facing h; moving and limp are 0..1 */
     follow:(dt, x, y, h, o) => step(dt, {pos:{x, y, h}, moving:o && o.moving, limp:o && o.limp}),
+    /* lay the strand along a path you give, head at pts[0] (a logo, a diagram): its own wave and twist still play,
+       with moving 0..1 setting how lively they are */
+    lay(dt, pts, o){
+      clock += dt; if (!pts || pts.length < 2) return;
+      head.x = pts[0].x; head.y = pts[0].y; heading = Math.atan2(pts[0].y - pts[1].y, pts[0].x - pts[1].x);
+      trail = pts.map(q => ({x:q.x, y:q.y}));
+      moving += ((o && o.moving != null ? o.moving : 1) - moving) * Math.min(1, dt * 3);
+      if (S.motion === 'trail') layoutTrail(dt); else stepPhysics(dt);
+    },
+    /* how far apart loose letters sit along the body, and how far the first one sits from the head */
+    get spacing(){ return {gap:LB * (recipeMode() ? S.looseGap : 1), lead:R * 1.6}; },
     render:() => { if (visible) renderStrand(); },
     /* replace the letters; pass folded segments [{fn, start, end}] to keep structures, otherwise everything is loose */
     setSeq:(s, sg) => { segs = Array.isArray(sg) ? sg.map(segOf) : []; setSeq(clean(s).split('')); },

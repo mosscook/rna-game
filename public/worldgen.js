@@ -623,16 +623,22 @@ function surface(world){
     return (Ef[n] * (1 - tx) + Ef[n + 1] * tx) * (1 - ty) + (Ef[n + FX] * (1 - tx) + Ef[n + FX + 1] * tx) * ty;
   }
   /* colour per grid cell from the one-hot place weights, blurred one cell so neighbouring places blend slightly */
-  const N = GX * GY, C = [new Float32Array(N), new Float32Array(N), new Float32Array(N)];
-  for (const id in world.weights){ const w = Float32Array.from(world.weights[id]); blur(w, GX, GY, 1); const col = PLACE_COL[id] || PLACE_COL.water;
-    for (let n = 0; n < N; n++) if (w[n]) for (let k = 0; k < 3; k++) C[k][n] += w[n] * col[k]; }
+  const N = GX * GY, C = [new Float32Array(N), new Float32Array(N), new Float32Array(N)], WB = {};
+  for (const id in world.weights){ const w = Float32Array.from(world.weights[id]); blur(w, GX, GY, 1); WB[id] = w; }
+  /* colours per place: PLACE_COL unless a map of {place: [r, g, b]} says otherwise (the game's look settings) */
+  function recolour(cols){
+    for (const a of C) a.fill(0);
+    for (const id in WB){ const w = WB[id], col = (cols && cols[id]) || PLACE_COL[id] || PLACE_COL.water;
+      for (let n = 0; n < N; n++) if (w[n]) for (let k = 0; k < 3; k++) C[k][n] += w[n] * col[k]; }
+  }
+  recolour();
   function colour(x, y, out){
     let fx = x / RES - 0.5, fy = y / RES - 0.5; fx = fx < 0 ? 0 : fx > GX - 1.001 ? GX - 1.001 : fx; fy = fy < 0 ? 0 : fy > GY - 1.001 ? GY - 1.001 : fy;
     const i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j, n = j * GX + i;
     for (let k = 0; k < 3; k++){ const a = C[k]; out[k] = (a[n] * (1 - tx) + a[n + 1] * tx) * (1 - ty) + (a[n + GX] * (1 - tx) + a[n + GX + 1] * tx) * ty; }
     return out;
   }
-  return {elev, colour, refresh, Ef, FX, FY};
+  return {elev, colour, refresh, recolour, Ef, FX, FY};
 }
 
 return {generate, texture, surface, TEXTURES, DEFAULTS, WALL, T, BRIGHT, SPEED, PLACE_COL, bandOf, speedOf, dsin, dcos};
