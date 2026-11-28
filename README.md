@@ -74,7 +74,7 @@ Free letters don't last forever, as real nucleotides break down in water (hydrol
 
 ## Microscope look
 
-`public/lens.js` adds optional effects that make the soup look like a view down a microscope. On by default: `motes`, `eyepiece`, `grain`, `bokeh` and `edge`. The Lo button turns off the two that cost every frame (`grain`, `edge`). choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
+`public/lens.js` adds optional effects that make the soup look like a view down a microscope. On by default: `motes`, `eyepiece`, `grain` and `bokeh`. The Lo button turns off the two that cost every frame (`grain`, and `edge` if picked). choose others with `?lens=` (comma-separated; the list replaces the default), or toggled in `?dev` under "Microscope look". `?lens=off` turns them all off.
 
 | Effect | What it does | Cost |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ Free letters don't last forever, as real nucleotides break down in water (hydrol
 | `soft` | The ground out of focus, so only strands and letters are sharp | Slightly cheaper than normal: ground tiles are drawn at lower resolution and blurred once |
 | `scale` | A scale bar in nanometres above the minimap (letters are about 0.6 nm apart) | None measurable |
 | `grain` (on; off in low detail) | Sensor noise | About 25% of frame rate in a slowed-down test |
-| `edge` (on; off in low detail) | Real blur around the edge of the view (CSS backdrop-filter), round with the eyepiece, so only the middle is sharp | Every frame, on the graphics chip |
+| `edge` (off; off in low detail too) | Real blur around the edge of the view (CSS backdrop-filter), round with the eyepiece, so only the middle is sharp | Every frame, on the graphics chip |
 
 Recommended set: `?lens=motes,vignette,rim,bokeh,soft,scale`.
 

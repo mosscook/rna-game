@@ -14,13 +14,13 @@
                low detail; no drifting with reduced motion. About 120 small drawImage calls a frame.
      scale     a scale bar in nanometres, from the strand's own spacing (about 0.6 nm between letters).
      edge      (to test on a real Chromebook only) real blur around the edge with backdrop-filter. This one costs
-               every frame on the graphics chip. On by default since Nov 2026; off in low detail, like grain.
+               every frame on the graphics chip, so it is off unless asked for (and off in low detail, like grain).
    Choose with ?lens=soft,bokeh,... (or ?lens=off), or the buttons in ?dev. */
 window.SoupLens = (() => {
 'use strict';
 const TAU = Math.PI * 2;
 const ALL = ['motes', 'vignette', 'eyepiece', 'rim', 'grain', 'bokeh', 'soft', 'scale', 'edge'];
-const DEFAULT = ['motes', 'eyepiece', 'grain', 'bokeh', 'edge'];
+const DEFAULT = ['motes', 'eyepiece', 'grain', 'bokeh'];
 
 function create({pond, under, MAP, low = () => false}){
   /* the layer sits between the strands and the top canvas, so names, effects and the minimap stay bright */
