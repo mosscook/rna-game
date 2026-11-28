@@ -134,7 +134,9 @@ function create(o){
     for (const [x, y, col, r, dur, flash] of m.X || []) hooks.fx({x, y, col, r, dur, flash:!!flash});
     /* strands that left your view: hide them until they come back */
     for (const mm of P.values()) if (mm.last != null && mm.last < st - 0.4 && mm.id !== meId){ mm.shown = false; mm.alive = false; }
-    for (const f of F.values()) if (t - f.seen > 0.6){ f.shown = false; if (t - f.seen > 90) dropMirror(F, f.id); }
+    /* fragments the server stopped sending (taken in by a Joiner, burst, or out of view): hide them at once, not just
+       stop moving them, and forget them after a while */
+    for (const f of F.values()) if (t - f.seen > 0.3){ if (f.shown){ f.shown = false; f.s.setVisible(false); } if (t - f.seen > 90) dropMirror(F, f.id); }
   }
 
   /* ---------- your own strand: predicted here, corrected by the server ---------- */
@@ -263,7 +265,7 @@ function create(o){
     inRoster:id => roster.has(id),
     get watchOnly(){ return watchOnly; },
     debug:obj => send(Object.assign({t:'debug'}, obj)),   /* ignored by real servers; local testing only */
-    get me(){ return meId != null ? P.get(meId) || null : null; }, get players(){ return players; }, get frags(){ return frags; }, get nucs(){ return nucs; },
+    get me(){ return meId != null ? P.get(meId) || null : null; }, get players(){ return players; }, get frags(){ return frags.filter(f => f.shown); }, get nucs(){ return nucs; },
     get mini(){ return mini; }, get state(){ return state; }, get timeLeft(){ return Math.max(0, tl - (state === 'play' ? now() - tlAt : 0)); },
     get rtt(){ return rtt; }, get seed(){ return seed; }};
 }
