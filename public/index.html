@@ -224,6 +224,13 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
 .dev .lk{display:grid;grid-template-columns:84px minmax(90px,1fr) 34px;align-items:center;gap:6px;font-size:11px;width:100%;box-sizing:border-box}
 .dev .lk input{width:100%;margin:0}
 .dev .lk output{font:11px var(--font-mono);text-align:right;color:var(--ink)}
+.dev .tk{grid-template-columns:minmax(80px,1fr) 52px 18px;row-gap:1px;margin-top:3px}
+.dev .tk span{grid-column:1/-1;line-height:1.25;font-family:var(--font-body)}
+.dev .tk.changed span{color:var(--ink);font-weight:700}
+.dev .tk button{all:unset;cursor:pointer;color:var(--muted);text-align:center;font-size:12px}
+.dev .tk button:hover{color:var(--ink)}
+.dev .tk:not(.changed) button{visibility:hidden}
+.dev .tuneHead{font:700 10.5px var(--font-body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:4px}
 .dev .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11px}
 .dev .cols label{display:flex;align-items:center;gap:6px}
 .dev .cols input{width:30px;height:20px;padding:0;border:1px solid var(--line);border-radius:4px;background:none}
@@ -506,6 +513,7 @@ function devSetup(){
   const lucky = SEG.LIST.map(s => { const out = []; for (let i = 0; i < s.core.length; i++) for (const b of 'AUGC') if (b !== s.core[i] && RS.mutationEffect(s.fn, i, b) > 1) out.push(`${s.core[i]}${i + 3}${b}`); return `${s.fn}: ${out.join(' ') || 'none'}`; }).join('\n');
   $('dev').innerHTML = `<pre id="devStats"></pre>`
     + sec('look', 'Map look', lookPanel(), true)
+    + sec('segs', 'Segments', tunePanel(), false)
     + sec('lens', 'Microscope effects', `<div class="row">${LENS.ALL.map(k => `<button class="btn" type="button" data-lens="${k}" aria-pressed="${LENS.has(k)}">${k}</button>`).join('')}</div>`, false)
     + (solo ? sec('test', 'Test tools', `<h3>Add to your strand</h3><div class="row">${seg}</div>`
       + `<h3>Make it happen here</h3><div class="row"><button class="btn" type="button" data-do="frag">Fragment</button><button class="btn" type="button" data-do="meteor">Meteorite</button>`
@@ -516,7 +524,7 @@ function devSetup(){
       + `<div class="legend" id="devLegend" hidden>${BIO.CELLS.map((c, i) => `<span style="--c:${devCol(i)}">${c.key.toLowerCase()}</span>`).join('')}</div>`
       + `<h3>Lucky mistakes (answer key)</h3><pre>${lucky}</pre>`, false);
   $('dev').addEventListener('toggle', e => { const d = e.target.closest('[data-sec]'); if (!d) return; devOpen[d.dataset.sec] = d.open; try { localStorage.setItem('soup2.devOpen', JSON.stringify(devOpen)); } catch(err){} }, true);
-  wireLookPanel();
+  wireLookPanel(); wireTunePanel();
   $('dev').hidden = false;
   $('dBio').addEventListener('click', toggleBiomes);
   $('dev').addEventListener('click', e => {
@@ -1257,6 +1265,50 @@ function syncLookPanel(){
   for (const b of $('dev').querySelectorAll('[data-slot]')) b.setAttribute('aria-pressed', b.dataset.slot === looks.slot);
   for (const i of $('dev').querySelectorAll('[data-look]')){ const v = L[i.dataset.look] != null ? L[i.dataset.look] : MAP.LOOK_BASE[i.dataset.look]; i.value = v; $('dev').querySelector(`[data-out="${i.dataset.look}"]`).textContent = (+v).toFixed(2); }
   for (const i of $('dev').querySelectorAll('[data-col]')){ const id = i.dataset.col; i.value = hex(id === 'deep' ? L.deep : L.colours[id] || base[id] || base.water); }
+}
+/* ---------- dev panel: Segments. Every value a segment's 'tune' list names (segments.js), grouped by what it does and
+   how it looks. Changes are remembered on this device; game values only change single-player games (a room runs the
+   server's copy). Copy settings gives JSON that can be baked in as the new defaults ---------- */
+let tuneSeg = 'Cleaver';
+try { const v = JSON.parse(localStorage.getItem('soup2.tune') || 'null'); if (v){ SEG.tuneApply(v.values); if (v.seg) tuneSeg = v.seg; } } catch(e){}
+const saveTune = () => { try { localStorage.setItem('soup2.tune', JSON.stringify({seg:tuneSeg, values:SEG.tuneChanged()})); } catch(e){} };
+const tuneFmt = (v, st) => (+v).toFixed(st >= 1 ? 0 : st >= 0.1 ? 1 : 2);
+function tuneRows(fn){
+  const s = SEG.get(fn); if (!s || !s.tune) return '<p class="fine">Nothing to adjust on this one yet.</p>';
+  const row = ([k, label, a, b, st, unit]) => { const v = SEG.tuneGet(fn, k), ch = v !== SEG.tuneDefault(fn, k);
+    return `<label class="lk tk${ch ? ' changed' : ''}" title="${label}${unit ? ' (' + unit + ')' : ''}. Shipped value: ${tuneFmt(SEG.tuneDefault(fn, k), st)}"><span>${label}</span>`
+      + `<input type="range" data-tune="${k}" min="${a}" max="${b}" step="${st}" value="${v}"><output data-tout="${k}">${tuneFmt(v, st)}${unit && unit.length < 4 ? unit : ''}</output>`
+      + `<button type="button" data-treset="${k}" aria-label="Back to the shipped value">↺</button></label>`; };
+  const game = s.tune.filter(t => t[6] === 'game'), look = s.tune.filter(t => t[6] === 'look');
+  return (game.length ? `<div class="tuneHead">What it does</div>${game.map(row).join('')}` : '')
+    + (look.length ? `<div class="tuneHead">How it looks</div>${look.map(row).join('')}` : '');
+}
+function tunePanel(){
+  const changed = SEG.tuneChanged();
+  return `<div class="row">${SEG.LIST.map(s => `<button class="btn" type="button" data-tseg="${s.fn}" aria-pressed="${s.fn === tuneSeg}">${s.fn}${changed[s.fn] ? ' •' : ''}</button>`).join('')}</div>`
+    + `<div id="tuneBody">${tuneRows(tuneSeg)}</div>`
+    + `<div class="row"><button class="btn" type="button" id="tuReset">Reset ${tuneSeg}</button><button class="btn" type="button" id="tuResetAll">Reset all segments</button><button class="btn" type="button" id="tuCopy">Copy settings</button></div>`
+    + `<p class="fine">${net ? 'In a room, only “How it looks” changes here: the server runs the game. Try game values in single player.' : 'Game values apply to this single-player game. Changes are remembered on this device; • marks a changed segment.'}</p>`;
+}
+function syncTunePanel(){ const d = $('dev').querySelector('[data-sec="segs"] .body'); if (d) d.innerHTML = tunePanel(); }
+function wireTunePanel(){
+  const d = $('dev');
+  d.addEventListener('input', e => {
+    const t = e.target; if (!t.dataset.tune) return;
+    const k = t.dataset.tune, spec = SEG.get(tuneSeg).tune.find(x => x[0] === k);
+    SEG.tuneSet(tuneSeg, k, t.value); saveTune();
+    const o = d.querySelector(`[data-tout="${k}"]`); if (o) o.textContent = tuneFmt(t.value, spec[4]) + (spec[5] && spec[5].length < 4 ? spec[5] : '');
+    t.closest('.tk').classList.toggle('changed', SEG.tuneGet(tuneSeg, k) !== SEG.tuneDefault(tuneSeg, k));
+    for (const b of d.querySelectorAll('[data-tseg]')) b.textContent = b.dataset.tseg + (SEG.tuneChanged()[b.dataset.tseg] ? ' •' : '');
+  });
+  d.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.tseg){ tuneSeg = b.dataset.tseg; saveTune(); syncTunePanel(); }
+    else if (b.dataset.treset){ e.preventDefault(); SEG.tuneSet(tuneSeg, b.dataset.treset, SEG.tuneDefault(tuneSeg, b.dataset.treset)); saveTune(); syncTunePanel(); }
+    else if (b.id === 'tuReset'){ SEG.tuneReset(tuneSeg); saveTune(); syncTunePanel(); }
+    else if (b.id === 'tuResetAll'){ SEG.tuneReset(); saveTune(); syncTunePanel(); }
+    else if (b.id === 'tuCopy'){ const txt = JSON.stringify(SEG.tuneChanged()); navigator.clipboard && navigator.clipboard.writeText(txt).then(() => say('Segment settings copied.'), () => say(txt)); }
+  });
 }
 function wireLookPanel(){
   const d = $('dev');

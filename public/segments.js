@@ -27,6 +27,16 @@
      saltBreaks chance each half second that a drying salt pool damages it
      warnEarly  seconds of warning before UV flashes and meteorites (without one: 1.8)
      findsFragments  points the player to the nearest fragment
+     hitR       (striking segments) how close a tip must come to a rival to strike, in px, at full strength
+     rest, regrow, stub   (Cleaver) seconds it rests after a cut; how long the regrowth at the end of that takes;
+                how long its spikes are while resting (a fraction of full length)
+     fresh, arm, fade, grab   (Cleaver) a piece it cuts off: seconds anyone can take it back; seconds before it can be
+                taken; seconds it fades; how close a tail end must come to take it, in px
+     reach, cooldown   (Joiner) how close a fragment must come to the jaws, in px; seconds before it can join again
+   Tuning (the dev panel's Segments section):
+     tune       [key, label, min, max, step, unit, kind] for each adjustable value. key is a property of the entry
+                ('swim.speed' for a nested one) or 'S.<name>' for a strand drawing setting (rna-strand.js). kind is
+                'game' (what it does; single player only, since a room runs the server's copy) or 'look' (how it is drawn)
    How bots think about it (bots.js):
      likedBy    personality traits that make a bot fond of it
      plan(c)    sets c.want (and can change c.gain, the score it would add) for a bot weighing what to build;
@@ -41,6 +51,9 @@ const LIST = [
    does:'Swim faster and turn tighter. Its two blades spin like a turbine.',
    tag:'Game only', sci:'No RNA can swim. Movement is the biggest thing this game invents.',
    swim:{speed:0.3, turn:0.6, turnBot:0.5},
+   tune:[['swim.speed', 'Swim speed bonus', 0, 1.5, 0.05, '×', 'game'], ['swim.turn', 'Turn bonus (you)', 0, 2, 0.05, '', 'game'],
+     ['swim.turnBot', 'Turn bonus (bots)', 0, 2, 0.05, '', 'game'],
+     ['S.spin', 'Blade spin', 0, 3, 0.05, '', 'look'], ['S.pitch', 'Blade pitch', 0, 90, 1, '°', 'look'], ['S.sweep', 'Blade sweep', 0, 2, 0.05, '', 'look']],
    likedBy:['greed', 'curiosity'],
    plan(c){ c.want = 0.3 + 0.5 * c.tr.curiosity + 0.4 * c.tr.greed + (c.m.fear > 0.3 ? c.tr.caution : 0) - 0.3 * c.n; if (c.n >= 3) c.gain *= 0.5; }},
 
@@ -49,6 +62,14 @@ const LIST = [
    tag:'Real science', sci:'Hammerhead ribozymes can be built to find a target RNA by base pairing, then cut it.',
    /* one base sits at each spike tip */
    tips(f){ const L = f.end - f.start; return [f.start + Math.round(L / 4), f.start + Math.round(3 * L / 4)]; },
+   hitR:13, rest:10, regrow:1, stub:0.12, fresh:3.5, arm:0.6, fade:0.8, grab:32,
+   tune:[['hitR', 'Strike reach', 4, 40, 1, 'px', 'game'], ['rest', 'Rest after a cut', 0, 30, 0.5, 's', 'game'],
+     ['regrow', 'Regrow time (end of the rest)', 0.1, 10, 0.1, 's', 'game'],
+     ['fresh', 'Cut piece: time to take it back', 0, 10, 0.1, 's', 'game'], ['arm', 'Cut piece: delay before it can be taken', 0, 3, 0.1, 's', 'game'],
+     ['fade', 'Cut piece: fade time', 0.1, 3, 0.1, 's', 'game'], ['grab', 'Cut piece: tail reach to take it', 8, 80, 1, 'px', 'game'],
+     ['S.spikeLen', 'Spike length, active (first spike)', 2, 20, 0.5, '', 'look'], ['S.spikeLenB', 'Spike length, active (second spike)', 2, 20, 0.5, '', 'look'],
+     ['stub', 'Spike length, resting', 0, 1, 0.02, '× active', 'look'], ['S.spikeSlope', 'Spike slant', 0, 6, 0.1, '', 'look'],
+     ['S.spikeTwist', 'Spike twist', 0, 90, 1, '°', 'look']],
    likedBy:['aggression', 'grudge'],
    plan(c){ c.want = 1.7 * c.tr.aggression + 0.5 * c.tr.opportunism + 0.8 * c.m.anger + (c.info.late && c.info.rank > 1 ? 0.6 : 0); if (c.n >= 2) c.want *= 0.35; }},
 
@@ -56,6 +77,10 @@ const LIST = [
    does:'Takes the hits meant for the functions on either side of it. Membranes side by side shield each other and add up their strength. Dissolves in magnesium.',
    tag:'Real science', sci:'Bubbles of fatty acid can hold RNA, grow and divide. Magnesium breaks them apart.',
    shield:true, saltBreaks:0.25,
+   tune:[['saltBreaks', 'Chance a drying salt pool damages it (each ½ s)', 0, 1, 0.01, '', 'game'],
+     ['S.memDiam', 'Chamber width', 4, 20, 0.5, '', 'look'], ['S.memLength', 'Chamber length', 3, 16, 0.5, '', 'look'],
+     ['S.memSqueeze', 'Chamber squeeze', 0, 2, 0.05, '', 'look'], ['S.gooOpacity', 'Goo opacity (all goo)', 0, 1, 0.02, '', 'look'],
+     ['S.gooSize', 'Goo width (all goo)', 6, 50, 1, '', 'look']],
    likedBy:['caution', 'patience', 'grudge'],
    plan(c){ c.want = 1.4 * c.tr.caution + 0.35 * c.rivalSpikes + 0.6 * c.m.fear + 0.08 * c.p.s.functions.length; if (c.n >= 2) c.want *= 0.4; }},
 
@@ -63,6 +88,7 @@ const LIST = [
    does:'Warns you of UV flashes and meteorites early and points to the nearest fragment.',
    tag:'Real science', sci:'Riboswitches change shape when they catch a particular molecule, switching genes on or off.',
    warnEarly:4.5, findsFragments:true,
+   tune:[['warnEarly', 'Warning before UV flashes and meteorites', 1.8, 10, 0.1, 's', 'game'], ['S.detSize', 'Circle size', 1, 10, 0.25, '', 'look']],
    /* opportunists want one too: it leads them to fragments for a Joiner */
    likedBy:['caution', 'curiosity', 'patience', 'opportunism'],
    plan(c){ c.want = 0.9 * c.tr.caution + 0.4 * c.tr.curiosity + 0.8 * c.tr.opportunism; if (c.n) c.want *= 0.3; }},
@@ -70,6 +96,8 @@ const LIST = [
   {fn:'Joiner', core:'GGA', body:'jaws',
    does:'While it is the very end of your strand, back your tail into a fragment to join it. It fuses around what it grabbed: +1.',
    tag:'Real science', sci:'The class I ligase, one of the first ribozymes evolved from random RNA, joins strands together.',
+   reach:30, cooldown:4,
+   tune:[['reach', 'Jaw reach', 8, 80, 1, 'px', 'game'], ['cooldown', 'Wait before joining again', 0, 15, 0.5, 's', 'game']],
    likedBy:['opportunism'],
    plan(c){
      const p = c.p, G = c.G;
@@ -88,6 +116,7 @@ const LIST = [
   {fn:'Repairer', core:'GACGACGAC', body:'helpers',
    does:'Leaves the strand as two helpers that travel up it once, mending damage and clearing junk.',
    tag:'Game idea', sci:'Cells today repair RNA and DNA with protein enzymes. Whether early RNA could mend itself is an open question.',
+   tune:[['S.repSpeed', 'Helper speed (how fast it travels and mends)', 2, 60, 0.5, '', 'game']],
    likedBy:[],
    plan(c){
      /* worth what it would mend */
@@ -149,19 +178,44 @@ function strengthNote(f){
   return q >= 0.8 ? `a mild mistake: ${pct} strength` : `a harmful mistake: ${pct} strength`;
 }
 
-/* a piece freshly cut off a strand: for CUT_FRESH seconds anyone's tail end can take it back on (after a short CUT_ARM,
-   so it does not jump straight back onto the strand it came from). It pulses while it can be taken, then fades for
-   CUT_FADE seconds and breaks up into letters. fresh = seconds left to take it, fade = seconds left of fading */
-const CUT_FRESH = 3.5, CUT_ARM = 0.6, CUT_FADE = 0.8;
-/* a Cleaver that has just cut shrinks, and strikes nothing until it has grown back over CLEAVE_REST seconds */
-const CLEAVE_REST = 10;
-/* how shrunk a resting Cleaver is, from the seconds left: a stub (1) until the last second, then it grows back quickly */
-const restOf = left => left >= 1 ? 1 : left <= 0 ? 0 : left * left * (3 - 2 * left);
+/* a piece freshly cut off a strand: for the Cleaver's 'fresh' seconds anyone's tail end can take it back on (after a
+   short 'arm', so it does not jump straight back onto the strand it came from). It pulses while it can be taken, then
+   fades for 'fade' seconds and breaks up into letters. A Cleaver that has just cut rests for 'rest' seconds: a stub
+   until its last 'regrow' seconds, then it grows back. These are read through CUT_FRESH, CUT_ARM, CUT_FADE and
+   CLEAVE_REST below, so tuning the Cleaver changes them everywhere */
+const CL = BY.Cleaver;
+/* how shrunk a resting Cleaver is, from the seconds left: 1 (a stub) until the regrowth, then back to 0 */
+const restOf = left => { const g = Math.max(0.01, CL.regrow); if (left >= g) return 1; if (left <= 0) return 0; const u = left / g; return u * u * (3 - 2 * u); };
 function fragAlpha(fresh, fade, t){
-  if (fade != null && fade >= 0) return 0.6 * Math.max(0, fade) / CUT_FADE;
+  if (fade != null && fade >= 0) return 0.6 * Math.max(0, fade) / Math.max(0.01, CL.fade);
   if (fresh > 0) return 0.3 + 0.55 * (0.5 + 0.5 * Math.sin(t * 9));
   return 0.7;
 }
 
-return {LIST, names, get, bodyOf, swimOf, warnEarly, any, strength, strengthNote, CUT_FRESH, CUT_ARM, CUT_FADE, CLEAVE_REST, restOf, fragAlpha};
+/* ---------- tuning: the dev panel's Segments section adjusts the values each entry's 'tune' list names ---------- */
+const RSG = () => window.RNAStrand;
+const pathGet = (o, k) => k.split('.').reduce((a, p) => a == null ? a : a[p], o);
+const pathSet = (o, k, v) => { const ps = k.split('.'), last = ps.pop(); const t = ps.reduce((a, p) => a[p], o); t[last] = v; };
+function tuneGet(fn, k){ if (k.startsWith('S.')) return RSG() ? RSG().S[k.slice(2)] : undefined; return pathGet(get(fn), k); }
+/* the values as shipped, captured the first time anything is tuned (the strand settings exist only once rna-strand.js loads) */
+let DEF = null;
+function captureDefaults(){ if (DEF) return; DEF = {}; for (const s of LIST) if (s.tune){ DEF[s.fn] = {}; for (const [k] of s.tune) DEF[s.fn][k] = tuneGet(s.fn, k); } }
+function tuneSet(fn, k, v){
+  captureDefaults(); v = +v;
+  if (k.startsWith('S.')){ if (RSG()){ RSG().S[k.slice(2)] = v; RSG().restyle(k.slice(2)); } return; }
+  pathSet(get(fn), k, v);
+}
+const tuneDefault = (fn, k) => { captureDefaults(); return DEF[fn] && DEF[fn][k]; };
+/* the values that differ from the shipped ones: {fn:{key:value}} */
+function tuneChanged(){
+  captureDefaults(); const out = {};
+  for (const s of LIST) if (s.tune) for (const [k] of s.tune){ const v = tuneGet(s.fn, k); if (v !== DEF[s.fn][k]) (out[s.fn] = out[s.fn] || {})[k] = v; }
+  return out;
+}
+function tuneApply(o){ for (const fn in o || {}) for (const k in o[fn]){ const s = get(fn); if (s && s.tune && s.tune.some(t => t[0] === k)) tuneSet(fn, k, o[fn][k]); } }
+function tuneReset(fn){ captureDefaults(); for (const s of LIST) if (s.tune && (!fn || s.fn === fn)) for (const [k] of s.tune) tuneSet(s.fn, k, DEF[s.fn][k]); }
+
+return {LIST, names, get, bodyOf, swimOf, warnEarly, any, strength, strengthNote, restOf, fragAlpha,
+  get CUT_FRESH(){ return CL.fresh; }, get CUT_ARM(){ return CL.arm; }, get CUT_FADE(){ return CL.fade; }, get CLEAVE_REST(){ return CL.rest; },
+  tuneGet, tuneSet, tuneDefault, tuneChanged, tuneApply, tuneReset};
 })();

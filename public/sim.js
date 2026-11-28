@@ -390,7 +390,7 @@ function create(opts){
       if (!a.alive) continue;
       for (const f of working(a)){
         const seg = SEG.get(f.fn); if (!seg || !seg.tips || (a.rest && a.rest.get(f.start) > 0)) continue;
-        const R = HIT_R * SEG.strength(f);   /* a stronger Cleaver reaches further, a weak one has to touch closer */
+        const R = (seg.hitR || HIT_R) * SEG.strength(f);   /* a stronger Cleaver reaches further, a weak one has to touch closer */
         for (const tip of seg.tips(f)){
           const na = a.s.nodes[tip]; if (!na) continue;
           const oneHit = MAP.saltAt(na.x, na.y);
@@ -402,7 +402,7 @@ function create(opts){
               if (dist(na.x, na.y, nb[j].x, nb[j].y) > R) continue;
               const hit = strike(b, j, a, oneHit);
               /* a cut: this Cleaver shrinks and rests while it grows back */
-              if (hit === 'cut' && a.rest){ a.rest.set(f.start, SEG.CLEAVE_REST); a.s.setRest(f.start, 1); }
+              if (hit === 'cut' && a.rest && (seg.rest || 0) > 0){ a.rest.set(f.start, seg.rest); a.s.setRest(f.start, 1); }
               if (hit) break;
             }
             if (a.rest && a.rest.get(f.start) > 0) break;
@@ -414,7 +414,7 @@ function create(opts){
     /* a freshly cut piece: anyone's tail end that touches it takes it on, no Joiner needed */
     for (const f of frags.slice()){
       if (!(f.fresh > 0) || SEG.CUT_FRESH - f.fresh < SEG.CUT_ARM) continue;
-      const p = players.find(q => q.alive && !(q.rcd > 0) && q.s.nodes.length && f.s.nodes.some(n => { const t = q.s.nodes[q.s.nodes.length - 1]; return dist(t.x, t.y, n.x, n.y) < 32; }));
+      const p = players.find(q => q.alive && !(q.rcd > 0) && q.s.nodes.length && f.s.nodes.some(n => { const t = q.s.nodes[q.s.nodes.length - 1]; return dist(t.x, t.y, n.x, n.y) < SEG.get('Cleaver').grab; }));
       if (!p) continue;
       const t = p.s.nodes[p.s.nodes.length - 1], n0 = take(p, f); p.rcd = 1.5;
       if (!n0) continue;
@@ -428,10 +428,10 @@ function create(opts){
       if (!p.alive || p.jcd > 0 || !frags.length) continue;
       const jaws = working(p).find(f => f.jstate === 'armed'); if (!jaws) continue;
       const t = p.s.nodes[p.s.nodes.length - 1]; if (!t) continue;
-      const reach = 30 * SEG.strength(jaws), f = frags.find(fr => fr.s.nodes.some(n => dist(t.x, t.y, n.x, n.y) < reach));
+      const reach = SEG.get('Joiner').reach * SEG.strength(jaws), f = frags.find(fr => fr.s.nodes.some(n => dist(t.x, t.y, n.x, n.y) < reach));
       if (!f) continue;
       const add = take(p, f); if (!add) continue;
-      p.jcd = 4; p.stats.joins++;
+      p.jcd = SEG.get('Joiner').cooldown; p.stats.joins++;
       puff(t.x, t.y, p.col, 34);
       if (!p.isBot){
         dirty(p);
