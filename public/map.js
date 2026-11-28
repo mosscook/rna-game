@@ -125,7 +125,7 @@ let world = null, surf = null, worldHash = 0;
    wall     0..1   the least brightness walls keep, so they read as solid even with no fill
    deep     [r,g,b] the colour of the black depths, and of the ground where fill is 0
    colours  {place: [r,g,b]} each place's colour (missing ones use worldgen's) */
-const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, wallLine:1, hueShift:0, gap:0, bright:1, sat:1, deep:[3, 5, 7], colours:{}, coloursLow:{}};
+const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, wallLine:1, hueShift:0, gap:0, layers:3, gapCurve:1, sides:3, sideDark:0.6, bright:1, sat:1, deep:[3, 5, 7], colours:{}, coloursLow:{}};
 /* hue shifting: each place's layers run from its top colour (the highest layer) to a bottom colour (the deepest). The
    bottom is the place's coloursLow entry if it has one, or else the top colour turned hueShift degrees round the wheel */
 function hueTurn([r, g, b], deg){
@@ -451,72 +451,98 @@ let softPx = 0, softMode = 'low';
 function setSoft(px, mode){ if (px === softPx && (mode || softMode) === softMode) return; softPx = px; softMode = mode || softMode; chunks.clear(); }
 /* a generated world is drawn from its depth field: each pixel takes its place's colour at its band's brightness, black
    in the depths, with a soft one-pixel edge between bands (the lab's look, without the raised layers) */
+/* ---------- the generated world's ground, one chunk at a time ----------
+   Each pixel: the deep colour, then each band from the deep up at its brightness, blended toward the deep by fill;
+   walls keep a dim tint; outlines where each band starts; the wall's edge brighter. With a layer gap (parallax), the
+   top bands are pictures of their own: the floor is drawn with everything above band L shown as band L, and each raised
+   band k (L-1 up to the walls, band 0) gets a transparent picture of just its shape, so drawBase can lift it toward the
+   eye. Their 'sides' are the same shapes darkened, stacked between one layer and the next like cliff faces */
+const parallaxLayers = Lk => Lk.gap > 0 ? Math.max(1, Math.min(4, Math.round(Lk.layers || 3))) : 0;
 function renderWorldChunk(kx, ky){
-  const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT, Lk = look;
+  const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT, Lk = look, L = parallaxLayers(Lk);
   /* drawn a little under screen resolution when filled (the bands are smooth curves); at full resolution with outlines */
-  const R = softPx && softMode === 'low' ? 0.34 : Lk.line > 0 ? CR : 0.6, S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
+  const R = softPx && softMode === 'low' ? 0.34 : Lk.line > 0 ? CR : 0.6, S = CH * CELL, pad = softPx && !L ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
   const c = document.createElement('canvas'); c.width = c.height = n;
   const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0], low = [0, 0, 0], bc = [0, 0, 0], hs = shifting(Lk);
   const x0 = kx * S - pad, y0 = ky * S - pad, m = n + 1, ev = new Float32Array(m * m);
   for (let py = 0; py < m; py++) for (let px = 0; px < m; px++) ev[py * m + px] = surf.elev(x0 + (px + 0.5) * step, y0 + (py + 0.5) * step);
   const [d0, d1, d2] = Lk.deep, fill = Lk.fill, sp = Lk.depth, lineA = Lk.line, lw = Math.max(0.3, Lk.lineW) * 0.8, fade = Lk.lineFade, wallB = Lk.wall, wl = Lk.wallLine == null ? 1 : Lk.wallLine;
-  const gapW = Lk.gap || 0, brt = Lk.bright == null ? 1 : Lk.bright, sat = Lk.sat == null ? 1 : Lk.sat, tone = brt !== 1 || sat !== 1;
+  const brt = Lk.bright == null ? 1 : Lk.bright, sat = Lk.sat == null ? 1 : Lk.sat, tone = brt !== 1 || sat !== 1;
   const bright = BR.map(v => Math.max(0, 1 - (1 - v) * sp)), lineM = BR.map(v => 1 - fade * (1 - v));
+  /* the raised bands' pictures, and the box each one's pixels fall in */
+  const lay = []; for (let k = 0; k < L; k++) lay.push({img:g.createImageData(n, n), x0:n, y0:n, x1:-1, y1:-1});
+  let e = 0, grad = 1;
+  const bandCol = k => {
+    if (!hs && !tone) return col;
+    const f = hs ? (6 - k) / 6 : 1; bc[0] = low[0] + (col[0] - low[0]) * f; bc[1] = low[1] + (col[1] - low[1]) * f; bc[2] = low[2] + (col[2] - low[2]) * f;
+    /* brightness and saturation */
+    if (tone){ const gr = (bc[0] + bc[1] + bc[2]) / 3; for (let q = 0; q < 3; q++) bc[q] = (gr + (bc[q] - gr) * sat) * brt; }
+    return bc;
+  };
+  /* the colour of this pixel with nothing above band 'top' (top 0 = everything, walls included) */
+  const out = [0, 0, 0];
+  function shade(top){
+    let r = d0, gg = d1, b = d2;
+    if (fill > 0) for (let k = 6; k >= top; k--){
+      const a = (e - T[k]) / grad + 0.5; if (a <= 0) break;
+      const t = a > 1 ? 1 : a, cc = bandCol(k);
+      r += (d0 + (cc[0] * bright[k] - d0) * fill - r) * t; gg += (d1 + (cc[1] * bright[k] - d1) * fill - gg) * t; b += (d2 + (cc[2] * bright[k] - d2) * fill - b) * t;
+    }
+    /* walls keep at least a dim tint of their place, so they still read as solid */
+    if (top === 0 && wallB > 0 && wallB > fill * bright[0]){
+      const a = (e - T[0]) / grad + 0.5;
+      if (a > 0){ const t = a > 1 ? 1 : a; r += (d0 + (col[0] * wallB - d0) - r) * t; gg += (d1 + (col[1] * wallB - d1) - gg) * t; b += (d2 + (col[2] * wallB - d2) - b) * t; }
+    }
+    /* outlines where each band starts */
+    if (lineA > 0) for (let k = 6; k >= Math.max(1, top); k--){
+      const a = (1 - Math.abs(e - T[k]) / (grad * lw)) * lineA; if (a <= 0) continue;
+      const mm = lineM[k], t = a > 1 ? 1 : a, cc = bandCol(k);
+      r += (cc[0] * mm - r) * t; gg += (cc[1] * mm - gg) * t; b += (cc[2] * mm - b) * t;
+    }
+    /* the wall's edge, where swimming stops: wider, at full brightness and lifted toward white by wallLine, even in a
+       filled look. At 0 it is drawn like the other outlines */
+    if (top === 0){ const la = Math.max(lineA, Math.min(1, wl) * 0.9), a = (1 - Math.abs(e - T[0]) / (grad * lw * (1 + 0.6 * wl))) * la;
+      if (a > 0){
+        const t = a > 1 ? 1 : a, mm = wl > 0 ? 1 : lineM[0], wh = Math.min(0.6, 0.3 * wl);
+        const tr = col[0] * mm + (255 - col[0] * mm) * wh, tg = col[1] * mm + (255 - col[1] * mm) * wh, tb = col[2] * mm + (255 - col[2] * mm) * wh;
+        r += (tr - r) * t; gg += (tg - gg) * t; b += (tb - b) * t;
+      } }
+    out[0] = r; out[1] = gg; out[2] = b; return out;
+  }
   for (let py = 0; py < n; py++) for (let px = 0; px < n; px++){
     const x = x0 + (px + 0.5) * step, y = y0 + (py + 0.5) * step, o = (py * n + px) * 4;
     if (x < 0 || y < 0 || x >= W || y >= H){ d[o] = d0; d[o + 1] = d1; d[o + 2] = d2; d[o + 3] = 255; continue; }
-    const i = py * m + px, e = ev[i], ex = ev[i + 1] - e, ey = ev[i + m] - e, grad = Math.sqrt(ex * ex + ey * ey) + 1e-6;
-    let r = d0, gg = d1, b = d2;
-    if (e >= T[6] - (lw + 1) * grad){
-      /* each band's colour: the place's colour, or with hue shifting, part way from its bottom colour (band 6) to its top (band 0) */
-      if (hs) surf.colour2(x, y, col, low); else surf.colour(x, y, col);
-      const bandCol = k => {
-        if (!hs && !tone) return col;
-        const f = hs ? (6 - k) / 6 : 1; bc[0] = low[0] + (col[0] - low[0]) * f; bc[1] = low[1] + (col[1] - low[1]) * f; bc[2] = low[2] + (col[2] - low[2]) * f;
-        /* brightness and saturation */
-        if (tone){ const gr = (bc[0] + bc[1] + bc[2]) / 3; for (let q = 0; q < 3; q++) bc[q] = (gr + (bc[q] - gr) * sat) * brt; }
-        return bc;
-      };
-      if (!hs){ low[0] = col[0]; low[1] = col[1]; low[2] = col[2]; }
-      /* fill: each band from the deep up, its colour at its brightness, blended toward the deep colour by fill */
-      if (fill > 0) for (let k = 6; k >= 0; k--){
-        const a = (e - T[k]) / grad + 0.5; if (a <= 0) break;
-        const t = a > 1 ? 1 : a, cc = bandCol(k);
-        r += (d0 + (cc[0] * bright[k] - d0) * fill - r) * t; gg += (d1 + (cc[1] * bright[k] - d1) * fill - gg) * t; b += (d2 + (cc[2] * bright[k] - d2) * fill - b) * t;
-      }
-      /* layer gap: a dark seam just below where each layer starts, so the layers read as separate steps */
-      if (gapW > 0) for (let k = 6; k >= 0; k--){
-        const below = (T[k] - e) / grad; if (below <= 0 || below > gapW + 1) continue;
-        const t = Math.min(1, gapW + 1 - below) * 0.85; r += (d0 - r) * t; gg += (d1 - gg) * t; b += (d2 - b) * t;
-      }
-      /* walls keep at least a dim tint of their place, so they still read as solid */
-      if (wallB > 0 && wallB > fill * bright[0]){
-        const a = (e - T[0]) / grad + 0.5;
-        if (a > 0){ const t = a > 1 ? 1 : a; r += (d0 + (col[0] * wallB - d0) - r) * t; gg += (d1 + (col[1] * wallB - d1) - gg) * t; b += (d2 + (col[2] * wallB - d2) - b) * t; }
-      }
-      /* outlines where each band starts */
-      if (lineA > 0) for (let k = 6; k >= 1; k--){
-        const a = (1 - Math.abs(e - T[k]) / (grad * lw)) * lineA; if (a <= 0) continue;
-        const mm = lineM[k], t = a > 1 ? 1 : a, cc = bandCol(k);
-        r += (cc[0] * mm - r) * t; gg += (cc[1] * mm - gg) * t; b += (cc[2] * mm - b) * t;
-      }
-      /* the wall's edge, where swimming stops: wider, at full brightness and lifted toward white by wallLine, even in a
-         filled look. At 0 it is drawn like the other outlines */
-      { const la = Math.max(lineA, Math.min(1, wl) * 0.9), a = (1 - Math.abs(e - T[0]) / (grad * lw * (1 + 0.6 * wl))) * la;
-        if (a > 0){
-          const t = a > 1 ? 1 : a, mm = wl > 0 ? 1 : lineM[0], wh = Math.min(0.6, 0.3 * wl);
-          const tr = col[0] * mm + (255 - col[0] * mm) * wh, tg = col[1] * mm + (255 - col[1] * mm) * wh, tb = col[2] * mm + (255 - col[2] * mm) * wh;
-          r += (tr - r) * t; gg += (tg - gg) * t; b += (tb - b) * t;
-        } }
+    const i = py * m + px, ex = ev[i + 1] - ev[i], ey = ev[i + m] - ev[i]; e = ev[i]; grad = Math.sqrt(ex * ex + ey * ey) + 1e-6;
+    if (e < T[6] - (lw + 1) * grad){ d[o] = d0; d[o + 1] = d1; d[o + 2] = d2; d[o + 3] = 255; continue; }
+    /* each band's colour: the place's colour, or with hue shifting, part way from its bottom colour (band 6) to its top (band 0) */
+    if (hs) surf.colour2(x, y, col, low); else { surf.colour(x, y, col); low[0] = col[0]; low[1] = col[1]; low[2] = col[2]; }
+    const f = shade(L); d[o] = f[0]; d[o + 1] = f[1]; d[o + 2] = f[2]; d[o + 3] = 255;
+    for (let k = 0; k < L; k++){
+      const a = (e - T[k]) / grad + 0.5 + lw * 0.6; if (a <= 0) continue;
+      const q = lay[k], qd = q.img.data, s2 = shade(k);
+      qd[o] = s2[0]; qd[o + 1] = s2[1]; qd[o + 2] = s2[2]; qd[o + 3] = 255 * (a > 1 ? 1 : a);
+      if (px < q.x0) q.x0 = px; if (px > q.x1) q.x1 = px; if (py < q.y0) q.y0 = py; if (py > q.y1) q.y1 = py;
     }
-    d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = 255;
   }
   g.putImageData(img, 0, 0);
+  if (L){
+    /* each raised band as a picture of just its box, with a darkened copy for its sides */
+    const dark = Math.max(0, Math.min(1, Lk.sideDark == null ? 0.6 : Lk.sideDark)), layers = lay.map(q => {
+      if (q.x1 < 0) return null;
+      const w = q.x1 - q.x0 + 1, h = q.y1 - q.y0 + 1, lc = document.createElement('canvas'); lc.width = w; lc.height = h;
+      lc.getContext('2d').putImageData(q.img, -q.x0, -q.y0, q.x0, q.y0, w, h);
+      let side = null;
+      if ((Lk.sides || 0) > 0){ side = document.createElement('canvas'); side.width = w; side.height = h; const sg = side.getContext('2d');
+        sg.drawImage(lc, 0, 0); sg.globalCompositeOperation = 'source-atop'; sg.fillStyle = `rgba(${d0},${d1},${d2},${dark})`; sg.fillRect(0, 0, w, h); }
+      return {c:lc, side, x:q.x0 * step, y:q.y0 * step, w:w * step, h:h * step};
+    });
+    return {floor:c, layers};
+  }
   if (!pad) return c;
-  const out = document.createElement('canvas'); out.width = out.height = Math.round(S * R);
-  const q = out.getContext('2d'); q.filter = `blur(${(softPx * R * (softMode === 'low' ? 0.5 : 1)).toFixed(2)}px)`;
+  const o2 = document.createElement('canvas'); o2.width = o2.height = Math.round(S * R);
+  const q = o2.getContext('2d'); q.filter = `blur(${(softPx * R * (softMode === 'low' ? 0.5 : 1)).toFixed(2)}px)`;
   q.drawImage(c, -pad * R, -pad * R);
-  return out;
+  return o2;
 }
 function renderChunk(kx, ky){
   if (world) return renderWorldChunk(kx, ky);
@@ -569,8 +595,24 @@ function drawBase(g, camX, camY, vw, vh, t){
   const j0 = Math.max(0, Math.floor(camY / S)), j1 = Math.min(Math.ceil(H / S) - 1, Math.floor((camY + vh) / S));
   for (let ky = j0; ky <= j1; ky++) for (let kx = k0; kx <= k1; kx++){
     const c = chunk(kx, ky);
-    if (c) g.drawImage(c, kx * S, ky * S, S, S);
+    if (c) g.drawImage(c.floor || c, kx * S, ky * S, S, S);
     else { g.fillStyle = COL[K.OCEAN]; g.fillRect(kx * S, ky * S, S, S); }
+  }
+  /* parallax: each raised band drawn scaled about the middle of the view by 1 + height x gap, so it sits closer to the
+     eye: it slides faster than the floor as the view moves, and more so toward the edges. Its sides fill the climb from
+     the layer below in thin slices, like cliff faces */
+  const L = world ? parallaxLayers(look) : 0;
+  if (L){
+    const P = look.gap, curve = look.gapCurve || 1, slices = Math.round(look.sides || 0), cx = camX + vw / 2, cy = camY + vh / 2;
+    const hOf = i => Math.pow(i + 1, curve), list = [];
+    for (let ky = j0 - 1; ky <= j1 + 1; ky++) for (let kx = k0 - 1; kx <= k1 + 1; kx++){ const c = chunks.get(kx + ',' + ky); if (c && c.layers) list.push([kx, ky, c]); }
+    const at = (h, fn) => { const z = 1 + h * P; g.save(); g.translate(cx, cy); g.scale(z, z); g.translate(-cx, -cy); fn(); g.restore(); };
+    for (let i = 0; i < L; i++){
+      const k = L - 1 - i, h1 = hOf(i), h0 = i ? hOf(i - 1) : 0;
+      for (let s2 = 0; s2 < slices; s2++){ const h = h0 + (h1 - h0) * s2 / slices;
+        at(h, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q && q.side) g.drawImage(q.side, kx * S + q.x, ky * S + q.y, q.w, q.h); } }); }
+      at(h1, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q) g.drawImage(q.c, kx * S + q.x, ky * S + q.y, q.w, q.h); } });
+    }
   }
   /* warm the cache just outside the view so swimming into new ground does not stutter */
   for (let ky = j0 - 1; ky <= j1 + 1 && renderBudget > 0; ky++) for (let kx = k0 - 1; kx <= k1 + 1 && renderBudget > 0; kx++){

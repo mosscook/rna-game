@@ -64,7 +64,10 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 | Wall tint | The least brightness walls keep, so they read as solid |
 | Wall outline | How strongly the wall's edge (where swimming stops) is drawn: wider, full brightness and lifted toward white. Shown in both looks; 0 draws it like the other outlines. Default 1 (2 in the default Lines look) |
 | Hue shift | Each place's layers shade from its top colour (highest layer) to a bottom colour (deepest), part way at each step. The bottom is the top turned this many degrees round the colour wheel, unless the place has its own **Bottom colour** set. 0 = no shading |
-| Layer gap | A dark seam just below where each layer starts, so the layers read as separate steps. 0 = none |
+| Layer gap (parallax) | Lifts the top layers toward the eye: each is drawn scaled about the middle of the view by 1 + height × gap, so it slides faster than the floor as the view moves, more so toward the edges. 0 = flat (and no extra cost) |
+| Raised layers | How many of the top layers are lifted (1-4; the walls are always the top one) |
+| Height curve | Above 1 the top layers stand taller than the ones below them |
+| Cliff side slices, darkness | The lifted layers' sides, drawn as darkened copies stacked between one layer and the next like cliff faces. More slices look smoother and cost a little more each frame. Strands bump into the foot of a cliff, where the map really is |
 | Brightness, Saturation | Applied to every layer's colour. 1 = as set |
 | Colours | The deep colour and each place's colour |
 
