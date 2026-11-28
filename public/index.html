@@ -1239,7 +1239,7 @@ function applyLook(){
 }
 const toggleLook = () => { if (!MAP.world) return; looks.slot = looks.slot === 'filled' ? 'lines' : 'filled'; applyLook(); syncLookPanel(); };
 $('bLook').addEventListener('click', toggleLook);
-const LOOK_SLIDERS = [['fill', 'Fill', 0, 1, 0.05], ['depth', 'Depth steps', 0, 1.5, 0.05], ['line', 'Outline', 0, 1, 0.05], ['lineW', 'Line width', 0.5, 3, 0.25], ['lineFade', 'Line fade', 0, 1, 0.05], ['wall', 'Wall tint', 0, 0.6, 0.02]];
+const LOOK_SLIDERS = [['fill', 'Fill', 0, 1, 0.05], ['depth', 'Depth steps', 0, 1.5, 0.05], ['line', 'Outline', 0, 1, 0.05], ['lineW', 'Line width', 0.5, 3, 0.25], ['lineFade', 'Line fade', 0, 1, 0.05], ['wall', 'Wall tint', 0, 0.6, 0.02], ['wallLine', 'Wall outline', 0, 2, 0.1]];
 function lookPanel(){
   return `<p class="note" id="lkNote" hidden>Only the generated world uses these; this is the classic map.</p>`
     + `<div class="row">${Object.entries(LOOK_SLOTS).map(([k, t]) => `<button class="btn" type="button" data-slot="${k}">${t}</button>`).join('')}<span class="note">editing this look · ◯ / O switches</span></div>`
@@ -1253,7 +1253,7 @@ function syncLookPanel(){
   const L = looks[looks.slot], base = window.WorldGen.PLACE_COL;
   $('lkNote').hidden = !!MAP.world;
   for (const b of $('dev').querySelectorAll('[data-slot]')) b.setAttribute('aria-pressed', b.dataset.slot === looks.slot);
-  for (const i of $('dev').querySelectorAll('[data-look]')){ i.value = L[i.dataset.look]; $('dev').querySelector(`[data-out="${i.dataset.look}"]`).textContent = (+L[i.dataset.look]).toFixed(2); }
+  for (const i of $('dev').querySelectorAll('[data-look]')){ const v = L[i.dataset.look] != null ? L[i.dataset.look] : MAP.LOOK_BASE[i.dataset.look]; i.value = v; $('dev').querySelector(`[data-out="${i.dataset.look}"]`).textContent = (+v).toFixed(2); }
   for (const i of $('dev').querySelectorAll('[data-col]')){ const id = i.dataset.col; i.value = hex(id === 'deep' ? L.deep : L.colours[id] || base[id] || base.water); }
 }
 function wireLookPanel(){

@@ -62,6 +62,7 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 | Outline, Line width | The line where each band starts, and its width |
 | Line fade | How much the lines dim with depth |
 | Wall tint | The least brightness walls keep, so they read as solid |
+| Wall outline | How strongly the wall's edge (where swimming stops) is drawn: wider, full brightness and lifted toward white. Shown in both looks; 0 draws it like the other outlines. Default 1 |
 | Colours | The deep colour and each place's colour |
 
 Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default.

@@ -70,7 +70,7 @@ function generate(s, opt){
   if (opt && opt.world){ chunks.clear(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
   W = BASE_W; H = BASE_H; GW = W / CELL; GH = H / CELL; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
   grid = new Uint8Array(GW * GH).fill(K.OCEAN);
-  shores.clear(); flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
+  flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
   lavas = []; melted = new Set(); chunks.clear(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
   lobby = !!(opt && opt.lobby); lobbyClumps = [];
   if (lobby) return generateLobby();
@@ -125,7 +125,7 @@ let world = null, surf = null, worldHash = 0;
    wall     0..1   the least brightness walls keep, so they read as solid even with no fill
    deep     [r,g,b] the colour of the black depths, and of the ground where fill is 0
    colours  {place: [r,g,b]} each place's colour (missing ones use worldgen's) */
-const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, deep:[3, 5, 7], colours:{}};
+const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, wallLine:1, deep:[3, 5, 7], colours:{}};
 let look = Object.assign({}, LOOK_BASE);
 function setWorldLook(o){
   const recol = o && o.colours && JSON.stringify(o.colours) !== JSON.stringify(look.colours);
@@ -425,7 +425,6 @@ function update(dt, ev, heads){
 
 /* ---------- drawing: cached terrain chunks, plus what moves ---------- */
 const chunks = new Map(); let renderBudget = 0;
-const shores = new Map();   /* per chunk: the wall's edge as short segments with outward normals, for the ripples */
 function dirty(cx, cy){ chunks.delete(Math.floor(cx / CH) + ',' + Math.floor(cy / CH)); mini.dirty = true; }
 const hash = (a, b) => { let h = Math.imul(a, 374761393) + Math.imul(b, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
 /* the microscope look (lens.js) can draw the ground out of focus: each chunk is blurred once, when it is made.
@@ -442,7 +441,7 @@ function renderWorldChunk(kx, ky){
   const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0];
   const x0 = kx * S - pad, y0 = ky * S - pad, m = n + 1, ev = new Float32Array(m * m);
   for (let py = 0; py < m; py++) for (let px = 0; px < m; px++) ev[py * m + px] = surf.elev(x0 + (px + 0.5) * step, y0 + (py + 0.5) * step);
-  const [d0, d1, d2] = Lk.deep, fill = Lk.fill, sp = Lk.depth, lineA = Lk.line, lw = Math.max(0.3, Lk.lineW) * 0.8, fade = Lk.lineFade, wallB = Lk.wall;
+  const [d0, d1, d2] = Lk.deep, fill = Lk.fill, sp = Lk.depth, lineA = Lk.line, lw = Math.max(0.3, Lk.lineW) * 0.8, fade = Lk.lineFade, wallB = Lk.wall, wl = Lk.wallLine == null ? 1 : Lk.wallLine;
   const bright = BR.map(v => Math.max(0, 1 - (1 - v) * sp)), lineM = BR.map(v => 1 - fade * (1 - v));
   for (let py = 0; py < n; py++) for (let px = 0; px < n; px++){
     const x = x0 + (px + 0.5) * step, y = y0 + (py + 0.5) * step, o = (py * n + px) * 4;
@@ -463,11 +462,19 @@ function renderWorldChunk(kx, ky){
         if (a > 0){ const t = a > 1 ? 1 : a; r += (d0 + (col[0] * wallB - d0) - r) * t; gg += (d1 + (col[1] * wallB - d1) - gg) * t; b += (d2 + (col[2] * wallB - d2) - b) * t; }
       }
       /* outlines where each band starts */
-      if (lineA > 0) for (let k = 6; k >= 0; k--){
+      if (lineA > 0) for (let k = 6; k >= 1; k--){
         const a = (1 - Math.abs(e - T[k]) / (grad * lw)) * lineA; if (a <= 0) continue;
         const mm = lineM[k], t = a > 1 ? 1 : a;
         r += (col[0] * mm - r) * t; gg += (col[1] * mm - gg) * t; b += (col[2] * mm - b) * t;
       }
+      /* the wall's edge, where swimming stops: wider, at full brightness and lifted toward white by wallLine, even in a
+         filled look. At 0 it is drawn like the other outlines */
+      { const la = Math.max(lineA, Math.min(1, wl) * 0.9), a = (1 - Math.abs(e - T[0]) / (grad * lw * (1 + 0.6 * wl))) * la;
+        if (a > 0){
+          const t = a > 1 ? 1 : a, mm = wl > 0 ? 1 : lineM[0], wh = Math.min(0.6, 0.3 * wl);
+          const tr = col[0] * mm + (255 - col[0] * mm) * wh, tg = col[1] * mm + (255 - col[1] * mm) * wh, tb = col[2] * mm + (255 - col[2] * mm) * wh;
+          r += (tr - r) * t; gg += (tg - gg) * t; b += (tb - b) * t;
+        } }
     }
     d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = 255;
   }
@@ -558,52 +565,7 @@ function drawBase(g, camX, camY, vw, vh, t){
   g.fill(); g.globalAlpha = 1;
 }
 const seen = (x, y, pad, camX, camY, vw, vh) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
-/* the wall's edge in one chunk, by marching squares on a 16 px grid. Each crossing keeps the downhill direction there,
-   so a ripple can be drawn by pushing the whole edge outward. Built once per chunk, the first time it is seen */
-function shoreOf(kx, ky){
-  const key = kx + ',' + ky; let sh = shores.get(key); if (sh) return sh;
-  const WALL = window.WorldGen.WALL, S = CH * CELL, n = Math.round(S / 16), st = S / n, x0 = kx * S, y0 = ky * S, m = n + 1, E = new Float32Array(m * m), out = [];
-  for (let j = 0; j < m; j++) for (let i = 0; i < m; i++) E[j * m + i] = surf.elev(Math.min(W - 1, x0 + i * st), Math.min(H - 1, y0 + j * st));
-  const pt = (xa, ya, ea, xb, yb, eb) => {
-    const f = (WALL - ea) / (eb - ea), x = xa + (xb - xa) * f, y = ya + (yb - ya) * f;
-    const gx = surf.elev(x + 4, y) - surf.elev(x - 4, y), gy = surf.elev(x, y + 4) - surf.elev(x, y - 4), L = Math.hypot(gx, gy) || 1;
-    return [x, y, -gx / L, -gy / L];
-  };
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++){
-    const a = E[j * m + i], b = E[j * m + i + 1], c = E[(j + 1) * m + i + 1], d = E[(j + 1) * m + i];
-    const xa = x0 + i * st, ya = y0 + j * st, xb = xa + st, yb = ya + st, hits = [];
-    if ((a >= WALL) !== (b >= WALL)) hits.push(pt(xa, ya, a, xb, ya, b));
-    if ((b >= WALL) !== (c >= WALL)) hits.push(pt(xb, ya, b, xb, yb, c));
-    if ((c >= WALL) !== (d >= WALL)) hits.push(pt(xb, yb, c, xa, yb, d));
-    if ((d >= WALL) !== (a >= WALL)) hits.push(pt(xa, yb, d, xa, ya, a));
-    for (let k = 0; k + 1 < hits.length; k += 2) out.push(...hits[k], ...hits[k + 1]);
-  }
-  sh = new Float32Array(out); shores.set(key, sh); return sh;
-}
-/* water lapping at the walls: three faint outlines leave each wall edge, spread out and fade, so what cannot be
-   swum through stands out a little without being drawn brighter. Cheap: a few hundred short lines on screen */
-function drawRipples(g, camX, camY, vw, vh, t){
-  if (!world || !surf) return;
-  const S = CH * CELL, kx0 = Math.max(0, Math.floor((camX - 40) / S)), ky0 = Math.max(0, Math.floor((camY - 40) / S));
-  const kx1 = Math.min(Math.ceil(W / S) - 1, Math.floor((camX + vw + 40) / S)), ky1 = Math.min(Math.ceil(H / S) - 1, Math.floor((camY + vh + 40) / S));
-  const sets = [];
-  for (let ky = ky0; ky <= ky1; ky++) for (let kx = kx0; kx <= kx1; kx++){ const sh = shoreOf(kx, ky); if (sh.length) sets.push(sh); }
-  if (!sets.length) return;
-  g.lineWidth = 1.1; g.lineCap = 'round';
-  for (let r = 0; r < 3; r++){
-    const ph = (t * 0.22 + r / 3) % 1, a = Math.sin(Math.PI / 2 * Math.min(1, ph * 4)) * (1 - ph) * (1 - ph) * 0.32;
-    if (a < 0.01) continue;
-    const base = 3 + ph * 30;
-    g.strokeStyle = `rgba(190,220,235,${a.toFixed(3)})`; g.beginPath();
-    for (const sh of sets) for (let q = 0; q < sh.length; q += 8){
-      const w1 = base + 2.5 * Math.sin(t * 1.3 + sh[q] * 0.021 + sh[q + 1] * 0.017), w2 = base + 2.5 * Math.sin(t * 1.3 + sh[q + 4] * 0.021 + sh[q + 5] * 0.017);
-      g.moveTo(sh[q] + sh[q + 2] * w1, sh[q + 1] + sh[q + 3] * w1); g.lineTo(sh[q + 4] + sh[q + 6] * w2, sh[q + 5] + sh[q + 7] * w2);
-    }
-    g.stroke();
-  }
-}
 function drawOver(g, camX, camY, vw, vh, t){
-  drawRipples(g, camX, camY, vw, vh, t);
   /* currents: motes that wink into being somewhere along a stream, drift with it for a few seconds and fade away.
      Stateless: each mote's life is a function of the clock, so nothing is stored and every screen agrees closely enough */
   for (let fi = 0; fi < flows.length; fi++){
