@@ -34,7 +34,27 @@ function blur(a, GX, GY, r){
 }
 
 /* the depth bands (as in the lab): E >= WALL is a wall; the black depth is below 0.14 */
-const WALL = 0.86, DEFAULTS = {lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, texture:1, align:1, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
+const WALL = 0.86, DEFAULTS = {layout:'auto', asymmetry:0.85, offset:1, elongation:1, variance:1, sea:1, lagoon:1650, mounds:7, rin:280, rim:58, door:50, channel:220, spread:20, pockets:4, rosettes:60, gap:10, slope:30, dither:2.3, craters:36, basins:2, chimneys:6, lava:4, impacts:3, ispread:0.55, erosion:0.5, calderas:2, rivers:0.5, riverDepth:0.5, texture:1, align:1, scale:1, outer:['island', 'chimneys', 'ice', 'ridge']};
+
+/* ---- the big picture: layout styles ----
+   A style is a recipe for the map's large shapes: how far each trait is pushed, 0 (not at all) to 1 (fully).
+     off     the lagoon sits away from the middle of the map
+     long    the impacts fall in a row, so the lagoon is long or bent instead of round
+     vary    outer places differ in size and shape, and the highland rim is wide on one side and thin on another
+     sea     open water between the outer places (islands) instead of land edge to edge
+     arc     how much of the way round the lagoon the ring channel runs
+     strait  a great channel crossing the whole map past the lagoon
+   'auto' picks a style from the seed. The designer's knobs (asymmetry, offset, elongation, variance, sea) scale these:
+   asymmetry 0 gives the old even layout whatever the style; the others at 1 mean "as the style says". */
+const LAYOUTS = {
+  ring:       {off:0.45, long:0.3,  vary:0.6, sea:0,    arc:0.75, strait:0},
+  crescent:   {off:0.7,  long:1,    vary:0.7, sea:0.2,  arc:0.6,  strait:0},
+  continent:  {off:1,    long:0.45, vary:1,   sea:0,    arc:0.5,  strait:0},
+  archipelago:{off:0.6,  long:0.6,  vary:0.8, sea:1,    arc:0.45, strait:0},
+  strait:     {off:0.8,  long:0.8,  vary:0.7, sea:0.3,  arc:0.45, strait:1}};
+const LAYOUT_NAMES = Object.keys(LAYOUTS);
+/* 'auto' draws from this list: the ring, the layout closest to the old map, comes up half as often as the others */
+const AUTO = ['ring', 'crescent', 'crescent', 'continent', 'continent', 'archipelago', 'archipelago', 'strait', 'strait'];
 
 /* generate = build, check, and regrow from the next seed if a check fails that can't be fixed in place (at most 4
    tries; then the best try). Deterministic: the same settings and seed always end on the same map */
@@ -56,40 +76,93 @@ function build(o){
   const w = {lagoon:new Float32Array(N), flats:new Float32Array(N), water:new Float32Array(N)};
   p.outer.forEach(id => w[id] = new Float32Array(N));
 
-  /* ---- world scale, founded by meteors: 1-3 big impacts near the centre. Their merged, worn basins are the lagoon;
-     their raised rims, the craggy highlands around it; everything further out is measured from them. dn(x, y) is the
-     distance from the impact field in basin radii (1 = the old rim): a smooth union of tilted ellipses, roughened by
-     erosion noise, so the lagoon is central but never a plain oval ---- */
-  const S = p.scale || 1, impacts = [];
-  const R1 = p.lagoon * S * (0.85 + 0.15 * r()), mx = W / 2 + (r() - 0.5) * 0.06 * W, my = H / 2 + (r() - 0.5) * 0.06 * H;
+  /* ---- world scale, founded by meteors: 1-3 big impacts. Their merged, worn basins are the lagoon; their raised
+     rims, the craggy highlands around it; everything further out is measured from them. dn(x, y) is the distance from
+     the impact field in basin radii (1 = the old rim): a smooth union of tilted ellipses, roughened by erosion noise.
+     The layout style and the asymmetry knobs decide where the impacts fall: together in the middle (a round, central
+     lagoon), or strung out in a row, bent, and pushed toward one side of the map ---- */
+  const S = p.scale || 1, impacts = [], mix = (a, b, t) => a + (b - a) * t;
+  const pick = AUTO[Math.floor(r() * AUTO.length)], layout = LAYOUTS[p.layout] ? p.layout : pick, LAY = LAYOUTS[layout];
+  const A = Math.max(0, Math.min(1, p.asymmetry)), trait = (k, knob) => Math.max(0, Math.min(1, LAY[k] * knob));
+  const OFF = trait('off', p.offset) * A, LONG = trait('long', p.elongation) * A, VARY = trait('vary', p.variance) * A, SEA = trait('sea', p.sea);
+  const R1 = p.lagoon * S * (0.85 + 0.15 * r()), oa = r() * TAU, om = 0.55 + 0.45 * r();
+  const mx = W / 2 + (r() - 0.5) * 0.06 * W + OFF * om * dcos(oa) * Math.max(0, W / 2 - 1.4 * R1), my = H / 2 + (r() - 0.5) * 0.06 * H + OFF * om * dsin(oa) * Math.max(0, H / 2 - 1.15 * R1);
+  /* the row the impacts fall along: within about 50 degrees of level, since the map is wider than it is tall */
+  const axis = (r() - 0.5) * 1.75, bend = (r() - 0.5) * 2;
   for (let k = 0; k < Math.max(1, p.impacts); k++){
-    const R = k ? R1 * (0.42 + 0.3 * r()) : R1, a = r() * TAU, d = k ? p.ispread * R1 * (0.6 + 0.5 * r()) : p.ispread * R1 * 0.25 * r(), tilt = r() * PI;
-    impacts.push({x:mx + d * dcos(a), y:my + d * dsin(a), R, c:dcos(tilt), s:dsin(tilt), asp:0.78 + 0.2 * r()});
+    const q1 = r(), q2 = r(), q3 = r(), q4 = r(), q5 = r();
+    const R = k ? R1 * mix(0.42 + 0.3 * q1, 0.6 + 0.16 * q1, LONG) : R1 * mix(1, 0.76, LONG);
+    const a = axis * LONG + (k % 2 ? 0 : PI) + (k % 2 ? 1 : -1) * bend * 0.75 * LONG + (q2 - 0.5) * TAU * (1 - LONG);
+    const d = k ? R1 * mix(p.ispread * (0.6 + 0.5 * q3), 0.8 + 0.22 * q3, LONG) : p.ispread * R1 * 0.25 * q3 * (1 - LONG);
+    const tilt = mix(q4 * PI, axis, LONG);
+    impacts.push({x:mx + d * dcos(a), y:my + d * dsin(a), R, c:dcos(tilt), s:dsin(tilt), asp:mix(0.78 + 0.2 * q5, 0.7 + 0.3 * q5, LONG)});
   }
   const dI = (m, x, y) => { const ex = x - m.x, ey = y - m.y, u = (ex * m.c + ey * m.s) / m.R, v = (ey * m.c - ex * m.s) / (m.R * m.asp); return Math.sqrt(u * u + v * v); };
   const KS = 0.2 + 0.4 * p.erosion, EA = 0.08 + 0.16 * p.erosion, EB = 0.03 + 0.09 * p.erosion;
   const smin = (a, b) => { const h = Math.max(KS - Math.abs(a - b), 0) / KS; return Math.min(a, b) - h * h * KS * 0.25; };
-  let cx = 0, cy = 0, sw0 = 0; for (const m of impacts){ const q = m.R * m.R; cx += m.x * q; cy += m.y * q; sw0 += q; } cx /= sw0; cy /= sw0;
-  let RX = 0, RY = 0; for (const m of impacts){ RX = Math.max(RX, Math.abs(m.x - cx) + m.R); RY = Math.max(RY, Math.abs(m.y - cy) + m.R * 0.9); }
+  let cx = 0, cy = 0, RX = 0, RY = 0;
+  const measure = () => { let sw0 = 0; cx = 0; cy = 0; RX = 0; RY = 0; for (const m of impacts){ const q = m.R * m.R; cx += m.x * q; cy += m.y * q; sw0 += q; } cx /= sw0; cy /= sw0;
+    for (const m of impacts){ RX = Math.max(RX, Math.abs(m.x - cx) + m.R); RY = Math.max(RY, Math.abs(m.y - cy) + m.R * 0.9); } };
+  measure();
+  /* keep the whole lagoon on the map: slide the impacts back in if their row runs over an edge */
+  { const sx = Math.max(RX * 1.08 - cx, 0) - Math.max(cx + RX * 1.08 - W, 0), sy = Math.max(RY * 1.08 - cy, 0) - Math.max(cy + RY * 1.08 - H, 0);
+    if (sx || sy){ for (const m of impacts){ m.x += sx; m.y += sy; } measure(); } }
   const dn = (x, y) => { let d = dI(impacts[0], x, y); for (let k = 1; k < impacts.length; k++) d = smin(d, dI(impacts[k], x, y));
     return d + EA * fbm(g[0], x / (1800 * S), y / (1800 * S)) + EB * fbm(g[0], x / (650 * S) + 31, y / (650 * S)); };
-  /* the point at angle a from the centre where dn first reaches d */
-  const at = (a, d) => { const ux = dcos(a), uy = dsin(a); let t = 0; while (t < 9000 && dn(cx + ux * t, cy + uy * t) < d) t += 15; return {x:cx + ux * t, y:cy + uy * t}; };
+  /* the highland rim's outer edge, and the ring channel beyond it, are measured in dz: dn stretched and squeezed by
+     a broad noise, so the rim is wide on one side of the lagoon and thin on another */
+  const RIMV = 0.75 * VARY, dzOf = (x, y, d) => d * (1 + RIMV * fbm(g[1], x / (2300 * S) + 11.3, y / (2300 * S) + 5.1));
+  /* the point at angle a from the centre where dn (or dz) first reaches d */
+  const at = (a, d, z) => { const ux = dcos(a), uy = dsin(a); let t = 0; for (; t < 9000; t += 15){ const x = cx + ux * t, y = cy + uy * t, v = dn(x, y); if ((z ? dzOf(x, y, v) : v) >= d) break; } return {x:cx + ux * t, y:cy + uy * t}; };
   const a0 = r() * TAU, K = p.outer.length;
-  const sites = p.outer.map((id, k) => { const a = a0 + TAU * k / K + (r() - 0.5) * 0.5; return {id, a, ux:dcos(a), uy:dsin(a)}; });
+
+  /* ---- where the outer places go: each gets a seed point out beyond the rim, and owns the land nearest to it. The
+     seeds are spread by always taking the free spot furthest from those already taken (nudged by noise), so places
+     never stack up; each then gets its own size and a stretched, tilted reach, so one place can be a sliver and its
+     neighbour a continent that wraps round it. With more variance, some places get a second, smaller seed elsewhere:
+     an outlying patch of ice inside the ridge, say ---- */
+  const spots = [];
+  for (let y = 0.06 * H; y < 0.95 * H; y += 150) for (let x = 0.05 * W; x < 0.96 * W; x += 150){ const d = dn(x, y); if (dzOf(x, y, d) > 2.15) spots.push({x, y}); }
+  const seeds = [], nExtra = spots.length >= K * 6 ? Math.floor(VARY * 2.999 * r()) : 0;
+  if (spots.length >= K * 3){
+    const taken = [spots[Math.floor(r() * spots.length)]];
+    while (taken.length < K + nExtra){ let best = null, bv = -1;
+      for (const q of spots){ let md = Infinity; for (const t of taken){ const dx = q.x - t.x, dy = q.y - t.y, v = dx * dx + dy * dy; if (v < md) md = v; }
+        const v = Math.sqrt(md) * (1 + 0.5 * VARY * fbm(g[3], q.x / 900, q.y / 900)); if (v > bv){ bv = v; best = q; } }
+      taken.push(best); }
+    /* which place gets which spot: a shuffle from the seed */
+    const order = p.outer.map((_, k) => k); for (let k = K - 1; k > 0; k--){ const j = Math.floor(r() * (k + 1)), t = order[k]; order[k] = order[j]; order[j] = t; }
+    taken.forEach((q, k) => { const tilt = r() * PI, main = k < K;
+      seeds.push({x:q.x, y:q.y, place:main ? order[k] : Math.floor(r() * K), main, size:main ? 1 + VARY * (r() * 1.5 - 0.55) : 0.4 + 0.25 * r(), c:dcos(tilt), s:dsin(tilt), asp:1 - 0.5 * VARY * r()}); });
+  } else {
+    /* a map too small for that (the lobby): evenly round the lagoon, as directions */
+    p.outer.forEach((id, k) => { const a = a0 + TAU * k / K + (r() - 0.5) * 0.5, q = at(a, 2.6, true); seeds.push({x:q.x, y:q.y, place:k, main:true, size:1, c:1, s:0, asp:1}); });
+  }
+  const SL = 1500 * S;
+  const reach = (q, x, y) => { const ex = x - q.x, ey = y - q.y, u = ex * q.c + ey * q.s, v = (ey * q.c - ex * q.s) / q.asp; return Math.sqrt(u * u + v * v) / (q.size * SL); };
 
   /* ---- deep channels, laid down first so the land forms around them ----
-     a ring between the middle ring and the outer areas, three quarters of the way round; spokes from the lagoon's edge
-     to the ring through the gaps between places; and a connector from the ring into every outer place */
-  const lines = [], ringStart = a0 + PI / K + (r() - 0.5) * 0.4, ring = [];
-  for (let k = 0; k <= 54; k++){ const a = ringStart + 1.5 * PI * k / 54; ring.push(at(a, 1.82 * (1 + 0.05 * fbm(g[1], k * 0.3, 1.7)))); }
-  lines.push(ring);
-  const meander = (A, B, n, amp, gi) => { const pts = [], dx = B.x - A.x, dy = B.y - A.y, L = Math.sqrt(dx * dx + dy * dy), nx = -dy / L, ny = dx / L;
-    for (let k = 0; k <= n; k++){ const t = k / n, m = amp * fbm(g[gi], t * 2.3 + gi * 3.1, 0.5) * (1 - (2 * t - 1) * (2 * t - 1)); pts.push({x:A.x + dx * t + nx * m, y:A.y + dy * t + ny * m}); } return pts; };
-  const gaps = sites.map((s, k) => s.a + PI / K).slice(0, 3);
-  gaps.forEach((a, k) => lines.push(meander(at(a, 0.98), at(a + (r() - 0.5) * 0.3, 1.82), 14, 260, 2 + (k % 3))));
-  sites.forEach((s, k) => lines.push(meander(at(s.a + (r() - 0.5) * 0.25, 1.82), at(s.a, 2.45), 10, 200, 3 + (k % 2))));
-  const segs = []; for (const L of lines) for (let k = 0; k + 1 < L.length; k++) segs.push([L[k], L[k + 1]]);
+     a ring beyond the highland rim, part or all of the way round; spokes from the lagoon's edge out to it; a connector
+     from the nearest channel toward every outer place; in some layouts a strait across the whole map, or a fjord
+     running out to the map's edge. Each line has its own width (1 = the channel setting) */
+  const lines = [], ring = [], ARC = Math.min(1, mix(0.75, LAY.arc + 0.5 * r(), A)), ringStart = a0 + (r() - 0.5) * 0.4;
+  for (let k = 0; k <= 54; k++){ const a = ringStart + TAU * ARC * k / 54; ring.push(at(a, 1.82 * (1 + (0.05 + 0.12 * A) * fbm(g[1], k * 0.3, 1.7)), true)); }
+  ring.wf = 1; lines.push(ring);
+  const meander = (A, B, n, amp, gi, wf = 1) => { const pts = [], dx = B.x - A.x, dy = B.y - A.y, L = Math.sqrt(dx * dx + dy * dy) || 1, nx = -dy / L, ny = dx / L;
+    for (let k = 0; k <= n; k++){ const t = k / n, m = amp * fbm(g[gi], t * 2.3 + gi * 3.1, 0.5) * (1 - (2 * t - 1) * (2 * t - 1)); pts.push({x:A.x + dx * t + nx * m, y:A.y + dy * t + ny * m}); } pts.wf = wf; return pts; };
+  const nSpokes = A > 0.3 ? 2 + Math.floor(r() * 2.999) : 3;
+  for (let k = 0; k < nSpokes; k++){ const a = ringStart + TAU * (k + 0.5 + (r() - 0.5) * 0.7 * A) / nSpokes; lines.push(meander(at(a, 0.98), at(a + (r() - 0.5) * 0.3, 1.82, true), 14, 260, 2 + (k % 3))); }
+  if (LAY.strait * A > 0.4){
+    /* the strait: touches the ring at one point and runs on both ways, off the map */
+    const ta = r() * TAU, T0 = at(ta, 1.9, true), tx = -dsin(ta), ty = dcos(ta), lean = (r() - 0.5) * 0.9, ux = tx + lean * dcos(ta), uy = ty + lean * dsin(ta);
+    lines.push(meander({x:T0.x - ux * W * 0.8, y:T0.y - uy * W * 0.8}, {x:T0.x + ux * W * 0.8, y:T0.y + uy * W * 0.8}, 26, 520, 4, 1.5));
+  } else if (r() < 0.6 * A){
+    const fa = r() * TAU, F0 = at(fa, 1.82, true); lines.push(meander(F0, {x:F0.x + dcos(fa) * W * 0.6, y:F0.y + dsin(fa) * W * 0.6}, 14, 380, 4, 1.2));
+  }
+  const trunk = lines.reduce((a, L) => a.concat(L), []);
+  seeds.forEach((q, k) => { if (!q.main) return; let near = trunk[0], nd = Infinity; for (const t of trunk){ const dx = t.x - q.x, dy = t.y - q.y, v = dx * dx + dy * dy; if (v < nd){ nd = v; near = t; } }
+    lines.push(meander(near, {x:near.x + (q.x - near.x) * 0.8, y:near.y + (q.y - near.y) * 0.8}, 10, 200, 3 + (k % 2))); });
+  const segs = []; for (const L of lines) for (let k = 0; k + 1 < L.length; k++) segs.push([L[k], L[k + 1], L.wf || 1]);
   const half = p.channel / 2;
 
   /* ---- every point belongs to exactly one place: discrete zones ----
@@ -97,21 +170,26 @@ function build(o){
      weights are close, so a blobby noise per place decides: the two zones interleave in blob-shaped islands ("dither"
      in discrete blobs) instead of blending. Channels are their own place. */
   const PIDS = ['lagoon', 'flats'].concat(p.outer).concat(['water']), pid = new Uint8Array(N), F = new Float32Array(N), EU = new Float32Array(N), DN = new Float32Array(N), L0 = new Float32Array(N), L1 = new Float32Array(N), CH = new Float32Array(N), BK = new Float32Array(N);
-  const blobG = PIDS.map(() => noiseGrid(r));
+  const blobG = PIDS.map(() => noiseGrid(r)), rch = new Float32Array(seeds.length), sw = new Float32Array(K), SEAF = new Float32Array(N);
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
     const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, d = dn(x, y); DN[n] = d;
-    const wL = 1 - smooth(0.74, 1.26, d), wO = smooth(1.45, 2.05, d), wM = Math.max(0, 1 - wL - wO);
-    let ux = (x - cx) / RX, uy = (y - cy) / RY; const ul = Math.sqrt(ux * ux + uy * uy) || 1; ux /= ul; uy /= ul;
-    let bd = -2; const dots = sites.map(s0 => { const v = ux * s0.ux + uy * s0.uy; if (v > bd) bd = v; return v; });
-    let st = 0; const sw = dots.map(v => { const q = Math.max(0, 1 - (bd - v) / 0.45); st += q; return q; });
-    const score = [wL, wM].concat(sw.map(q => wO * q / st));
+    const wL = 1 - smooth(0.74, 1.26, d), wO = smooth(1.45, 2.05, dzOf(x, y, d)), wM = Math.max(0, 1 - wL - wO);
+    /* each outer place's share here: 1 for the place whose seed reaches this spot most easily, fading to 0 for
+       places 0.3 of a reach further off */
+    let vmin = Infinity; for (let k = 0; k < seeds.length; k++){ const v = reach(seeds[k], x, y); rch[k] = v; if (v < vmin) vmin = v; }
+    sw.fill(0); for (let k = 0; k < seeds.length; k++){ const q = Math.max(0, 1 - (rch[k] - vmin) / 0.3), pl = seeds[k].place; if (q > sw[pl]) sw[pl] = q; }
+    let st = 0; for (let k = 0; k < K; k++) st += sw[k];
+    const score = [wL, wM]; for (let k = 0; k < K; k++) score.push(wO * sw[k] / st);
+    /* open sea: beyond the rim, far from every place's seed (how far, the sea setting decides), with a ragged shore */
+    const sea = SEA > 0 ? wO * smooth(0, 0.14, vmin + 0.22 * fbm(g[2], x / 620 + 3.3, y / 620) - mix(1.6, 0.92, SEA)) : 0;
     let best = 0, bs = -9;
     for (let k = 0; k < score.length; k++){
       const blob = fbm(blobG[k], x / 520, y / 520) * 0.5 + fbm(blobG[k], x / 230 + 40, y / 230) * 0.5;
       const v = score[k] + p.dither * blob; if (v > bs){ bs = v; best = k; }
     }
-    let cd = Infinity; for (const [A, B] of segs){ const v = segDist(x, y, A, B); if (v < cd) cd = v; }
-    CH[n] = 1 - smooth(half * 0.55, half, cd); BK[n] = smooth(half * 0.9, half * 1.15, cd) * (1 - smooth(half * 1.15, half * 1.6, cd));
+    let cd = Infinity; for (const sg of segs){ const v = segDist(x, y, sg[0], sg[1]) / sg[2]; if (v < cd) cd = v; }
+    CH[n] = Math.max(1 - smooth(half * 0.55, half, cd), sea); BK[n] = smooth(half * 0.9, half * 1.15, cd) * (1 - smooth(half * 1.15, half * 1.6, cd)) * (1 - sea);
+    SEAF[n] = sea;
     pid[n] = CH[n] > 0.5 ? PIDS.length - 1 : best;
     L0[n] = fbm(g[2], x / 1400, y / 1400); L1[n] = fbm(g[3], x / 600, y / 600);
   }
@@ -132,7 +210,7 @@ function build(o){
   const OUTER_BASE = {island:0.62, chimneys:0.6, ice:0.62, ridge:0.55};
   for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++){
     const n = j * GX + i, x = (i + 0.5) * RES, y = (j + 0.5) * RES, id = PIDS[pid[n]], n1 = L0[n], n2 = L1[n];
-    let e = id === 'lagoon' ? 0.39 + 0.34 * n1 + 0.1 * n2 : id === 'flats' ? 0.47 + 0.32 * n1 + 0.15 * n2 : id === 'water' ? 0.03 : (OUTER_BASE[id] || 0.6) + 0.28 * n1 + 0.15 * n2;
+    let e = id === 'lagoon' ? 0.39 + 0.34 * n1 + 0.1 * n2 : id === 'flats' ? 0.47 + 0.32 * n1 + 0.15 * n2 : id === 'water' ? 0.03 + SEAF[n] * (0.14 * smooth(-0.1, 0.25, n2) + 0.12 * smooth(0.0, 0.45, n1)) : (OUTER_BASE[id] || 0.6) + 0.28 * n1 + 0.15 * n2;
     const d = DN[n];
     if (id === 'lagoon'){
       /* the impacts' eroded central peaks survive as islands; the floor shallows toward the old rim */
@@ -407,9 +485,24 @@ function build(o){
     }
   }
   const mounds = [], letters = [], spawns = [], BASES = ['A', 'U', 'G', 'C'];
-  for (let k = 0; k < p.mounds; k++){
-    const a = a0 + TAU * k / p.mounds + (r() - 0.5) * 0.3, pos = at(a, 0.56 * (1 + (r() - 0.5) * 0.12)), rin = p.rin * (0.85 + r() * 0.3);
-    mounds.push({x:pos.x, y:pos.y, a, rin, t:p.rim, doors:[], k, door:p.door, warp:rin * 0.28, slopeIn:80, slopeOut:110, top:0.96, floor:0.56, inside:() => 0.08});
+  /* where the mounds go: anywhere in the lagoon's middle belt (a narrow ring when asymmetry is 0, most of the lagoon
+     when it is 1), each new one at the free spot furthest from the others, nudged by noise. So they follow the
+     lagoon's shape, long or bent, sit unevenly, and still keep their distance: fair starts */
+  const pang = (dx, dy) => { const q = dx / ((dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) || 1); return dy < 0 ? 3 + q : 1 - q; };   /* a pseudo-angle: grows with the true angle, plain arithmetic only */
+  {
+    const belt = [], pad = p.rin + p.rim, lo = mix(0.5, 0.2, A), hi = mix(0.62, 0.66, A);
+    for (let y = pad; y <= H - pad; y += 60) for (let x = pad; x <= W - pad; x += 60){ const d = dn(x, y); if (d > lo && d < hi) belt.push({x, y}); }
+    const taken = [];
+    if (belt.length >= p.mounds * 4){
+      taken.push(belt[Math.floor(r() * belt.length)]);
+      while (taken.length < p.mounds){ let best = null, bv = -1;
+        for (const q of belt){ let md = Infinity; for (const t of taken){ const dx = q.x - t.x, dy = q.y - t.y, v = dx * dx + dy * dy; if (v < md) md = v; }
+          const v = Math.sqrt(md) * (1 + 0.3 * A * fbm(g[3], q.x / 400 + 9, q.y / 400)); if (v > bv){ bv = v; best = q; } }
+        taken.push(best); }
+    } else for (let k = 0; k < p.mounds; k++) taken.push(at(a0 + TAU * k / p.mounds + (r() - 0.5) * 0.3, 0.56 * (1 + (r() - 0.5) * 0.12)));
+    /* in order round the centre, so each mound's neighbour (for doorways and letter pockets) is the next one along */
+    taken.map(q => ({q, a:pang(q.x - cx, q.y - cy)})).sort((u, v) => u.a - v.a).forEach(({q, a}, k) => { const rin = p.rin * (0.85 + r() * 0.3);
+      mounds.push({x:q.x, y:q.y, a, rin, t:p.rim, doors:[], k, door:p.door, warp:rin * 0.28, slopeIn:80, slopeOut:110, top:0.96, floor:0.56, inside:() => 0.08}); });
   }
   const unit = (x, y) => { const l = Math.sqrt(x * x + y * y) || 1; return {x:x / l, y:y / l}; };
   const turn = (u, th) => { const c = dcos(th), s = dsin(th); return {x:u.x * c - u.y * s, y:u.x * s + u.y * c}; };
@@ -500,31 +593,31 @@ function build(o){
     for (let k = letters.length - 1; k >= 0; k--){ const l = letters[k], n = Math.min(GY - 1, Math.max(0, Math.floor(l.y / RES))) * GX + Math.min(GX - 1, Math.max(0, Math.floor(l.x / RES))); if (E[n] >= WALL) letters.splice(k, 1); }
   }
   {
-    /* fair starts: gaps between neighbouring mounds, by angle around the lagoon */
-    /* order by a pseudo-angle (monotonic in the true angle, plain arithmetic only) */
-    const pang = (dx, dy) => { const q = dx / ((dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) || 1); return dy < 0 ? 3 + q : 1 - q; };
-    const ang = spawns.map(sp => ({sp, a:pang(sp.x - cx, sp.y - cy)})).sort((a, b) => a.a - b.a);
-    const gaps = ang.map((q, k) => { const nx = ang[(k + 1) % ang.length].sp; return Math.sqrt((nx.x - q.sp.x) ** 2 + (nx.y - q.sp.y) ** 2); });
+    /* fair starts: how far each mound is from its nearest neighbour. Nobody crowded, nobody out on their own */
+    const gaps = spawns.map(a => { let md = Infinity; for (const b of spawns) if (b !== a) md = Math.min(md, Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2)); return md; });
     const mean = gaps.reduce((a, b) => a + b, 0) / (gaps.length || 1);
     checks.spawnSpread = gaps.length > 1 ? (Math.max(...gaps) - Math.min(...gaps)) / mean : 0;
     /* places linked: an open cell of the place next to a deep channel */
-    checks.unlinked = [];
+    checks.unlinked = []; checks.small = []; checks.layout = layout;
     for (const id of p.outer){ const k = PIDS.indexOf(id); let cells = 0, linked = false;
       for (let n = 0; n < N && !linked; n++){ if (pid[n] !== k) continue; cells++;
         if (E[n] < WALL){ const i = n % GX, j = (n - i) / GX;
           for (let b = -3; b <= 3 && !linked; b++) for (let a = -3; a <= 3; a++){ const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < GX && jj < GY && CH[jj * GX + ii] > 0.5){ linked = true; break; } } } }
-      if (cells > 200 && !linked) checks.unlinked.push(id); }
+      if (cells > 200 && !linked) checks.unlinked.push(id);
+      /* and every outer place must be there, with room to play in: at least 2.5% of the map */
+      let all = 0; for (let n = 0; n < N; n++) if (pid[n] === k) all++;
+      if (all < N * 0.025) checks.small.push(id); }
     /* lagoon mix */
     let lag = 0, mid = 0; for (let n = 0; n < N; n++) if (zone[n] === 0){ lag++; if (E[n] >= 0.14 && E[n] < 0.62) mid++; }
     checks.lagoonMid = lag ? mid / lag : 0;
     checks.mounds = mounds.length;
-    checks.ok = checks.unlinked.length === 0 && checks.lagoonMid >= 0.35 && checks.spawnSpread < 0.8 && mounds.length === p.mounds;
-    checks.score = (checks.ok ? 10 : 0) - checks.unlinked.length * 2 + checks.lagoonMid - checks.spawnSpread;
+    checks.ok = checks.unlinked.length === 0 && checks.small.length === 0 && checks.lagoonMid >= 0.35 && checks.spawnSpread < 0.8 && mounds.length === p.mounds;
+    checks.score = (checks.ok ? 10 : 0) - checks.unlinked.length * 2 - checks.small.length * 2 + checks.lagoonMid - checks.spawnSpread;
   }
   /* lanes: deep channels, streams and lava channels. Textures fade out over them so travel lanes stay open */
   const lane = new Float32Array(N);
   for (let n = 0; n < N; n++) lane[n] = Math.max(CH[n], Math.min(1, LW[n] * 8), LD[n] < 2 ? 1 - smooth(1, 1.8, LD[n]) : 0);
-  return {E, E0:Float32Array.from(E), checks, zone, pid, PIDS, ramp:F, lane, seed:p.seed, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, centre:{x:cx, y:cy, RX, RY}, GX, GY, RES};
+  return {E, E0:Float32Array.from(E), checks, zone, pid, PIDS, ramp:F, lane, seed:p.seed, weights:w, letters, spawns, impacts, craters, vents, lavas, rivers, mounds, rosettes, pockets, channels:lines, layout, seeds, centre:{x:cx, y:cy, RX, RY}, GX, GY, RES};
 }
 
 /* ---- place scale: reaction-diffusion textures, steered by the landforms (lab step 3) ----

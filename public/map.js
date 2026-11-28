@@ -232,7 +232,7 @@ function generateWorld(s, o){
 /* the lobby as a mini generated world: one small lagoon from two impacts, three ring mounds and a few rosettes, a
    ring of highland around it and a scrap of the outer places at the edges, drawn in the world's own look. Still the
    lobby: no hazards, no currents, letters gathered in clumps that refill, humans one per mound */
-const MINI_LOBBY = {size:0.4, settings:{lagoon:2500, impacts:2, ispread:0.5, mounds:3, rin:150, rim:44, door:70, rosettes:16,
+const MINI_LOBBY = {size:0.4, settings:{layout:'ring', asymmetry:0, pattern:0, lagoon:2500, impacts:2, ispread:0.5, mounds:3, rin:150, rim:44, door:70, rosettes:16,
   craters:20, basins:0, chimneys:0, calderas:0, lava:0, rivers:0.4, spread:20, pockets:0}};
 function generateMiniLobby(s){
   const sp = generateWorld(s, MINI_LOBBY);
