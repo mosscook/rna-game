@@ -76,6 +76,10 @@ A strand's head picks up a letter within 19 px (more on clay). People's heads re
 
 About half the shield volcanoes and calderas are active, chosen from the seed so every screen agrees (there is always at least one shield with a lava flow). An active shield's vent pit holds a lava pool and lava runs down its channels, no more than 1400 px; an active caldera's floor is a lava lake and has no geyser. The lava swells and ebbs over 34 to 56 seconds: each flow's front creeps down its channel and back, glowing while it advances. Twice a second every structure touching lava is damaged, loose letters touching it burn off with everything behind them, and free letters and fragments that drift in burn away. Bots steer clear of it. It shows orange on the minimap at its fullest. The code is `lavas`, `lavaNear` and `lavaAt` in `map.js`.
 
+## Membranes side by side
+
+A Membrane takes hits meant for the function on either side of it. Two or more Membranes in a row stack: a Membrane is shielded by a working neighbour Membrane too, so a pair takes three hits to cut instead of two, and when shields stand on both sides of a struck function their strengths add up (two weak ones hold like one exact one). The strongest takes the hit. Their goo overlaps too: where two or three Membranes reach, it is drawn again on top, so it looks denser.
+
 ## Cut-off pieces
 
 A Cleaver that has just cut something shrinks to a quarter of its size and strikes nothing while it grows back over 5 seconds (`CLEAVE_REST` in `segments.js`). Damaging a hit does not set it off, only a cut.

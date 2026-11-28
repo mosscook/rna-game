@@ -53,7 +53,7 @@ const LIST = [
    plan(c){ c.want = 1.7 * c.tr.aggression + 0.5 * c.tr.opportunism + 0.8 * c.m.anger + (c.info.late && c.info.rank > 1 ? 0.6 : 0); if (c.n >= 2) c.want *= 0.35; }},
 
   {fn:'Membrane', core:'GCCGGC', body:'chamber',
-   does:'Takes the hits meant for the functions on either side of it. Dissolves in magnesium.',
+   does:'Takes the hits meant for the functions on either side of it. Membranes side by side shield each other and add up their strength. Dissolves in magnesium.',
    tag:'Real science', sci:'Bubbles of fatty acid can hold RNA, grow and divide. Magnesium breaks them apart.',
    shield:true, saltBreaks:0.25,
    likedBy:['caution', 'patience', 'grudge'],

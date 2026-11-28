@@ -242,15 +242,22 @@ function create(opts){
     if (p.isBot) BOTS.onRespawn(p);
     dirty(p); tell(p, 'A new core formed with a single Mover. Start again from there.');
   }
-  /* a working shield (a Membrane) next to the struck function takes the hit instead */
+  /* a working shield (a Membrane) next to the struck function takes the hit instead. Membranes side by side stack: a
+     Membrane is shielded by a working neighbour Membrane too, and the strengths of the shields on both sides add up */
   const isShield = fn => { const s = SEG.get(fn); return !!(s && s.shield); };
-  /* a weak shield sometimes lets a hit through (only weak ones draw a random number) */
-  const shieldHolds = sh => !sh || SEG.strength(sh) >= 1 || Math.random() < SEG.strength(sh);
+  /* a weak shield sometimes lets a hit through (only weak ones draw a random number); wall = both sides together */
+  const wallOf = sh => sh.wall != null ? sh.wall : SEG.strength(sh);
+  const shieldHolds = sh => !sh || wallOf(sh) >= 1 || Math.random() < wallOf(sh);
   function shieldFor(p, st){
-    if (!st || isShield(st.fn)) return null;
+    if (!st) return null;
     const fl = p.s.functions, k = fl.findIndex(f => f.start === st.start);
     if (k < 0) return null;
-    return [fl[k - 1], fl[k + 1]].find(f => f && isShield(f.fn) && !f.damaged) || null;
+    const sides = [fl[k - 1], fl[k + 1]].filter(f => f && isShield(f.fn) && !f.damaged);
+    if (!sides.length) return null;
+    /* the strongest takes the hit */
+    const best = sides.reduce((a, b) => SEG.strength(b) > SEG.strength(a) ? b : a);
+    best.wall = sides.reduce((n, f) => n + SEG.strength(f), 0);
+    return best;
   }
   function strike(b, j, by, oneHit){
     const st = b.s.structureAt(j);

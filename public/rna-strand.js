@@ -498,6 +498,8 @@ function makeStrand(stage, opts){
   /* mask ids are page-wide: two stages on one page (the soup and the start-screen logo) must not share one */
   const mid = 'rs-m' + (MASK_N++);
   E.gooBody = el('path', {fill:'none', stroke:'var(--goo)', 'stroke-linecap':'round', 'stroke-linejoin':'round'}, E.gooFL);
+  E.gooBody2 = el('path', {fill:'none', stroke:'var(--goo)', 'stroke-linecap':'round', 'stroke-linejoin':'round'}, E.gooFL);
+  E.gooBody3 = el('path', {fill:'none', stroke:'var(--goo)', 'stroke-linecap':'round', 'stroke-linejoin':'round'}, E.gooFL);
   E.mask = el('mask', {id:mid, maskUnits:'userSpaceOnUse', x:-1e5, y:-1e5, width:2e5, height:2e5}, stage.defs);
   el('rect', {x:-1e5, y:-1e5, width:2e5, height:2e5, fill:'#fff'}, E.mask);
   E.gooIn = el('path', {fill:'none', stroke:'#000', 'stroke-linecap':'round', 'stroke-linejoin':'round'}, E.mask);
@@ -1224,9 +1226,9 @@ function makeStrand(stage, opts){
     return COLOR[seq[i]];
   }
   /* goo only where a Membrane reaches: the Membrane itself plus the structure on each side of it */
-  let gooCov = [], gooAny = false, memCov = [], memAny = false;
+  let gooCov = [], gooAny = false, memCov = [], memAny = false, memCnt = [];
   function gooCoverage(){
-    const n = seq.length, cov = new Array(n).fill(false);
+    const n = seq.length, cov = new Array(n).fill(false), cnt = new Array(n).fill(0);
     {
       const units = fold.units || [], mods = fold.mods || [];
       const blockOf = m => units.find(u => m.start >= u.start && m.end <= u.end) || m;
@@ -1235,10 +1237,11 @@ function makeStrand(stage, opts){
         const before = mods.filter(m => m.end < u.start).pop(), after = mods.find(m => m.start > u.end);
         if (before) lo = blockOf(before).start;
         if (after) hi = blockOf(after).end;
-        for (let i = lo; i <= hi; i++) cov[i] = true;
+        for (let i = lo; i <= hi; i++){ cov[i] = true; cnt[i]++; }
       }
     }
-    memCov = cov; memAny = S.goo === 'memFill' && cov.some(Boolean);
+    /* neighbouring Membranes overlap: where two or three reach, the goo is drawn again on top, so it is denser */
+    memCnt = cnt; memCov = cov; memAny = S.goo === 'memFill' && cov.some(Boolean);
     gooCov = S.gooCover === 'all' ? new Array(n).fill(true) : cov;
     gooAny = S.goo !== 'off' && gooCov.some(Boolean);
   }
@@ -1263,7 +1266,7 @@ function makeStrand(stage, opts){
     /* goo: a wide round stroke along the strand is the body; the same stroke, a little wider, with the body masked out, is the outline */
     const gw = S.gooSize * 1.2, edge = Math.max(1, S.lineW * 1.6);
     const fillOn = S.goo === 'fill' || S.goo === 'both' || (S.goo === 'memFill' && memAny), outOn = S.goo === 'outline' || S.goo === 'both' || S.goo === 'memFill';
-    $('gooBody').setAttribute('stroke-width', f1(gw)); $('gooBody').setAttribute('opacity', S.gooOpacity);
+    for (const k of ['gooBody', 'gooBody2', 'gooBody3']){ $(k).setAttribute('stroke-width', f1(gw)); $(k).setAttribute('opacity', S.gooOpacity); }
     $('gooIn').setAttribute('stroke-width', f1(gw)); $('gooOut').setAttribute('stroke-width', f1(gw + edge * 2));
     $('gooFL').style.display = fillOn && gooAny ? '' : 'none';
     $('gooL').style.display = outOn && gooAny ? '' : 'none';
@@ -1348,7 +1351,7 @@ function makeStrand(stage, opts){
     if ($('labels').getAttribute('font-size') !== fs) $('labels').setAttribute('font-size', fs);
     const core = $('core'); core.setAttribute('cx', f1(head.x)); core.setAttribute('cy', f1(head.y));
     if (!n){ ['bb','bbRibbon','rungs','bands','decoFill','decoLine','hull','bbNick'].forEach(id => $(id).setAttribute('d', ''));
-      const hd = `M${f1(head.x)} ${f1(head.y)}h0.1`; $('gooOut').setAttribute('d', hd); $('gooIn').setAttribute('d', hd); $('gooBody').setAttribute('d', ''); renderHelpers(); return; }
+      const hd = `M${f1(head.x)} ${f1(head.y)}h0.1`; $('gooOut').setAttribute('d', hd); $('gooIn').setAttribute('d', hd); $('gooBody').setAttribute('d', ''); $('gooBody2').setAttribute('d', ''); $('gooBody3').setAttribute('d', ''); renderHelpers(); return; }
     let rung = '';
     const info = new Array(n), spk = new Array(n).fill(null);
     if (S.cleaverSpikes) for (const m of fold.mods) if (isCleaver(m)) for (let i = m.start; i <= m.end; i++) spk[i] = m;
@@ -1382,6 +1385,8 @@ function makeStrand(stage, opts){
       const outD = S.gooCover === 'all' ? path || `M${f1(head.x)} ${f1(head.y)}h0.1` : runs(gooCov);
       $('gooOut').setAttribute('d', outD); $('gooIn').setAttribute('d', outD);
       $('gooBody').setAttribute('d', S.goo === 'memFill' ? runs(memCov) : outD);
+      $('gooBody2').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 2)) : '');
+      $('gooBody3').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 3)) : '');
     }
     $('bb').setAttribute('d', path); $('bbRibbon').setAttribute('d', S.backbone === 'ribbon' ? path : '');
     let nick = '';
