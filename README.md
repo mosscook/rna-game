@@ -62,10 +62,10 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 | Outline, Line width | The line where each band starts, and its width |
 | Line fade | How much the lines dim with depth |
 | Wall tint | The least brightness walls keep, so they read as solid |
-| Wall outline | How strongly the wall's edge (where swimming stops) is drawn: wider, full brightness and lifted toward white. Shown in both looks; 0 draws it like the other outlines. Default 1 |
+| Wall outline | How strongly the wall's edge (where swimming stops) is drawn: wider, full brightness and lifted toward white. Shown in both looks; 0 draws it like the other outlines. Default 1 (2 in the default Lines look) |
 | Colours | The deep colour and each place's colour |
 
-Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default.
+Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default. Raise `LOOKS_V` at the same time, so looks saved on devices before then are replaced.
 
 The server and every browser build the same map from the seed: the generator uses only basic arithmetic. The room also sends a fingerprint of the map, and a browser that grew a different one says so in its console. `node test/world.mjs` plays a round on a world. `node test/room-world.mjs` checks a world room against `wrangler dev`. The reaction-diffusion textures are off in the game for now: they take 2-3 s to grow.
 

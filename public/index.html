@@ -1221,13 +1221,15 @@ const LOOK_PRESETS = {
 const LOOK_SLOTS = {filled:'Filled', lines:'Lines'};
 const PLACE_IDS = ['lagoon', 'flats', 'island', 'chimneys', 'ice', 'ridge', 'water'];
 const PLACE_LABEL = {lagoon:'lagoon', flats:'highlands', island:'island', chimneys:'chimneys', ice:'ice', ridge:'ridge', water:'channels', deep:'deep'};
-/* everyone's default: the Lines look as Moss tuned it (27 Nov 2026) */
-const freshLooks = () => ({slot:'lines', filled:Object.assign({colours:{}}, LOOK_PRESETS.filled, {deep:[3, 5, 7]}),
-  lines:{colours:{lagoon:[79, 85, 4]}, fill:0.2, depth:1.4, line:0.4, lineW:1, lineFade:1, wall:0.4, deep:[3, 5, 7]}});
+/* everyone's default: the Lines look as Moss tuned it (28 Nov 2026). Raise LOOKS_V when the defaults change, so looks
+   saved on a device before then are replaced by the new ones (which look is chosen is kept) */
+const LOOKS_V = 2;
+const freshLooks = () => ({v:LOOKS_V, slot:'lines', filled:Object.assign({colours:{}}, LOOK_PRESETS.filled, {deep:[3, 5, 7]}),
+  lines:{colours:{lagoon:[79, 85, 4]}, fill:0.5, depth:1.1, line:0.9, lineW:1, lineFade:1, wall:0.4, wallLine:2, deep:[3, 5, 7]}});
 let looks = freshLooks();
 try {
   const v = JSON.parse(localStorage.getItem('soup2.looks') || 'null');
-  if (v && v.filled && v.lines) looks = Object.assign(freshLooks(), v);
+  if (v && v.filled && v.lines) looks = v.v === LOOKS_V ? Object.assign(freshLooks(), v) : Object.assign(freshLooks(), {slot:v.slot === 'filled' ? 'filled' : 'lines'});
   else if (localStorage.getItem('soup2.look') === 'outline') looks.slot = 'lines';
 } catch(e){}
 { const q = new URLSearchParams(location.search).get('look'); if (q) looks.slot = /^(lines|outline)$/.test(q) ? 'lines' : 'filled'; }
