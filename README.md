@@ -82,7 +82,7 @@ A Membrane takes hits meant for the function on either side of it. Two or more M
 
 ## Cut-off pieces
 
-A Cleaver that has just cut something shrinks to a stub (an eighth of its length) and strikes nothing for 5 seconds: it stays a stub until the last second, then grows back quickly (`CLEAVE_REST` in `segments.js`). Damaging a hit does not set it off, only a cut.
+A Cleaver that has just cut something shrinks to a stub (an eighth of its length) and strikes nothing for 10 seconds: it stays a stub until the last second, then grows back quickly (`CLEAVE_REST` in `segments.js`). Damaging a hit does not set it off, only a cut.
 
 When a Cleaver cuts a strand, everything behind the cut floats free as a piece. For 3.5 seconds anyone's tail end that touches it takes it on, no Joiner needed: the strand that lost it (by turning back), the one that cut it, or anyone passing. It cannot be taken for the first 0.6 seconds, so it does not jump straight back onto the strand it came from. While it can be taken it pulses; then it fades for 0.8 seconds and breaks up into letters. A Joiner can also take it while it lasts. The times are `CUT_FRESH`, `CUT_ARM` and `CUT_FADE` in `segments.js`. Fragments that drift in on their own last until a Joiner takes them or a smoker breaks them up.
 

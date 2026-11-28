@@ -45,7 +45,7 @@ const LIST = [
    plan(c){ c.want = 0.3 + 0.5 * c.tr.curiosity + 0.4 * c.tr.greed + (c.m.fear > 0.3 ? c.tr.caution : 0) - 0.3 * c.n; if (c.n >= 3) c.gain *= 0.5; }},
 
   {fn:'Cleaver', core:'CUGCUG', body:'spikes',
-   does:'Its two spikes damage what they touch on rival strands, then cut damaged structures off. Everything behind the cut floats free. After a cut its spikes shrink to stubs for 5 seconds before they grow back and it can strike again.',
+   does:'Its two spikes damage what they touch on rival strands, then cut damaged structures off. Everything behind the cut floats free. After a cut its spikes shrink to stubs for 10 seconds before they grow back and it can strike again.',
    tag:'Real science', sci:'Hammerhead ribozymes can be built to find a target RNA by base pairing, then cut it.',
    /* one base sits at each spike tip */
    tips(f){ const L = f.end - f.start; return [f.start + Math.round(L / 4), f.start + Math.round(3 * L / 4)]; },
@@ -154,7 +154,7 @@ function strengthNote(f){
    CUT_FADE seconds and breaks up into letters. fresh = seconds left to take it, fade = seconds left of fading */
 const CUT_FRESH = 3.5, CUT_ARM = 0.6, CUT_FADE = 0.8;
 /* a Cleaver that has just cut shrinks, and strikes nothing until it has grown back over CLEAVE_REST seconds */
-const CLEAVE_REST = 5;
+const CLEAVE_REST = 10;
 /* how shrunk a resting Cleaver is, from the seconds left: a stub (1) until the last second, then it grows back quickly */
 const restOf = left => left >= 1 ? 1 : left <= 0 ? 0 : left * left * (3 - 2 * left);
 function fragAlpha(fresh, fade, t){
