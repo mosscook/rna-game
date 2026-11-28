@@ -65,6 +65,7 @@ function generateLobby(){
 /* opt.lobby: build the lobby instead of the world */
 function generate(s, opt){
   seed = s >>> 0 || 1; world = null; surf = null;
+  if (opt && opt.lobby && !opt.classic){ chunks.clear(); return generateMiniLobby(s >>> 0 || 1); }
   if (opt && opt.world){ chunks.clear(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
   W = BASE_W; H = BASE_H; GW = W / CELL; GH = H / CELL; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
   grid = new Uint8Array(GW * GH).fill(K.OCEAN);
@@ -179,6 +180,28 @@ function generateWorld(s, o){
   const homes = world.spawns.map(p => ({x:p.x, y:p.y}));
   const bots = homes.slice(1).concat(homes.slice(0, 1));
   return {player:homes[0], homes, bots};
+}
+
+/* the lobby as a mini generated world: one small lagoon from two impacts, three ring mounds and a few rosettes, a
+   ring of highland around it and a scrap of the outer places at the edges, drawn in the world's own look. Still the
+   lobby: no hazards, no currents, letters gathered in clumps that refill, humans one per mound */
+const MINI_LOBBY = {size:0.4, settings:{lagoon:2500, impacts:2, ispread:0.5, mounds:3, rin:150, rim:44, door:70, rosettes:16,
+  craters:20, basins:0, chimneys:0, calderas:0, lava:0, rivers:0.4, spread:20, pockets:0}};
+function generateMiniLobby(s){
+  const sp = generateWorld(s, MINI_LOBBY);
+  lobby = true; flows = []; smokers = []; geysers = []; springs = []; LABELS.length = 0;
+  const c = world.centre, open = (x, y) => !solidAt(x, y) && !solidAt(x + 70, y) && !solidAt(x - 70, y) && !solidAt(x, y + 70) && !solidAt(x, y - 70);
+  /* clumps: one inside each mound, then open lagoon water around the middle */
+  lobbyClumps = world.mounds.map(m => ({x:m.x, y:m.y, r:Math.min(110, m.rin * 0.55)}));
+  for (let t = 0; t < 400 && lobbyClumps.length < 8; t++){
+    const a = rr(0, TAU), d = Math.sqrt(Math.random()) * c.RX * 0.85, x = c.x + Math.cos(a) * d, y = c.y + Math.sin(a) * d * 0.8;
+    if (open(x, y) && lobbyClumps.every(q => Math.hypot(q.x - x, q.y - y) > 360)) lobbyClumps.push({x, y, r:110});
+  }
+  LABELS.push({t:'LOBBY', x:c.x, y:Math.max(120, c.y - c.RY - 40)});
+  byType = CELLS.map(() => []);
+  for (let i = 0; i < grid.length; i++) if (!SOLID[grid[i]]) byType[grid[i]].push(i);
+  buildMinimap();
+  return sp;
 }
 
 /* ---------- queries ---------- */
@@ -580,7 +603,7 @@ function buildMinimap(){
 }
 /* the part of the map the minimap shows: the lobby's pool and a margin, or the whole world */
 function miniView(){
-  if (!lobby) return {x:0, y:0, w:W, h:H};
+  if (!lobby || world) return {x:0, y:0, w:W, h:H};
   const mw = (LOBBY.a + 350) * 2, mh = mw * H / W;
   return {x:LOBBY.x - mw / 2, y:LOBBY.y - mh / 2, w:mw, h:mh};
 }
