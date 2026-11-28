@@ -69,7 +69,7 @@ function generate(s, opt){
   if (opt && opt.world){ chunks.clear(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
   W = BASE_W; H = BASE_H; GW = W / CELL; GH = H / CELL; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
   grid = new Uint8Array(GW * GH).fill(K.OCEAN);
-  flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
+  shores.clear(); flows = []; pools = []; springs = []; smokers = []; geysers = []; rafts = []; craters = []; meteors = []; uvFlashes = []; LABELS.length = 0;
   melted = new Set(); chunks.clear(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3;
   lobby = !!(opt && opt.lobby); lobbyClumps = [];
   if (lobby) return generateLobby();
@@ -371,6 +371,7 @@ function update(dt, ev, heads){
 
 /* ---------- drawing: cached terrain chunks, plus what moves ---------- */
 const chunks = new Map(); let renderBudget = 0;
+const shores = new Map();   /* per chunk: the wall's edge as short segments with outward normals, for the ripples */
 function dirty(cx, cy){ chunks.delete(Math.floor(cx / CH) + ',' + Math.floor(cy / CH)); mini.dirty = true; }
 const hash = (a, b) => { let h = Math.imul(a, 374761393) + Math.imul(b, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
 /* the microscope look (lens.js) can draw the ground out of focus: each chunk is blurred once, when it is made.
@@ -503,7 +504,52 @@ function drawBase(g, camX, camY, vw, vh, t){
   g.fill(); g.globalAlpha = 1;
 }
 const seen = (x, y, pad, camX, camY, vw, vh) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
+/* the wall's edge in one chunk, by marching squares on a 16 px grid. Each crossing keeps the downhill direction there,
+   so a ripple can be drawn by pushing the whole edge outward. Built once per chunk, the first time it is seen */
+function shoreOf(kx, ky){
+  const key = kx + ',' + ky; let sh = shores.get(key); if (sh) return sh;
+  const WALL = window.WorldGen.WALL, S = CH * CELL, n = Math.round(S / 16), st = S / n, x0 = kx * S, y0 = ky * S, m = n + 1, E = new Float32Array(m * m), out = [];
+  for (let j = 0; j < m; j++) for (let i = 0; i < m; i++) E[j * m + i] = surf.elev(Math.min(W - 1, x0 + i * st), Math.min(H - 1, y0 + j * st));
+  const pt = (xa, ya, ea, xb, yb, eb) => {
+    const f = (WALL - ea) / (eb - ea), x = xa + (xb - xa) * f, y = ya + (yb - ya) * f;
+    const gx = surf.elev(x + 4, y) - surf.elev(x - 4, y), gy = surf.elev(x, y + 4) - surf.elev(x, y - 4), L = Math.hypot(gx, gy) || 1;
+    return [x, y, -gx / L, -gy / L];
+  };
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++){
+    const a = E[j * m + i], b = E[j * m + i + 1], c = E[(j + 1) * m + i + 1], d = E[(j + 1) * m + i];
+    const xa = x0 + i * st, ya = y0 + j * st, xb = xa + st, yb = ya + st, hits = [];
+    if ((a >= WALL) !== (b >= WALL)) hits.push(pt(xa, ya, a, xb, ya, b));
+    if ((b >= WALL) !== (c >= WALL)) hits.push(pt(xb, ya, b, xb, yb, c));
+    if ((c >= WALL) !== (d >= WALL)) hits.push(pt(xb, yb, c, xa, yb, d));
+    if ((d >= WALL) !== (a >= WALL)) hits.push(pt(xa, yb, d, xa, ya, a));
+    for (let k = 0; k + 1 < hits.length; k += 2) out.push(...hits[k], ...hits[k + 1]);
+  }
+  sh = new Float32Array(out); shores.set(key, sh); return sh;
+}
+/* water lapping at the walls: three faint outlines leave each wall edge, spread out and fade, so what cannot be
+   swum through stands out a little without being drawn brighter. Cheap: a few hundred short lines on screen */
+function drawRipples(g, camX, camY, vw, vh, t){
+  if (!world || !surf) return;
+  const S = CH * CELL, kx0 = Math.max(0, Math.floor((camX - 40) / S)), ky0 = Math.max(0, Math.floor((camY - 40) / S));
+  const kx1 = Math.min(Math.ceil(W / S) - 1, Math.floor((camX + vw + 40) / S)), ky1 = Math.min(Math.ceil(H / S) - 1, Math.floor((camY + vh + 40) / S));
+  const sets = [];
+  for (let ky = ky0; ky <= ky1; ky++) for (let kx = kx0; kx <= kx1; kx++){ const sh = shoreOf(kx, ky); if (sh.length) sets.push(sh); }
+  if (!sets.length) return;
+  g.lineWidth = 1.1; g.lineCap = 'round';
+  for (let r = 0; r < 3; r++){
+    const ph = (t * 0.22 + r / 3) % 1, a = Math.sin(Math.PI / 2 * Math.min(1, ph * 4)) * (1 - ph) * (1 - ph) * 0.32;
+    if (a < 0.01) continue;
+    const base = 3 + ph * 30;
+    g.strokeStyle = `rgba(190,220,235,${a.toFixed(3)})`; g.beginPath();
+    for (const sh of sets) for (let q = 0; q < sh.length; q += 8){
+      const w1 = base + 2.5 * Math.sin(t * 1.3 + sh[q] * 0.021 + sh[q + 1] * 0.017), w2 = base + 2.5 * Math.sin(t * 1.3 + sh[q + 4] * 0.021 + sh[q + 5] * 0.017);
+      g.moveTo(sh[q] + sh[q + 2] * w1, sh[q + 1] + sh[q + 3] * w1); g.lineTo(sh[q + 4] + sh[q + 6] * w2, sh[q + 5] + sh[q + 7] * w2);
+    }
+    g.stroke();
+  }
+}
 function drawOver(g, camX, camY, vw, vh, t){
+  drawRipples(g, camX, camY, vw, vh, t);
   /* currents: motes that wink into being somewhere along a stream, drift with it for a few seconds and fade away.
      Stateless: each mote's life is a function of the clock, so nothing is stored and every screen agrees closely enough */
   for (let fi = 0; fi < flows.length; fi++){

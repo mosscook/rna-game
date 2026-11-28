@@ -55,7 +55,7 @@ const DEFAULTS = {glyph:'dot', color:'base', backbone:'wire', lineW:0.5, helixBa
   autoSwim:true, autoTurn:0.9, weave:0.5, motion:'trail', turnRate:6, speed:200, undulate:3, drag:0.6,
   pairing:'recipes', looseGap:1.5, minStem:2, foldSpeed:6, shape:1, side:'alternate', sticky:false,
   illus:true, behave:true, repSpeed:18.5, detSize:4, memStyle:'chamber', memDiam:10, memSlope:0.8, memTurns:2.5, memLength:8.5, memTwist:1, memSqueeze:0.95,
-  cleaverSpikes:true, spikeLen:12, spikeSlope:2, spikeTwist:0,
+  cleaverSpikes:true, spikeLen:10.5, spikeLenB:8.5, spikeSlope:2, spikeTwist:0,
   twist:true, rollStep:120, spacing:0.7, depthShade:1, turbine:true, spin:0.7, pitch:80, sweep:0.7,
   particles:true, follow:false, zoom:1,
   cSpine:'#ffffff', cGoo:'#ffffff', cFn:'#7cf0ff', cA:'#3ddc97', cU:'#ff5a6e', cG:'#ffc93c', cC:'#4da3ff', cBg:'#04050a', v:3};
@@ -259,8 +259,9 @@ function partsFold(s, minStem){
 const isCleaver = m => !!m && (m.cleaver || (m.recipe && BODY(m.fn) === 'spikes'));
 function spikeIdx(m){ const L = m.end - m.start; return {tA:Math.round(L / 4), C:Math.round(L / 2), tB:Math.round(3 * L / 4), L}; }
 function spikeShape(m){
-  const {tA, C, tB, L} = spikeIdx(m), Lu = S.spikeLen, sl = S.spikeSlope;
-  const P = [[0, -1], [Lu, -0.5 + sl], [0, 0], [-Lu, 0.5 + sl], [0, 1]], K = [0, tA, C, tB, L], out = [];
+  const {tA, C, tB, L} = spikeIdx(m), Lu = S.spikeLen, Lb = S.spikeLenB == null ? Lu : S.spikeLenB, sl = S.spikeSlope;
+  /* the second spike (the one whose arm runs back to the spine) reads bigger, so it is drawn a little shorter */
+  const P = [[0, -1], [Lu, -0.5 + sl], [0, 0], [-Lb, 0.5 + sl], [0, 1]], K = [0, tA, C, tB, L], out = [];
   for (let seg = 0; seg < 4; seg++){
     const a = P[seg], b = P[seg + 1], k0 = K[seg], k1 = K[seg + 1];
     for (let k = k0; k < (seg === 3 ? k1 + 1 : k1); k++){ const f = (k - k0) / ((k1 - k0) || 1); out[k] = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; }
