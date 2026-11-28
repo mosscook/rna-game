@@ -623,13 +623,14 @@ function surface(world){
     return (Ef[n] * (1 - tx) + Ef[n + 1] * tx) * (1 - ty) + (Ef[n + FX] * (1 - tx) + Ef[n + FX + 1] * tx) * ty;
   }
   /* colour per grid cell from the one-hot place weights, blurred one cell so neighbouring places blend slightly */
-  const N = GX * GY, C = [new Float32Array(N), new Float32Array(N), new Float32Array(N)], WB = {};
+  const N = GX * GY, C = [new Float32Array(N), new Float32Array(N), new Float32Array(N)], CL = [new Float32Array(N), new Float32Array(N), new Float32Array(N)], WB = {};
   for (const id in world.weights){ const w = Float32Array.from(world.weights[id]); blur(w, GX, GY, 1); WB[id] = w; }
-  /* colours per place: PLACE_COL unless a map of {place: [r, g, b]} says otherwise (the game's look settings) */
-  function recolour(cols){
-    for (const a of C) a.fill(0);
-    for (const id in WB){ const w = WB[id], col = (cols && cols[id]) || PLACE_COL[id] || PLACE_COL.water;
-      for (let n = 0; n < N; n++) if (w[n]) for (let k = 0; k < 3; k++) C[k][n] += w[n] * col[k]; }
+  /* colours per place: PLACE_COL unless a map of {place: [r, g, b]} says otherwise (the game's look settings). lows,
+     if given, is each place's colour at the bottom of its layers (the top colour where it has none): colour2 gives both */
+  function recolour(cols, lows){
+    for (const a of C) a.fill(0); for (const a of CL) a.fill(0);
+    for (const id in WB){ const w = WB[id], col = (cols && cols[id]) || PLACE_COL[id] || PLACE_COL.water, lo = (lows && lows[id]) || col;
+      for (let n = 0; n < N; n++) if (w[n]) for (let k = 0; k < 3; k++){ C[k][n] += w[n] * col[k]; CL[k][n] += w[n] * lo[k]; } }
   }
   recolour();
   function colour(x, y, out){
@@ -638,7 +639,13 @@ function surface(world){
     for (let k = 0; k < 3; k++){ const a = C[k]; out[k] = (a[n] * (1 - tx) + a[n + 1] * tx) * (1 - ty) + (a[n + GX] * (1 - tx) + a[n + GX + 1] * tx) * ty; }
     return out;
   }
-  return {elev, colour, refresh, recolour, Ef, FX, FY};
+  function colour2(x, y, top, low){
+    let fx = x / RES - 0.5, fy = y / RES - 0.5; fx = fx < 0 ? 0 : fx > GX - 1.001 ? GX - 1.001 : fx; fy = fy < 0 ? 0 : fy > GY - 1.001 ? GY - 1.001 : fy;
+    const i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j, n = j * GX + i, w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+    for (let k = 0; k < 3; k++){ const a = C[k], b = CL[k];
+      top[k] = a[n] * w00 + a[n + 1] * w10 + a[n + GX] * w01 + a[n + GX + 1] * w11; low[k] = b[n] * w00 + b[n + 1] * w10 + b[n + GX] * w01 + b[n + GX + 1] * w11; }
+  }
+  return {elev, colour, colour2, refresh, recolour, Ef, FX, FY};
 }
 
 return {generate, texture, surface, TEXTURES, DEFAULTS, WALL, T, BRIGHT, SPEED, PLACE_COL, bandOf, speedOf, dsin, dcos};

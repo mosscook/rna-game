@@ -63,6 +63,7 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 | Line fade | How much the lines dim with depth |
 | Wall tint | The least brightness walls keep, so they read as solid |
 | Wall outline | How strongly the wall's edge (where swimming stops) is drawn: wider, full brightness and lifted toward white. Shown in both looks; 0 draws it like the other outlines. Default 1 (2 in the default Lines look) |
+| Hue shift | Each place's layers shade from its top colour (highest layer) to a bottom colour (deepest), part way at each step. The bottom is the top turned this many degrees round the colour wheel, unless the place has its own **Bottom colour** set. 0 = no shading |
 | Colours | The deep colour and each place's colour |
 
 Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default. Raise `LOOKS_V` at the same time, so looks saved on devices before then are replaced.

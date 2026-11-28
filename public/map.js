@@ -125,12 +125,30 @@ let world = null, surf = null, worldHash = 0;
    wall     0..1   the least brightness walls keep, so they read as solid even with no fill
    deep     [r,g,b] the colour of the black depths, and of the ground where fill is 0
    colours  {place: [r,g,b]} each place's colour (missing ones use worldgen's) */
-const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, wallLine:1, deep:[3, 5, 7], colours:{}};
+const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, wallLine:1, hueShift:0, deep:[3, 5, 7], colours:{}, coloursLow:{}};
+/* hue shifting: each place's layers run from its top colour (the highest layer) to a bottom colour (the deepest). The
+   bottom is the place's coloursLow entry if it has one, or else the top colour turned hueShift degrees round the wheel */
+function hueTurn([r, g, b], deg){
+  r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d || !deg) return [r * 255, g * 255, b * 255];
+  const s = d / (1 - Math.abs(2 * l - 1)); let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = ((h * 60 + deg) % 360 + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+  const [a, bb, cc] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [(a + m) * 255, (bb + m) * 255, (cc + m) * 255];
+}
+const PLACE_KEYS = () => Object.keys(window.WorldGen.PLACE_COL);
+function lowsOf(L){
+  const out = {}, base = window.WorldGen.PLACE_COL;
+  for (const id of PLACE_KEYS()){ const top = (L.colours && L.colours[id]) || base[id]; out[id] = (L.coloursLow && L.coloursLow[id]) || hueTurn(top, L.hueShift || 0); }
+  return out;
+}
+const shifting = L => !!(L.hueShift || (L.coloursLow && Object.keys(L.coloursLow).length));
 let look = Object.assign({}, LOOK_BASE);
 function setWorldLook(o){
-  const recol = o && o.colours && JSON.stringify(o.colours) !== JSON.stringify(look.colours);
+  const key = L => JSON.stringify([L.colours || {}, L.coloursLow || {}, L.hueShift || 0]), recol = key(Object.assign({}, LOOK_BASE, o || {})) !== key(look);
   look = Object.assign({}, LOOK_BASE, o || {});
-  if (recol && surf) surf.recolour(look.colours);
+  if (recol && surf) surf.recolour(look.colours, lowsOf(look));
   mini.dirty = true; chunks.clear();
 }
 const PLACE_NAME = {lagoon:'TIDE-POOL LAGOON', flats:'HIGHLANDS', island:'VOLCANIC ISLAND', chimneys:'WHITE CHIMNEYS', ice:'ICE VEINS', ridge:'OCEAN RIDGE'};
@@ -142,7 +160,7 @@ function generateWorld(s, o){
   melted = new Set(); tide = 1; clock = 0; iceT = 12; meteorT = rr(25, 40); uvT = 3; lobby = false; lobbyClumps = []; raftRoute = [];
   world = WG.generate(Object.assign({}, o.settings || {}, {seed:s, W, H, RES:25, scale:size}));
   if (o.texture){ const tx = WG.texture(world, {amp:(o.settings && o.settings.texture) ?? 1, aniso:(o.settings && o.settings.align) ?? 1}); tx.step(o.textureIters || 3000); tx.apply(); }
-  surf = WG.surface(world); if (Object.keys(look.colours).length) surf.recolour(look.colours);
+  surf = WG.surface(world); if (Object.keys(look.colours).length || shifting(look)) surf.recolour(look.colours, lowsOf(look));
   /* a fingerprint of the depth field: the room sends its own, so a browser can tell if it grew a different map */
   worldHash = 0; for (let n = 0; n < world.E.length; n++) worldHash = (worldHash + Math.round(world.E[n] * 1000) * (n % 997 + 1)) % 2147483647;
   const WALL = WG.WALL, G = world.GX, R = world.RES, idAt = (x, y) => world.PIDS[world.pid[Math.min(world.GY - 1, Math.floor(y / R)) * G + Math.min(G - 1, Math.floor(x / R))]];
@@ -438,7 +456,7 @@ function renderWorldChunk(kx, ky){
   /* drawn a little under screen resolution when filled (the bands are smooth curves); at full resolution with outlines */
   const R = softPx && softMode === 'low' ? 0.34 : Lk.line > 0 ? CR : 0.6, S = CH * CELL, pad = softPx ? Math.ceil(softPx * 4) : 0, n = Math.round((S + 2 * pad) * R), step = (S + 2 * pad) / n;
   const c = document.createElement('canvas'); c.width = c.height = n;
-  const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0];
+  const g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data, col = [0, 0, 0], low = [0, 0, 0], bc = [0, 0, 0], hs = shifting(Lk);
   const x0 = kx * S - pad, y0 = ky * S - pad, m = n + 1, ev = new Float32Array(m * m);
   for (let py = 0; py < m; py++) for (let px = 0; px < m; px++) ev[py * m + px] = surf.elev(x0 + (px + 0.5) * step, y0 + (py + 0.5) * step);
   const [d0, d1, d2] = Lk.deep, fill = Lk.fill, sp = Lk.depth, lineA = Lk.line, lw = Math.max(0.3, Lk.lineW) * 0.8, fade = Lk.lineFade, wallB = Lk.wall, wl = Lk.wallLine == null ? 1 : Lk.wallLine;
@@ -449,12 +467,14 @@ function renderWorldChunk(kx, ky){
     const i = py * m + px, e = ev[i], ex = ev[i + 1] - e, ey = ev[i + m] - e, grad = Math.sqrt(ex * ex + ey * ey) + 1e-6;
     let r = d0, gg = d1, b = d2;
     if (e >= T[6] - (lw + 1) * grad){
-      surf.colour(x, y, col);
+      /* each band's colour: the place's colour, or with hue shifting, part way from its bottom colour (band 6) to its top (band 0) */
+      if (hs) surf.colour2(x, y, col, low); else surf.colour(x, y, col);
+      const bandCol = k => { if (!hs) return col; const f = (6 - k) / 6; bc[0] = low[0] + (col[0] - low[0]) * f; bc[1] = low[1] + (col[1] - low[1]) * f; bc[2] = low[2] + (col[2] - low[2]) * f; return bc; };
       /* fill: each band from the deep up, its colour at its brightness, blended toward the deep colour by fill */
       if (fill > 0) for (let k = 6; k >= 0; k--){
         const a = (e - T[k]) / grad + 0.5; if (a <= 0) break;
-        const t = a > 1 ? 1 : a;
-        r += (d0 + (col[0] * bright[k] - d0) * fill - r) * t; gg += (d1 + (col[1] * bright[k] - d1) * fill - gg) * t; b += (d2 + (col[2] * bright[k] - d2) * fill - b) * t;
+        const t = a > 1 ? 1 : a, cc = bandCol(k);
+        r += (d0 + (cc[0] * bright[k] - d0) * fill - r) * t; gg += (d1 + (cc[1] * bright[k] - d1) * fill - gg) * t; b += (d2 + (cc[2] * bright[k] - d2) * fill - b) * t;
       }
       /* walls keep at least a dim tint of their place, so they still read as solid */
       if (wallB > 0 && wallB > fill * bright[0]){
@@ -464,8 +484,8 @@ function renderWorldChunk(kx, ky){
       /* outlines where each band starts */
       if (lineA > 0) for (let k = 6; k >= 1; k--){
         const a = (1 - Math.abs(e - T[k]) / (grad * lw)) * lineA; if (a <= 0) continue;
-        const mm = lineM[k], t = a > 1 ? 1 : a;
-        r += (col[0] * mm - r) * t; gg += (col[1] * mm - gg) * t; b += (col[2] * mm - b) * t;
+        const mm = lineM[k], t = a > 1 ? 1 : a, cc = bandCol(k);
+        r += (cc[0] * mm - r) * t; gg += (cc[1] * mm - gg) * t; b += (cc[2] * mm - b) * t;
       }
       /* the wall's edge, where swimming stops: wider, at full brightness and lifted toward white by wallLine, even in a
          filled look. At 0 it is drawn like the other outlines */
@@ -707,11 +727,13 @@ function buildMinimap(){
     const WG = window.WorldGen, T = WG.T, BR = WG.BRIGHT, Lk = look, col = [0, 0, 0], [d0, d1, d2] = Lk.deep;
     const CUT = [T[0], T[2], T[4], T[6]], REP = [0, 1.5, 3.5, 5.5];
     const brAt = r => { const k = Math.floor(r), f = r - k, v = BR[k] + (BR[Math.min(6, k + 1)] - BR[k]) * f; return Math.max(0, 1 - (1 - v) * Lk.depth); };
-    const band = new Uint8Array(GW * GH), cols = new Float32Array(GW * GH * 3);
+    const band = new Uint8Array(GW * GH), cols = new Float32Array(GW * GH * 3), low = [0, 0, 0], hs = shifting(Lk);
     for (let cy = 0; cy < GH; cy++) for (let cx = 0; cx < GW; cx++){
       const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL, e = surf.elev(x, y), n = cy * GW + cx;
       let b = 0; while (b < 4 && e < CUT[b]) b++; band[n] = b;
-      surf.colour(x, y, col); cols[n * 3] = col[0]; cols[n * 3 + 1] = col[1]; cols[n * 3 + 2] = col[2];
+      /* with hue shifting, the colour part way down for this coarse band */
+      if (hs){ surf.colour2(x, y, col, low); const f = (6 - REP[Math.min(3, b)]) / 6; for (let k = 0; k < 3; k++) col[k] = low[k] + (col[k] - low[k]) * f; } else surf.colour(x, y, col);
+      cols[n * 3] = col[0]; cols[n * 3 + 1] = col[1]; cols[n * 3 + 2] = col[2];
     }
     /* a little more fill than the big map, so the overview never goes all black; lines where the coarse band changes */
     const fill = Math.max(Lk.fill, 0.3), line = Math.max(Lk.line, Lk.fill < 0.5 ? 0.6 : 0);
@@ -814,7 +836,7 @@ function randomOf(types){
 return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, get worldLook(){ return JSON.parse(JSON.stringify(look)); }, setWorldLook, LOOK_BASE, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
-  get lavas(){ return lavas; }, lavaAt, lavaNear,
+  get lavas(){ return lavas; }, lavaAt, lavaNear, lowsOf,
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
   get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }, setSoft, renderChunk};
 };
