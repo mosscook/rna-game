@@ -593,25 +593,28 @@ function drawBase(g, camX, camY, vw, vh, t){
   renderBudget = 3;
   const S = CH * CELL, k0 = Math.max(0, Math.floor(camX / S)), k1 = Math.min(Math.ceil(W / S) - 1, Math.floor((camX + vw) / S));
   const j0 = Math.max(0, Math.floor(camY / S)), j1 = Math.min(Math.ceil(H / S) - 1, Math.floor((camY + vh) / S));
-  for (let ky = j0; ky <= j1; ky++) for (let kx = k0; kx <= k1; kx++){
-    const c = chunk(kx, ky);
-    if (c) g.drawImage(c.floor || c, kx * S, ky * S, S, S);
-    else { g.fillStyle = COL[K.OCEAN]; g.fillRect(kx * S, ky * S, S, S); }
-  }
-  /* parallax: each raised band drawn scaled about the middle of the view by 1 + height x gap, so it sits closer to the
-     eye: it slides faster than the floor as the view moves, and more so toward the edges. Its sides fill the climb from
-     the layer below in thin slices, like cliff faces */
-  const L = world ? parallaxLayers(look) : 0;
+  /* parallax, seen from the top (where the strands are): the top layer, the walls, is drawn as is; each layer below it
+     is drawn scaled about the middle of the view by 1 + depth x gap, and the floor (everything under the raised layers)
+     the most. So deeper ground slides faster than the walls as the view moves, more so toward the edges. A layer's
+     sides fill the step down to the layer below it in thin slices, like cliff faces */
+  const L = world ? parallaxLayers(look) : 0, P = L ? look.gap : 0, cx = camX + vw / 2, cy = camY + vh / 2;
+  const hOf = i => Math.pow(i + 1, look.gapCurve || 1), top = L ? hOf(L - 1) : 0;
+  const at = (depth, fn) => { const z = 1 + depth * P; if (z === 1) return fn(); g.save(); g.translate(cx, cy); g.scale(z, z); g.translate(-cx, -cy); fn(); g.restore(); };
+  at(top, () => {
+    for (let ky = j0; ky <= j1; ky++) for (let kx = k0; kx <= k1; kx++){
+      const c = chunk(kx, ky);
+      if (c) g.drawImage(c.floor || c, kx * S, ky * S, S, S);
+      else { g.fillStyle = COL[K.OCEAN]; g.fillRect(kx * S, ky * S, S, S); }
+    }
+  });
   if (L){
-    const P = look.gap, curve = look.gapCurve || 1, slices = Math.round(look.sides || 0), cx = camX + vw / 2, cy = camY + vh / 2;
-    const hOf = i => Math.pow(i + 1, curve), list = [];
+    const slices = Math.round(look.sides || 0), list = [];
     for (let ky = j0 - 1; ky <= j1 + 1; ky++) for (let kx = k0 - 1; kx <= k1 + 1; kx++){ const c = chunks.get(kx + ',' + ky); if (c && c.layers) list.push([kx, ky, c]); }
-    const at = (h, fn) => { const z = 1 + h * P; g.save(); g.translate(cx, cy); g.scale(z, z); g.translate(-cx, -cy); fn(); g.restore(); };
     for (let i = 0; i < L; i++){
-      const k = L - 1 - i, h1 = hOf(i), h0 = i ? hOf(i - 1) : 0;
-      for (let s2 = 0; s2 < slices; s2++){ const h = h0 + (h1 - h0) * s2 / slices;
-        at(h, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q && q.side) g.drawImage(q.side, kx * S + q.x, ky * S + q.y, q.w, q.h); } }); }
-      at(h1, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q) g.drawImage(q.c, kx * S + q.x, ky * S + q.y, q.w, q.h); } });
+      const k = L - 1 - i, d1 = top - hOf(i), d0 = i ? top - hOf(i - 1) : top;
+      for (let s2 = 0; s2 < slices; s2++){ const dd = d0 + (d1 - d0) * s2 / slices;
+        at(dd, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q && q.side) g.drawImage(q.side, kx * S + q.x, ky * S + q.y, q.w, q.h); } }); }
+      at(d1, () => { for (const [kx, ky, c] of list){ const q = c.layers[k]; if (q) g.drawImage(q.c, kx * S + q.x, ky * S + q.y, q.w, q.h); } });
     }
   }
   /* warm the cache just outside the view so swimming into new ground does not stutter */

@@ -1233,10 +1233,11 @@ const PLACE_IDS = ['lagoon', 'flats', 'island', 'chimneys', 'ice', 'ridge', 'wat
 const PLACE_LABEL = {lagoon:'lagoon', flats:'highlands', island:'island', chimneys:'chimneys', ice:'ice', ridge:'ridge', water:'channels', deep:'deep'};
 /* everyone's default: the Lines look as Moss tuned it (28 Nov 2026). Raise LOOKS_V when the defaults change, so looks
    saved on a device before then are replaced by the new ones (which look is chosen is kept) */
-const LOOKS_V = 3;
+const LOOKS_V = 4;
 const freshLooks = () => ({v:LOOKS_V, slot:'lines', filled:Object.assign({colours:{}}, LOOK_PRESETS.filled, {deep:[3, 5, 7]}),
   lines:{colours:{lagoon:[102, 97, 0], ice:[147, 227, 253], water:[150, 211, 95]}, fill:0.5, depth:1.1, line:0.9, lineW:1, lineFade:1, wall:0.4, wallLine:1.4, deep:[3, 5, 7],
-    coloursLow:{lagoon:[0, 55, 74], flats:[92, 7, 1], island:[86, 61, 0], ridge:[122, 74, 0], water:[122, 33, 158], ice:[58, 135, 254]}}});
+    coloursLow:{lagoon:[0, 55, 74], flats:[92, 7, 1], island:[86, 61, 0], ridge:[122, 74, 0], water:[122, 33, 158], ice:[58, 135, 254]},
+    gap:0.12, layers:4, gapCurve:0.5, sides:0, sideDark:0}});
 let looks = freshLooks();
 try {
   const v = JSON.parse(localStorage.getItem('soup2.looks') || 'null');
