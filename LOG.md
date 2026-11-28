@@ -63,3 +63,45 @@ Open PRs: #1 (cheaper Repairer), no review comments yet.
 
 - Combine the Self-cutter branch with PR #1. They cover the same damaged-structure situations, and together they might push the one-use part well under 0.7. Retest them together once #1 is merged or rejected.
 - The trait spread on the classic map swings 0.37 ↔ 0.51 between 40-round halves. It's the noisiest part, and it masks real one-use gains. Consider 80 rounds as the standard.
+
+## 2026-11-28 — run 3 (scheduled)
+
+**Baseline (main @ d44b507, seeds 1000–1119).** Main gained a dev-panel change since run 2, but the baseline replayed run 1's numbers exactly, so gameplay is unchanged. Rounds 1080–1119 were added this run, so files now cover 120 rounds per map.
+
+| | classic | world 0.7 |
+|---|---|---|
+| Balance index, 80 rounds / 120 rounds | 65.6 / 65.3 | 63.9 / 66.0 |
+| Winner / median score (120 rounds) | 16.8 / 7.8 | 18.9 / 9.5 |
+| Core shares, 120 rounds (Joiner, Cleaver, Membrane, Detector) | 48, 38, 35, 43% | 61, 44, 46, 46% |
+| Repairer / Self-cutter used by | 0.8% / 1.1% | 2.0% / 0.7% |
+| Ties for first | 12% | 14% |
+
+What stood out:
+
+- About half of Joiner holders never joined a fragment on the classic map (38% on the world). The 7-letter Joiner is the cheapest 3 points, and it gets a free +1 whenever the bot's next recipe folds right behind it. Bots don't count that +1 when they plan, so removing it would change scores but not what they build.
+- Cut-off pieces carry the victim's tail, which is often an armed Joiner. Whoever joins the piece gets a fresh armed Joiner, so Joiners spread through fights. 16–23% of strands end with two or more Joiners.
+- Letters are never scarce: about 285 are still on the map at the end of a round, close to the 280 target. Recycling letters (the Self-cutter's burst) is therefore worth almost nothing. A Self-cutter is only worth building to shed damage.
+
+Open PRs: #1 (cheaper Repairer). No review comments from Moss yet, so this run left the Repairer and Self-cutter alone to avoid stacking on it.
+
+**Ideas tried**
+
+1. **Fragments carry core segments instead of mostly Movers** (`spawnFrag`: the first segment is a Cleaver, Membrane or Detector, not 50% Mover). The aim was to raise the low core shares through joins. Result: **worse** on the classic map. Not opened, not pushed.
+   - Classic, 80 rounds: −7.5 (−12.5 to −1.8). World, 80 rounds: +3.0 (−2.7 to 6.8).
+   - Richer fragments made Joiners more worth building. The Joiner share went from 47% to 54% on the classic map, while Membrane stayed at 36%.
+   - Side effects on the world: winner 19.1 → 20.1, ties 15% → 8%, joins 5.7 → 6.3 per round.
+   - Lesson: anything that makes fragments more valuable raises the Joiner share.
+2. **Fragments break down after 60 s** (`FRAG_LIFE` Infinity → 60; they burst into letters like a smoker-broken fragment). This is the inverse of idea 1, and on both maps, unlike run 1's world-only cut. Result: **no clear change**. Not opened, not pushed (a one-line change in `public/sim.js`).
+   - 80 rounds: classic +1.8 (−2.9 to 6.7), world +2.0 (−2.7 to 7.2).
+   - 120 rounds: classic +3.2 (−1.9 to 7.4), world −1.6 (−5.1 to 3.2).
+   - The segment part improved on both maps: classic 0.25 → 0.16 (Joiner 48 → 45%), world 0.28 → 0.25. On the world that gain was eaten by home-area noise (homes 0.06 → 0.24).
+   - Joins per round fell 3.3 → 2.5 on the classic map and 5.6 → 4.7 on the world.
+   - Classic winner fell 16.8 → 16.0 and ties for first rose 12% → 18%. The world winner was unchanged, with ties at 21%.
+
+**New ideas for later runs**
+
+- Fragment supply moves the Joiner share in the expected direction, but only by a few points. Fewer or shorter-lived fragments alone won't fix Joiner dominance. The levers left are the recipe (7 letters, hard-coded in `rna-strand.js`) and the free fusion +1 from self-folds (which only changes scores).
+- Try stopping cut-off pieces from carrying an armed Joiner: the victim's Joiner bursts into letters when the piece floats free. That would slow Joiners spreading through fights without touching fragment supply.
+- Fragment decay plus PR #1 might combine well: decay helps the segment part, #1 helps the one-use part, and they touch different code.
+- The home spread on the world is now the noisiest part: 0.06 at baseline against 0.24 for a change that doesn't touch homes, at 120 rounds. Cutting its weight or using more rounds would make world comparisons fairer. That's a scoring change, so it's Moss's call, not the loop's.
+- Aggression still ranks last on both maps (6.3–6.4 average rank). It makes the most cuts, but the fragments go to Joiner holders. IDEAS #5 (make cutting pay the cutter) is still untried.
