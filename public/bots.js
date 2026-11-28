@@ -88,10 +88,11 @@ function tick(dt){
       const k = Math.min(1, dt * 5); v.vx += (vx - v.vx) * k; v.vy += (vy - v.vy) * k;
     } else { v.vx = 0; v.vy = 0; }
     v.x = h.x; v.y = h.y;
-    /* where this strand's Cleaver spikes (anything with tips) are right now */
+    /* where this strand's Cleaver spikes (anything with tips) are right now. A resting Cleaver (a stub after a cut)
+       can't strike, and anyone can see it, so it is no threat until it grows back */
     const tips = p._tips || (p._tips = []); tips.length = 0;
     if (p.alive) for (const f of G.working(p)){
-      const seg = SEG.get(f.fn); if (!seg || !seg.tips) continue;
+      const seg = SEG.get(f.fn); if (!seg || !seg.tips || (p.rest && p.rest.get(f.start) > 0)) continue;
       for (const j of seg.tips(f)){ const n = p.s.nodes[j]; if (n) tips.push(n); }
     }
     if (p.mind){
@@ -228,7 +229,8 @@ function bestLetter(p, info, need){
     if (t === K.FLATS && MAP.tide < 0.5) c *= 1 + 0.8 * tr.caution;
     if (t === K.UV && working(p).length > 2) c *= 1 + 0.6 * tr.caution;
     if (MAP.saltAt(q.x, q.y) && SEG.any(working(p), 'saltBreaks')) c *= 1.6;
-    if (info.threat){ const oh = info.threat.s.head; if (dist(oh.x, oh.y, q.x, q.y) < 300) c *= 1 + 1.5 * tr.caution; }
+    /* letters right by a threat: the cautious hang back a little (they flee outright when it comes for them) */
+    if (info.threat){ const oh = info.threat.s.head; if (dist(oh.x, oh.y, q.x, q.y) < 300) c *= 1 + 0.6 * tr.caution; }
     if (c < bc){ bc = c; best = q; }
   }
   if (best) best._claim = {p, t:T, d:bc};
