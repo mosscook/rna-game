@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/page.mjs && node test/registry.mjs && node test/mutations.mjs && node test/headless.mjs && node test/world.mjs",
+    "test": "node test/page.mjs && node test/registry.mjs && node test/mutations.mjs && node test/headless.mjs && node test/worldgen.mjs && node test/world.mjs",
     "test:room": "node test/room.mjs",
     "fingerprint": "node test/fingerprint.mjs",
     "balance": "node test/balance.mjs"

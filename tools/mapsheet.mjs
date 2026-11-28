@@ -44,9 +44,15 @@ const set = arg('set', null) ? JSON.parse(arg('set')) : {};
 const size = +arg('size', 0.7), W = Math.round(9200 * size / 100) * 100, H = Math.round(6000 * size / 100) * 100;
 const make = seed => { const t0 = performance.now(); const w = WG.generate(Object.assign({}, set, {seed, W, H, RES:25, scale:size})); w.ms = performance.now() - t0; return w; };
 const out = arg('out', 'mapsheet.png');
-if (arg('places', false)){
+if (arg('swatches', false)){
+  /* every pattern in the library on the same made-up dome, as the editor's pattern pickers show them */
+  const names = Object.keys(WG.PATTERNS).filter(k => k !== 'none'), n = 64, z = 4, P = n * z, cols = 6, IW = cols * (P + 4), IH = Math.ceil(names.length / cols) * (P + 4), img = new Uint8Array(IW * IH * 3);
+  names.forEach((name, k) => { const t0 = performance.now(), t = WG.patternSwatch(name, n, {scale:+arg('scale', 1), follow:+arg('follow', 0.7)}); console.log(name, (performance.now() - t0).toFixed(0), 'ms');
+    for (let j = 0; j < P; j++) for (let i = 0; i < P; i++){ const v = t[Math.floor(j / z) * n + Math.floor(i / z)], b = Math.floor(v * 3.999) / 3, o = ((Math.floor(k / cols) * (P + 4) + j) * IW + (k % cols) * (P + 4) + i) * 3; img[o] = 30 + 60 * b; img[o + 1] = 60 + 150 * b; img[o + 2] = 70 + 110 * b; } });
+  writeFileSync(out, png(IW, IH, img)); console.log('wrote', out, names.join(' '));
+} else if (arg('places', false)){
   /* a close-up of each place, centred on the middle of its biggest stretch */
-  const world = make(+arg('seed', 7)), ids = world.PIDS.filter(id => id !== 'water'), S = +arg('span', 1500), P = 500, IW = P * 3 + 8, IH = P * 2 + 4, img = new Uint8Array(IW * IH * 3);
+  const world = make(+arg('seed', 7)), ids = world.PIDS.filter(id => id !== 'water'), S = +arg('span', 1500), P = +arg('px', 500), IW = P * 3 + 8, IH = P * 2 + 4, img = new Uint8Array(IW * IH * 3);
   ids.forEach((id, k) => { const q = world.PIDS.indexOf(id); let bx = 0, by = 0, bn = -1;
     /* the cell with the most of its own place within 12 cells: a coarse search */
     for (let j = 6; j < world.GY; j += 6) for (let i = 6; i < world.GX; i += 6){ let c = 0; for (let b = -12; b <= 12; b += 3) for (let a = -12; a <= 12; a += 3){ const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < world.GX && jj < world.GY && world.pid[jj * world.GX + ii] === q) c++; } if (c > bn){ bn = c; bx = i; by = j; } }
