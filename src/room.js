@@ -253,10 +253,12 @@ export class GameRoom extends DurableObject {
     const sg = s.segments;
     const dm = []; for (const g of sg){ const st = s.structureAt(g.start); if (st && st.damaged) dm.push(g.start); }
     /* a segment's strength rides along only when it isn't exact (a recipe folded with one wrong letter) */
-    return {seq:s.seq, sg:sg.map(g => g.q != null && g.q !== 1 ? [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end, g.q] : [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end]), dm};
+    /* Cleavers growing back after a cut: [start, seconds left], sent once when the rest begins (the page counts down) */
+    const p = this.sim.players.find(q => q.s === s), rs = p && p.rest && p.rest.size ? [...p.rest].map(([a, l]) => [a, r1(l)]) : [];
+    return {seq:s.seq, sg:sg.map(g => g.q != null && g.q !== 1 ? [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end, g.q] : [g.fn ? FN.indexOf(g.fn) : -1, g.start, g.end]), dm, rs};
   }
   strandMsg(s, id, frag){ const q = this.strandParts(s); return frag ? {t:'q', id, f:1, ...q} : {t:'q', id, ...q}; }
-  qKey(q){ return q.seq + '|' + q.sg.join(';') + '|' + q.dm.join(','); }
+  qKey(q){ return q.seq + '|' + q.sg.join(';') + '|' + q.dm.join(',') + '|' + q.rs.map(r => r[0]).join(','); }
 
   /* after each step: roster and strand shapes that changed go to everyone */
   sendChanges(){

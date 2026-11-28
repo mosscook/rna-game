@@ -259,7 +259,8 @@ function partsFold(s, minStem){
 const isCleaver = m => !!m && (m.cleaver || (m.recipe && BODY(m.fn) === 'spikes'));
 function spikeIdx(m){ const L = m.end - m.start; return {tA:Math.round(L / 4), C:Math.round(L / 2), tB:Math.round(3 * L / 4), L}; }
 function spikeShape(m){
-  const {tA, C, tB, L} = spikeIdx(m), Lu = S.spikeLen, Lb = S.spikeLenB == null ? Lu : S.spikeLenB, sl = S.spikeSlope;
+  /* rest: 1 just after a cut (shrunk to a quarter), easing back to 0 as it regrows */
+  const g = 1 - 0.75 * Math.min(1, Math.max(0, m.rest || 0)), {tA, C, tB, L} = spikeIdx(m), Lu = S.spikeLen * g, Lb = (S.spikeLenB == null ? S.spikeLen : S.spikeLenB) * g, sl = S.spikeSlope * g;
   /* the second spike (the one whose arm runs back to the spine) reads bigger, so it is drawn a little shorter */
   const P = [[0, -1], [Lu, -0.5 + sl], [0, 0], [-Lb, 0.5 + sl], [0, 1]], K = [0, tA, C, tB, L], out = [];
   for (let seg = 0; seg < 4; seg++){
@@ -1495,6 +1496,8 @@ function makeStrand(stage, opts){
     /* the structure at a letter index: {fn (null for junk arms), start, end, damaged}, or null for a loose letter */
     structureAt(i){ const st = structAt(i); return st ? {fn:isFn(st) ? st.fn : null, start:st.start, end:st.end, damaged:rangeDamaged(st)} : null; },
     /* damage the structure at a letter index; returns its name, or null if there is nothing there to damage */
+    /* a Cleaver resting after a cut: r from 1 (just cut, shrunk) to 0 (grown back) */
+    setRest(i, r){ for (const m of fold.mods) if (m.start <= i + 2 && m.end >= i && isCleaver(m)){ m.rest = r; return; } },
     damageAt(i){
       const st = structAt(i); if (!st || rangeDamaged(st)) return null;
       for (let k = st.start; k <= st.end; k++) dmg[k] = true;

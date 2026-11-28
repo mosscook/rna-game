@@ -80,7 +80,7 @@ function create(opts){
   /* a fresh strand with one Mover (a new player, or a human carried into the next round) */
   function birth(p, x, y){
     if (p.s) p.s.remove();
-    Object.assign(p, {alive:true, dead:0, inv:2, tx:x, ty:y, top:0, jcd:0, rcd:0, fling:null, iceT:0, ai:{t:rnd(0, 0.5), mode:'forage', modeT:0},
+    Object.assign(p, {alive:true, dead:0, inv:2, tx:x, ty:y, top:0, jcd:0, rcd:0, rest:new Map(), fling:null, iceT:0, ai:{t:rnd(0, 0.5), mode:'forage', modeT:0},
       /* this round's tallies, for the results screen */
       stats:{letters:0, folds:0, cuts:0, cutsTaken:0, hits:0, hitsTaken:0, joins:0, deaths:0}});
     p.s = stage.addStrand({seq:'', x, y, heading:rnd(0, TAU), onEvent:(t, d) => onStrandEvent(p, t, d), tint:hooks.tint(p.col, p.isBot)});
@@ -238,7 +238,7 @@ function create(opts){
     let x, y, tries = 0;
     do { x = rnd(400, W - 400); y = rnd(400, H - 400); tries++; } while (tries < 200 && (MAP.typeAt(x, y) !== MK.LAGOON && MAP.typeAt(x, y) !== MK.OCEAN || MAP.smokerAt(x, y, 400)));
     p.s.place(x, y, rnd(0, TAU)); giveMover(p); p.s.setOpacity(1); p.fling = null; p.ai.path = null;
-    p.alive = true; p.inv = 2.5; p.tx = x; p.ty = y;
+    p.alive = true; p.inv = 2.5; p.tx = x; p.ty = y; p.rest = new Map();
     if (p.isBot) BOTS.onRespawn(p);
     dirty(p); tell(p, 'A new core formed with a single Mover. Start again from there.');
   }
@@ -275,8 +275,8 @@ function create(opts){
       if (res && res.tail && res.tailNodes.length){ const p0 = res.tailNodes[0], p1 = res.tailNodes[1] || p0, fr = mkFrag(res.tail, res.tailSegs, p0.x, p0.y, Math.atan2(p0.y - p1.y, p0.x - p1.x), b.id); if (fr) fr.fresh = SEG.CUT_FRESH; }
       const lost = res && res.tail ? res.tail.length : 0;
       dirty(b); tell(b, `${by.name} cut you at your ${name}.${lost ? ` ${lost} letters behind it floated free. Touch it with your tail in the next few seconds to take it back (anyone can).` : ''}`);
-      tell(by, `You cut ${b.name}'s ${name}.${lost ? ' What was behind it floated free.' : ''}`);
-      return true;
+      tell(by, `You cut ${b.name}'s ${name}.${lost ? ' What was behind it floated free.' : ''} Your Cleaver shrinks and grows back in ${SEG.CLEAVE_REST} seconds.`);
+      return 'cut';
     }
     BOTS.onHit(b, by, false);
     by.stats.hits++; b.stats.hitsTaken++;
@@ -352,6 +352,8 @@ function create(opts){
       if (p.inv > 0) p.inv -= dt;
       if (p.jcd > 0) p.jcd -= dt;
       if (p.rcd > 0) p.rcd -= dt;
+      /* Cleavers growing back after a cut */
+      if (p.rest && p.rest.size) for (const [st, left] of p.rest){ const l = left - dt; if (l <= 0){ p.rest.delete(st); p.s.setRest(st, 0); } else { p.rest.set(st, l); p.s.setRest(st, l / SEG.CLEAVE_REST); } }
       if (p.isBot) BOTS.think(p, dt);
       swim(p, dt);
       const h = p.s.head;
@@ -380,7 +382,7 @@ function create(opts){
     if (cutsOn) for (const a of players){
       if (!a.alive) continue;
       for (const f of working(a)){
-        const seg = SEG.get(f.fn); if (!seg || !seg.tips) continue;
+        const seg = SEG.get(f.fn); if (!seg || !seg.tips || (a.rest && a.rest.get(f.start) > 0)) continue;
         const R = HIT_R * SEG.strength(f);   /* a stronger Cleaver reaches further, a weak one has to touch closer */
         for (const tip of seg.tips(f)){
           const na = a.s.nodes[tip]; if (!na) continue;
@@ -391,9 +393,14 @@ function create(opts){
             for (let j = 0; j < nb.length; j++){
               if (Math.abs(nb[j].x - na.x) > R || Math.abs(nb[j].y - na.y) > R) continue;
               if (dist(na.x, na.y, nb[j].x, nb[j].y) > R) continue;
-              if (strike(b, j, a, oneHit)) break;
+              const hit = strike(b, j, a, oneHit);
+              /* a cut: this Cleaver shrinks and rests while it grows back */
+              if (hit === 'cut' && a.rest){ a.rest.set(f.start, SEG.CLEAVE_REST); a.s.setRest(f.start, 1); }
+              if (hit) break;
             }
+            if (a.rest && a.rest.get(f.start) > 0) break;
           }
+          if (a.rest && a.rest.get(f.start) > 0) break;
         }
       }
     }

@@ -71,6 +71,8 @@ function create(o){
       if (dm.has(g.start) && !st.damaged) s.damageAt(g.start);
       else if (!dm.has(g.start) && st.damaged) s.mendAt(g.start);
     }
+    /* Cleavers growing back: the page counts each one down from what the server said */
+    if (!m.f){ const was = t.rest || new Map(); t.rest = new Map((m.rs || []).map(([a, l]) => [a, was.has(a) ? was.get(a) : now() + l])); for (const a of was.keys()) if (!t.rest.has(a)) s.setRest(a, 0); }
     if (!m.f && m.id === meId) hooks.dirty();
   }
 
@@ -207,6 +209,7 @@ function create(o){
     if (offset == null) return;
     const rt = t + offset - DELAY;
     for (const mm of P.values()){
+      if (mm.rest && mm.rest.size) for (const [a, until] of mm.rest) mm.s.setRest(a, Math.max(0, until - now()) / window.SoupSegments.CLEAVE_REST);
       if (mm.id === meId){
         if (mm.alive && mm.shown && state === 'play'){
           if (mm.cx || mm.cy){ const k = Math.min(1, dt * 12), dx = mm.cx * k, dy = mm.cy * k, h = mm.s.head; mm.s.setHead(h.x + dx, h.y + dy); mm.cx -= dx; mm.cy -= dy; if (Math.abs(mm.cx) + Math.abs(mm.cy) < 0.05) mm.cx = mm.cy = 0; }
