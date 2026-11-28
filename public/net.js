@@ -209,7 +209,7 @@ function create(o){
     if (offset == null) return;
     const rt = t + offset - DELAY;
     for (const mm of P.values()){
-      if (mm.rest && mm.rest.size) for (const [a, until] of mm.rest) mm.s.setRest(a, Math.max(0, until - now()) / window.SoupSegments.CLEAVE_REST);
+      if (mm.rest && mm.rest.size) for (const [a, until] of mm.rest) mm.s.setRest(a, window.SoupSegments.restOf(until - now()));
       if (mm.id === meId){
         if (mm.alive && mm.shown && state === 'play'){
           if (mm.cx || mm.cy){ const k = Math.min(1, dt * 12), dx = mm.cx * k, dy = mm.cy * k, h = mm.s.head; mm.s.setHead(h.x + dx, h.y + dy); mm.cx -= dx; mm.cy -= dy; if (Math.abs(mm.cx) + Math.abs(mm.cy) < 0.05) mm.cx = mm.cy = 0; }

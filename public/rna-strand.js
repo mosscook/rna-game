@@ -259,8 +259,8 @@ function partsFold(s, minStem){
 const isCleaver = m => !!m && (m.cleaver || (m.recipe && BODY(m.fn) === 'spikes'));
 function spikeIdx(m){ const L = m.end - m.start; return {tA:Math.round(L / 4), C:Math.round(L / 2), tB:Math.round(3 * L / 4), L}; }
 function spikeShape(m){
-  /* rest: 1 just after a cut (shrunk to a quarter), easing back to 0 as it regrows */
-  const g = 1 - 0.75 * Math.min(1, Math.max(0, m.rest || 0)), {tA, C, tB, L} = spikeIdx(m), Lu = S.spikeLen * g, Lb = (S.spikeLenB == null ? S.spikeLen : S.spikeLenB) * g, sl = S.spikeSlope * g;
+  /* rest: 1 while resting after a cut (a stub, an eighth of its length), back to 0 as it regrows */
+  const g = 1 - 0.88 * Math.min(1, Math.max(0, m.rest || 0)), {tA, C, tB, L} = spikeIdx(m), Lu = S.spikeLen * g, Lb = (S.spikeLenB == null ? S.spikeLen : S.spikeLenB) * g, sl = S.spikeSlope * g;
   /* the second spike (the one whose arm runs back to the spine) reads bigger, so it is drawn a little shorter */
   const P = [[0, -1], [Lu, -0.5 + sl], [0, 0], [-Lb, 0.5 + sl], [0, 1]], K = [0, tA, C, tB, L], out = [];
   for (let seg = 0; seg < 4; seg++){

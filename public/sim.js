@@ -282,7 +282,7 @@ function create(opts){
       if (res && res.tail && res.tailNodes.length){ const p0 = res.tailNodes[0], p1 = res.tailNodes[1] || p0, fr = mkFrag(res.tail, res.tailSegs, p0.x, p0.y, Math.atan2(p0.y - p1.y, p0.x - p1.x), b.id); if (fr) fr.fresh = SEG.CUT_FRESH; }
       const lost = res && res.tail ? res.tail.length : 0;
       dirty(b); tell(b, `${by.name} cut you at your ${name}.${lost ? ` ${lost} letters behind it floated free. Touch it with your tail in the next few seconds to take it back (anyone can).` : ''}`);
-      tell(by, `You cut ${b.name}'s ${name}.${lost ? ' What was behind it floated free.' : ''} Your Cleaver shrinks and grows back in ${SEG.CLEAVE_REST} seconds.`);
+      tell(by, `You cut ${b.name}'s ${name}.${lost ? ' What was behind it floated free.' : ''} Your Cleaver shrinks to a stub for ${SEG.CLEAVE_REST} seconds.`);
       return 'cut';
     }
     BOTS.onHit(b, by, false);
@@ -360,7 +360,7 @@ function create(opts){
       if (p.jcd > 0) p.jcd -= dt;
       if (p.rcd > 0) p.rcd -= dt;
       /* Cleavers growing back after a cut */
-      if (p.rest && p.rest.size) for (const [st, left] of p.rest){ const l = left - dt; if (l <= 0){ p.rest.delete(st); p.s.setRest(st, 0); } else { p.rest.set(st, l); p.s.setRest(st, l / SEG.CLEAVE_REST); } }
+      if (p.rest && p.rest.size) for (const [st, left] of p.rest){ const l = left - dt; if (l <= 0){ p.rest.delete(st); p.s.setRest(st, 0); } else { p.rest.set(st, l); p.s.setRest(st, SEG.restOf(l)); } }
       if (p.isBot) BOTS.think(p, dt);
       swim(p, dt);
       const h = p.s.head;
