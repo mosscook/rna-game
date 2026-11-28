@@ -64,6 +64,8 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 | Wall tint | The least brightness walls keep, so they read as solid |
 | Wall outline | How strongly the wall's edge (where swimming stops) is drawn: wider, full brightness and lifted toward white. Shown in both looks; 0 draws it like the other outlines. Default 1 (2 in the default Lines look) |
 | Hue shift | Each place's layers shade from its top colour (highest layer) to a bottom colour (deepest), part way at each step. The bottom is the top turned this many degrees round the colour wheel, unless the place has its own **Bottom colour** set. 0 = no shading |
+| Layer gap | A dark seam just below where each layer starts, so the layers read as separate steps. 0 = none |
+| Brightness, Saturation | Applied to every layer's colour. 1 = as set |
 | Colours | The deep colour and each place's colour |
 
 Presets (filled, lines + depth, lines, dim fill) load starting values into the look being edited. **Copy settings** puts the look on the clipboard as JSON, which can be pasted into `freshLooks()` in `public/index.html` to make it everyone's default. Raise `LOOKS_V` at the same time, so looks saved on devices before then are replaced.
@@ -167,9 +169,11 @@ Moving hazards (the tide, geysers, shifting ice, meteorites, UV flashes, rafts) 
 
 ## Dev mode
 
-Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). The panel's sections fold open and closed (remembered per browser): **Map look**, **Segments**, **Microscope effects**, **Test tools** and **Reference**. At the top it shows the frame rate and how long each step and frame take, the counts of strands, letters and fragments, the seed and tide, and the ground type, zone, speed and letter richness under the pointer. **Ground map** (or B) tints every cell by its ground type, with a key.
+Add `?dev` to any link (`rna.game/?dev`, `rna.game/period3?dev`). The panel's sections fold open and closed (remembered per browser): **Map look**, **Segments**, **Terrain**, **Microscope effects**, **Test tools** and **Reference**. **Copy all settings** at the top puts every look, segment and terrain setting on the clipboard as one JSON, and **Paste settings** applies one. At the top it shows the frame rate and how long each step and frame take, the counts of strands, letters and fragments, the seed and tide, and the ground type, zone, speed and letter richness under the pointer. **Ground map** (or B) tints every cell by its ground type, with a key.
 
 **Segments** adjusts each segment type, one at a time (pick it from the row of buttons). Values are grouped into **What it does** (reach, rest and recovery times, bonuses, chances) and **How it looks** (spike lengths when active and resting, chamber size, goo). The Cleaver, for example, has strike reach, rest after a cut, regrow time, the cut-off piece's timings and reach, and spike length active and resting. A changed value is shown in bold with ↺ to put it back, and • marks a changed segment. Changes are remembered on that device. Game values only change single-player games, since a room runs the server's copy. **Copy settings** puts the changes on the clipboard as JSON, to be baked in as the new defaults (in each entry of `segments.js`, or `DEFAULTS` in `rna-strand.js` for the `S.` ones). To make a new value adjustable, add it to the entry's `tune` list (see the top of `segments.js`).
+
+**Terrain** (single player only; a room grows the server's map) adjusts the generated world: the lagoon and channels, mounds, borders between places, features and letter spread (the settings in `worldgen.js` `DEFAULTS`), and the reaction-diffusion texture, both for all places (strength, how much it follows the slope, growth steps) and for one place at a time (strength, pattern size, feed, kill, follows slope: `TEXTURES`). The texture is off by default because it adds a few seconds to building the map on every device. Changes take effect with **Rebuild map** (same seed, the round restarts) or **New seed**, and are remembered on that device.
 
 In single-player the panel also has test buttons: add any segment to your strand; make a fragment, meteorite or UV flash where the pointer is; damage your strand; run time 4× faster; skip a minute; end the round; clear the bots. In rooms it only shows information, so nobody can cheat in a shared game.
 
