@@ -72,6 +72,10 @@ The server and every browser build the same map from the seed: the generator use
 
 A strand's head picks up a letter within 19 px (more on clay). People's heads reach 45% further than that, about 28 px, without it showing: they steer with a finger or a mouse, and in a room their head is a few frames behind the server's. Bots keep the plain reach. Letters also push each other apart when they're closer than 34 px, so piles spread into a loose scatter you can swim through and pick from. That costs about 0.15 ms a step for 280 letters. The constants are `HUMAN_REACH`, `REPEL_R` and `REPEL_A` at the top of `public/sim.js`.
 
+## Cut-off pieces
+
+When a Cleaver cuts a strand, everything behind the cut floats free as a piece. For 3.5 seconds anyone's tail end that touches it takes it on, no Joiner needed: the strand that lost it (by turning back), the one that cut it, or anyone passing. It cannot be taken for the first 0.6 seconds, so it does not jump straight back onto the strand it came from. While it can be taken it pulses; then it fades for 0.8 seconds and breaks up into letters. A Joiner can also take it while it lasts. The times are `CUT_FRESH`, `CUT_ARM` and `CUT_FADE` in `segments.js`. Fragments that drift in on their own last until a Joiner takes them or a smoker breaks them up.
+
 ## Letters break down
 
 Free letters don't last forever, as real nucleotides break down in water (hydrolysis). Each lasts 80–150 s, and fades out over its last 2.5 s. A letter with more than 12 others in the 300 px around it ages faster (20% faster for each extra letter), so piles in places nobody visits thin out. Cold brine in the ice veins slows breakdown to 40%. Letters in a fresh meteorite crater aren't hurried by crowding until it cools. The map holds about 280 letters (120 in the lobby). Constants are at the top of `public/sim.js`: `LIFE`, `CROWD_FREE`, `CROWD_RATE`, `COLD_RATE`, `NUC_FADE`.

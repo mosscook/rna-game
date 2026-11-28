@@ -285,7 +285,7 @@ export class GameRoom extends DurableObject {
       return {p, x:h.x, y:h.y, e:[p.id, r1(h.x), r1(h.y), r3(s.heading), Math.round(s.moving * 100), Math.round(s.limp * 100),
         p.alive ? 1 : 0, r1(Math.max(0, p.inv || 0)), (p.ai && p.ai.label) || '']};
     });
-    const F = sim.frags.map(f => ({x:f.s.head.x, y:f.s.head.y, e:[f.id, r1(f.s.head.x), r1(f.s.head.y), r3(f.s.heading)]}));
+    const F = sim.frags.map(f => ({x:f.s.head.x, y:f.s.head.y, e:f.fresh != null ? [f.id, r1(f.s.head.x), r1(f.s.head.y), r3(f.s.heading), r1(Math.max(0, f.fresh)), f.fade == null ? -1 : r1(f.fade)] : [f.id, r1(f.s.head.x), r1(f.s.head.y), r3(f.s.heading)]}));
     const X = this.fxQ.splice(0).map(e => ({x:e.x, y:e.y, e:[Math.round(e.x), Math.round(e.y), e.col, Math.round(e.r || 26), e.dur || 0.5, e.flash ? 1 : 0]}));
     const near = (c, x, y, mx = 0) => Math.abs(x - c.cx) < VIEW_X + mx && Math.abs(y - c.cy) < VIEW_Y + mx;
     const every = n => this.k % n === 0;

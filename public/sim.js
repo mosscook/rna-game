@@ -80,7 +80,7 @@ function create(opts){
   /* a fresh strand with one Mover (a new player, or a human carried into the next round) */
   function birth(p, x, y){
     if (p.s) p.s.remove();
-    Object.assign(p, {alive:true, dead:0, inv:2, tx:x, ty:y, top:0, jcd:0, fling:null, iceT:0, ai:{t:rnd(0, 0.5), mode:'forage', modeT:0},
+    Object.assign(p, {alive:true, dead:0, inv:2, tx:x, ty:y, top:0, jcd:0, rcd:0, fling:null, iceT:0, ai:{t:rnd(0, 0.5), mode:'forage', modeT:0},
       /* this round's tallies, for the results screen */
       stats:{letters:0, folds:0, cuts:0, cutsTaken:0, hits:0, hitsTaken:0, joins:0, deaths:0}});
     p.s = stage.addStrand({seq:'', x, y, heading:rnd(0, TAU), onEvent:(t, d) => onStrandEvent(p, t, d), tint:hooks.tint(p.col, p.isBot)});
@@ -272,9 +272,9 @@ function create(opts){
       b.cutBy = by; const res = b.s.cutAt(tgt.start); b.cutBy = null;
       b.inv = 2.5;
       if (n) puff(n.x, n.y, 'warn', 40);
-      if (res && res.tail && res.tailNodes.length){ const p0 = res.tailNodes[0], p1 = res.tailNodes[1] || p0; mkFrag(res.tail, res.tailSegs, p0.x, p0.y, Math.atan2(p0.y - p1.y, p0.x - p1.x), b.id); }
+      if (res && res.tail && res.tailNodes.length){ const p0 = res.tailNodes[0], p1 = res.tailNodes[1] || p0, fr = mkFrag(res.tail, res.tailSegs, p0.x, p0.y, Math.atan2(p0.y - p1.y, p0.x - p1.x), b.id); if (fr) fr.fresh = SEG.CUT_FRESH; }
       const lost = res && res.tail ? res.tail.length : 0;
-      dirty(b); tell(b, `${by.name} cut you at your ${name}.${lost ? ` ${lost} letters behind it floated free as a fragment. A Joiner on your tail can take them back.` : ''}`);
+      dirty(b); tell(b, `${by.name} cut you at your ${name}.${lost ? ` ${lost} letters behind it floated free. Touch it with your tail in the next few seconds to take it back (anyone can).` : ''}`);
       tell(by, `You cut ${b.name}'s ${name}.${lost ? ' What was behind it floated free.' : ''}`);
       return true;
     }
@@ -351,6 +351,7 @@ function create(opts){
       if (!p.alive){ p.dead -= dt; if (p.dead <= 0) respawn(p); continue; }
       if (p.inv > 0) p.inv -= dt;
       if (p.jcd > 0) p.jcd -= dt;
+      if (p.rcd > 0) p.rcd -= dt;
       if (p.isBot) BOTS.think(p, dt);
       swim(p, dt);
       const h = p.s.head;
@@ -396,6 +397,18 @@ function create(opts){
         }
       }
     }
+    /* a freshly cut piece: anyone's tail end that touches it takes it on, no Joiner needed */
+    for (const f of frags.slice()){
+      if (!(f.fresh > 0) || SEG.CUT_FRESH - f.fresh < SEG.CUT_ARM) continue;
+      const p = players.find(q => q.alive && !(q.rcd > 0) && q.s.nodes.length && f.s.nodes.some(n => { const t = q.s.nodes[q.s.nodes.length - 1]; return dist(t.x, t.y, n.x, n.y) < 32; }));
+      if (!p) continue;
+      const t = p.s.nodes[p.s.nodes.length - 1], n0 = take(p, f); p.rcd = 1.5;
+      if (!n0) continue;
+      puff(t.x, t.y, p.col, 34); dirty(p);
+      const from = players.find(q => q.id === f.owner);
+      tell(p, from === p ? `You took your cut-off piece back: ${n0} letters.` : `Your tail took on ${from ? from.name + "'s" : 'a'} cut-off piece: ${n0} letters.`);
+      if (from && from !== p) tell(from, `${p.name} took your cut-off piece.`);
+    }
     /* Joiners (jaws): an armed Joiner on the tail takes in a fragment the tail touches */
     for (const p of players){
       if (!p.alive || p.jcd > 0 || !frags.length) continue;
@@ -403,20 +416,13 @@ function create(opts){
       const t = p.s.nodes[p.s.nodes.length - 1]; if (!t) continue;
       const reach = 30 * SEG.strength(jaws), f = frags.find(fr => fr.s.nodes.some(n => dist(t.x, t.y, n.x, n.y) < reach));
       if (!f) continue;
-      /* loose letters at the front of the fragment fall away so the Joiner can close right around its first structure */
-      const sg = f.s.segments.filter(g => g.fn), k0 = sg.length ? sg[0].start : f.s.length;
-      const add = f.s.seq.slice(k0), addSegs = f.s.segments.filter(g => g.start >= k0).map(g => ({fn:g.fn, start:g.start - k0, end:g.end - k0}));
-      for (let k = 0; k < k0 && k < f.s.length; k++){ const n = f.s.nodes[k]; if (n && Math.random() < 0.6) spawnNuc(n.x, n.y, f.s.seq[k]); }
-      removeFrag(f);
-      if (!add) continue;
-      /* loose letters behind the Joiner fall away, so what it grabs attaches right behind it */
-      const loose = p.s.tail.length; if (loose) p.s.shedFrom(p.s.length - loose);
-      p.s.appendFolded(add, addSegs); p.jcd = 4; p.stats.joins++;
+      const add = take(p, f); if (!add) continue;
+      p.jcd = 4; p.stats.joins++;
       puff(t.x, t.y, p.col, 34);
       if (!p.isBot){
         dirty(p);
         const fused = p.s.functions.find(u => u.jstate === 'fused');
-        tell(p, `Your ${jaws.fn} took in a fragment of ${add.length} letters.` + (fused ? ' It fused around what it grabbed: +1.' : ''));
+        tell(p, `Your ${jaws.fn} took in a fragment of ${add} letters.` + (fused ? ' It fused around what it grabbed: +1.' : ''));
       }
     }
     /* smoker heat, salt pools and ice veins, twice a second */
@@ -453,8 +459,27 @@ function create(opts){
     fragT -= dt;
     if (fragT <= 0){ fragT = FRAG_EVERY; if (frags.length < 4 && !lobby) spawnFrag(); }
   }
+  /* a strand takes a fragment onto its tail end. Loose letters at the front of the fragment fall away so it joins at its
+     first structure, and the taker's own loose tail letters fall away so it attaches right behind the last one.
+     Returns how many letters joined (0 if none) */
+  function take(p, f){
+    const sg = f.s.segments.filter(g => g.fn), k0 = sg.length ? sg[0].start : f.s.length;
+    const add = f.s.seq.slice(k0), addSegs = f.s.segments.filter(g => g.start >= k0).map(g => ({fn:g.fn, start:g.start - k0, end:g.end - k0}));
+    for (let k = 0; k < k0 && k < f.s.length; k++){ const n = f.s.nodes[k]; if (n && Math.random() < 0.6) spawnNuc(n.x, n.y, f.s.seq[k]); }
+    removeFrag(f);
+    if (!add) return 0;
+    const loose = p.s.tail.length; if (loose) p.s.shedFrom(p.s.length - loose);
+    p.s.appendFolded(add, addSegs);
+    return add.length;
+  }
   function stepFrag(f, dt){
     f.age += dt;
+    /* a freshly cut piece: pulses while it can be taken, then fades and breaks up */
+    if (f.fresh != null){
+      if (f.fade == null){ f.fresh -= dt; if (f.fresh <= 0) f.fade = SEG.CUT_FADE; }
+      else { f.fade -= dt; if (f.fade <= 0){ burstFrag(f); return; } }
+      f.s.setOpacity(SEG.fragAlpha(f.fresh, f.fade, f.age));
+    }
     f.turn += rnd(-0.6, 0.6) * dt; f.turn = clamp(f.turn, -0.5, 0.5);
     const h = f.s.head, prev = {x:h.x, y:h.y};
     f.s.step(dt, {turn:f.turn, speed:14});

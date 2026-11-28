@@ -149,5 +149,15 @@ function strengthNote(f){
   return q >= 0.8 ? `a mild mistake: ${pct} strength` : `a harmful mistake: ${pct} strength`;
 }
 
-return {LIST, names, get, bodyOf, swimOf, warnEarly, any, strength, strengthNote};
+/* a piece freshly cut off a strand: for CUT_FRESH seconds anyone's tail end can take it back on (after a short CUT_ARM,
+   so it does not jump straight back onto the strand it came from). It pulses while it can be taken, then fades for
+   CUT_FADE seconds and breaks up into letters. fresh = seconds left to take it, fade = seconds left of fading */
+const CUT_FRESH = 3.5, CUT_ARM = 0.6, CUT_FADE = 0.8;
+function fragAlpha(fresh, fade, t){
+  if (fade != null && fade >= 0) return 0.6 * Math.max(0, fade) / CUT_FADE;
+  if (fresh > 0) return 0.3 + 0.55 * (0.5 + 0.5 * Math.sin(t * 9));
+  return 0.7;
+}
+
+return {LIST, names, get, bodyOf, swimOf, warnEarly, any, strength, strengthNote, CUT_FRESH, CUT_ARM, CUT_FADE, fragAlpha};
 })();

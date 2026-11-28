@@ -121,7 +121,8 @@ function create(o){
       mm.last = st;
       if (id === meId) correct(mm, x, y, h, t);
     }
-    for (const [id, x, y, h] of m.F || []){ const f = fragMirror(id); f.buf.push({t:st, x, y, h, mv:0.2, lp:0}); if (f.buf.length > 30) f.buf.shift(); f.last = st; f.seen = t; }
+    /* a freshly cut piece also says how long it can still be taken and how far through fading it is */
+    for (const [id, x, y, h, fr, fd] of m.F || []){ const f = fragMirror(id); f.buf.push({t:st, x, y, h, mv:0.2, lp:0}); if (f.buf.length > 30) f.buf.shift(); f.last = st; f.seen = t; if (fr != null){ f.fresh = fr; f.fade = fd < 0 ? null : fd; f.cutAt = t; } }
     if (m.N){
       const [add, mov, del] = m.N;
       /* a fifth entry marks a letter that is breaking down: the page fades it out from the moment it hears */
@@ -224,6 +225,12 @@ function create(o){
       const p = sample(f.buf, rt);
       if (!f.shown){ f.s.place(p.x, p.y, p.h); f.shown = true; }
       f.s.follow(dt, p.x, p.y, p.h, {moving:0.2, limp:0});
+      if (f.fresh != null){
+        /* run the pulse and fade on here between snapshots, from what the last one said */
+        const SG = window.SoupSegments, el = now() - f.cutAt;
+        let fr = 0, fd = null; if (f.fade == null){ fr = f.fresh - el; if (fr <= 0) fd = SG.CUT_FADE + fr; } else fd = f.fade - el;
+        f.s.setOpacity(SG.fragAlpha(fr, fd, now()));
+      }
     }
   }
 
