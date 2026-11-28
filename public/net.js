@@ -25,7 +25,7 @@ function create(o){
   const hooks = Object.assign({say(){}, dirty(){}, end(){}, welcome(){}, status(){}, tint(){ return null; }, fx(){}, outdated(){}, host(){}}, o.hooks || {});
   /* o.version: the page's own version, or a function returning it (the page learns it from /version after loading) */
   const pageVersion = () => typeof o.version === 'function' ? o.version() : o.version;
-  let lobby = false, isHost = false, hostName = '', auto = false, autoEnd = 0, worldSize = 0, mapKind = 'classic';   /* the room's lobby before a game, and who can start it */
+  let lobby = false, isHost = false, hostName = '', auto = false, autoEnd = 0, worldSize = 0, mapKind = 'world';   /* the room's lobby before a game, and who can start it */
   let ws = null, meId = null, seed = null, state = 'connecting', tl = 0, tlAt = 0, offset = null, rtt = 0.08, url = '', name = '', watchOnly = false, watchId = null;
   let lastSend = 0, lastAim = null, retry = 0, closedByUs = false;
   /* a random token for this tab only (gone when the tab closes): lets a refresh or a dropped connection take your strand back */
@@ -105,7 +105,7 @@ function create(o){
       case 'e': state = 'over'; hooks.end(m.rows.map(([id, nm, col, sc, bot, st]) => ({p:P.get(id) || {id, name:nm, col, isBot:!!bot, s:{length:0}}, score:sc,
         stats:st ? {letters:st[0], folds:st[1], cuts:st[2], cutsTaken:st[3], hits:st[4], hitsTaken:st[5], joins:st[6], deaths:st[7]} : null}))); break;
       case 'pong': rtt = rtt * 0.8 + (now() - m.at) * 0.2; break;
-      case 'h': isHost = !!m.you; hostName = m.name || ''; auto = !!m.auto; mapKind = m.mp || 'classic'; autoEnd = m.in ? now() + m.in : 0; hooks.host(); break;
+      case 'h': isHost = !!m.you; hostName = m.name || ''; auto = !!m.auto; mapKind = m.mp || 'world'; autoEnd = m.in ? now() + m.in : 0; hooks.host(); break;
       case 'full': hooks.status(m.watch ? 'Too many people are watching this room.' : 'This room is full. Try another room name.'); closedByUs = true; break;
     }
   }

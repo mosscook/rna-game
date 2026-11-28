@@ -129,8 +129,8 @@ export class GameRoom extends DurableObject {
   startGame(){
     this.lobby = false; this.autoAt = 0;
     this.sim.setMinStrands(MIN_STRANDS);
-    /* the host picks the map in the lobby: the classic painted map, or a generated world (worldgen.js) */
-    this.sim.reset(null, this.mapKind === 'world' ? {world:{size:WORLD_SIZE}} : undefined);
+    /* the generated world (worldgen.js), unless the host picked the classic painted map in the lobby (a fallback) */
+    this.sim.reset(null, this.mapKind !== 'classic' ? {world:{size:WORLD_SIZE}} : undefined);
     this.sim.start();
     this.resync();
   }
@@ -163,7 +163,7 @@ export class GameRoom extends DurableObject {
       case 'd': if (p && this.sim.state === 'play') this.sim.drop(p); break;
       case 'ping': if (Number.isFinite(m.at)) this.send(c, {t:'pong', at:m.at}); break;
       case 'start': if (this.lobby && c === this.host()) this.startGame(); break;
-      case 'map': if (c === this.host() && this.lobby){ this.mapKind = m.v === 'world' ? 'world' : 'classic'; this.sendHost(true); } break;
+      case 'map': if (c === this.host() && this.lobby){ this.mapKind = m.v === 'classic' ? 'classic' : 'world'; this.sendHost(true); } break;
       case 'auto': if (c === this.host()){ this.auto = !!m.on; if (!this.auto) this.autoAt = 0; this.sendHost(true); } break;
       case 'v':
         /* spectate: follow another strand (its id), or null to go back to your own. Your own strand waits where it is. */
@@ -221,7 +221,7 @@ export class GameRoom extends DurableObject {
   hostMsg(c){
     const h = this.host();
     return {t:'h', you:c === h ? 1 : 0, name:h ? (h.p ? h.p.name : 'the watcher') : '', lb:this.lobby ? 1 : 0,
-      auto:this.auto ? 1 : 0, mp:this.mapKind === 'world' ? 'world' : 'classic', in:this.autoAt ? Math.max(0, Math.round((this.autoAt - Date.now()) / 100) / 10) : 0};
+      auto:this.auto ? 1 : 0, mp:this.mapKind === 'classic' ? 'classic' : 'world', in:this.autoAt ? Math.max(0, Math.round((this.autoAt - Date.now()) / 100) / 10) : 0};
   }
   humanCount(){ return this.sim.players.filter(p => !p.isBot).length; }
   freeColor(){

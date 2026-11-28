@@ -35,11 +35,13 @@ A last card covers what the lesson didn't show: scoring, the other segments, bot
 
 A room opens in a lobby: a small walled pool with clumps of letters that keep refilling, and no bots, hazards, fragments, cuts or clock. Players can practise collecting and folding while everyone arrives. The host, whoever has been in the room longest (a Spectate tab counts, so a teacher at the projector can host), sees **Start game**; everyone else sees who they are waiting for. Start moves everyone to a fresh map with fresh strands, and bots fill the empty seats. After the results screen the room goes back to the lobby for the host to start the next round, unless the host ticked **Auto-start next rounds**: then the lobby counts down 10 seconds and starts by itself (the host can still start sooner). The minimap shows just the pool while in the lobby. If the host leaves, whoever has been there next longest takes over.
 
-## Generated world (test)
+## The map
 
-A new map is on its way: a world grown from a seed by `public/worldgen.js`, tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a central lagoon with ring mounds and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. It is 0.7 of the classic map across, about half the area.
+The map is a world grown from a seed by `public/worldgen.js`, and tuned in the terrain lab (`/lab/terrain.html`). Meteor impacts make a central lagoon, with ring mounds inside it and craggy highlands around it. Further out are deep channels, craters, volcanoes (big ones with deep calderas), lava channels, hydrothermal chimneys and streams. Depth sets swim speed: walls stop you, the shallows are slow, and the black depths are a little fast. The world is 0.7 of the classic map across, about half the area.
 
-To try it, the host ticks **New map (test)** in the lobby, or opens the room with `?map=world`. Solo play also takes `?map=world`. The classic map stays the default. The world's places reuse the classic ground types:
+**Fallback:** the old painted map is still there. In a room, the host ticks **Classic map** in the lobby, or opens the room with `?map=classic`. Solo play takes `?map=classic` too. Use it if the world runs slowly on a device.
+
+The world's places reuse the classic map's ground types:
 
 | World place | Plays as |
 |---|---|

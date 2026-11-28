@@ -301,7 +301,7 @@ kbd{font:700 10px/1 var(--font-mono);border:1px solid currentColor;border-radius
     <button class="btn sm" type="button" id="bPause" aria-pressed="false" aria-label="Pause" title="Pause (P)">&#10073;&#10073;</button>
   </div>
 
-  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><label class="auto" id="mapWrap" title="Try the new generated world: meteor-made lagoon, highlands, volcanoes, streams. Still being tuned"><input type="checkbox" id="mapBox"> New map (test)</label><button class="btn go" type="button" id="bStart">Start game</button></div>
+  <div class="lobbybar" id="lobbyBar" role="status" hidden><span id="lobbyText"></span><label class="auto" id="autoWrap" title="After each round, the lobby counts down 10 seconds and starts the next one"><input type="checkbox" id="autoBox"> Auto-start next rounds</label><label class="auto" id="mapWrap" title="Play the old painted map instead of the generated world, as a fallback (for example if a Chromebook runs slowly)"><input type="checkbox" id="mapBox"> Classic map</label><button class="btn go" type="button" id="bStart">Start game</button></div>
   <div class="coach" id="coach" role="status" aria-live="polite" hidden><span class="n" id="coachN"></span><div><b id="coachT"></b><p id="coachX"></p><p class="note" id="coachNote"></p><p class="tip" id="coachTip" hidden></p></div><button class="alt" type="button" id="coachSkip">Skip</button></div>
   <aside class="dev" id="dev" aria-label="Developer tools" hidden></aside>
   <div class="watch" id="watchBar" role="group" aria-label="Spectating" hidden>
@@ -346,8 +346,9 @@ const recipeLen = fn => RECIPES[fn].length + 4;
 /* ---------- the game runs in sim.js; this file draws it and handles the page ---------- */
 const MAP = window.SoupMap, MK = MAP.K, BOTS = window.SoupBots;
 let W = MAP.W, H = MAP.H;   /* a generated world can be smaller: refreshed every frame */
-/* ?map=world tries the generated world (worldgen.js): in solo play, and for a room's host, who can also pick it in the lobby */
-const WANT_WORLD = new URLSearchParams(location.search).get('map') === 'world';
+/* the generated world (worldgen.js) is the map; ?map=classic falls back to the old painted one, in solo play and for a
+   room's host (who can also tick Classic map in the lobby) */
+const WANT_CLASSIC = new URLSearchParams(location.search).get('map') === 'classic', WANT_WORLD = !WANT_CLASSIC;
 const zoneAt = (x, y) => MAP.zoneAt(x, y);
 /* the name of each place, shown at the top left (biomes.js) */
 const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
@@ -1095,8 +1096,8 @@ function renderLobby(){
   $('lobbyText').innerHTML = left ? `<b>Lobby</b> · ${here} · next round starts in <b>${left}</b>`
     : net.isHost ? `<b>Lobby</b> · ${here} · practise, then start when everyone is ready` : `<b>Lobby</b> · ${here} · waiting for <b>${net.hostName}</b> to start`;
   $('bStart').hidden = !net.isHost; $('autoWrap').hidden = !net.isHost; $('autoBox').checked = net.auto;
-  $('mapWrap').hidden = !net.isHost; $('mapBox').checked = net.mapKind === 'world';
-  if (net.isHost && WANT_WORLD && !renderLobby.asked){ renderLobby.asked = true; if (net.mapKind !== 'world') net.setMap('world'); }
+  $('mapWrap').hidden = !net.isHost; $('mapBox').checked = net.mapKind === 'classic';
+  if (net.isHost && WANT_CLASSIC && !renderLobby.asked){ renderLobby.asked = true; if (net.mapKind !== 'classic') net.setMap('classic'); }
   bar.classList.toggle('wait', !net.isHost);
 }
 function renderClock(){
@@ -1220,7 +1221,7 @@ const toggleLook = () => { if (!MAP.world) return; looks.slot = looks.slot === '
 $('bLook').addEventListener('click', toggleLook);
 const LOOK_SLIDERS = [['fill', 'Fill', 0, 1, 0.05], ['depth', 'Depth steps', 0, 1.5, 0.05], ['line', 'Outline', 0, 1, 0.05], ['lineW', 'Line width', 0.5, 3, 0.25], ['lineFade', 'Line fade', 0, 1, 0.05], ['wall', 'Wall tint', 0, 0.6, 0.02]];
 function lookPanel(){
-  return `<p class="note" id="lkNote" hidden>Only the generated world uses these: add <code>?map=world</code>.</p>`
+  return `<p class="note" id="lkNote" hidden>Only the generated world uses these; this is the classic map.</p>`
     + `<div class="row">${Object.entries(LOOK_SLOTS).map(([k, t]) => `<button class="btn" type="button" data-slot="${k}">${t}</button>`).join('')}<span class="note">editing this look · ◯ / O switches</span></div>`
     + `<div class="row">${Object.keys(LOOK_PRESETS).map(k => `<button class="btn" type="button" data-preset="${k}">${k}</button>`).join('')}</div>`
     + LOOK_SLIDERS.map(([k, t, a, b, st]) => `<label class="lk"><span>${t}</span><input type="range" data-look="${k}" min="${a}" max="${b}" step="${st}"><output data-out="${k}"></output></label>`).join('')
@@ -1254,7 +1255,7 @@ function wireLookPanel(){
 $('bRec').addEventListener('click', () => openPanel(true));
 $('bStart').addEventListener('click', () => { if (net && net.isHost) net.start(); });
 $('autoBox').addEventListener('change', e => { if (net && net.isHost) net.setAuto(e.target.checked); });
-$('mapBox').addEventListener('change', e => { if (net && net.isHost) net.setMap(e.target.checked ? 'world' : 'classic'); });
+$('mapBox').addEventListener('change', e => { if (net && net.isHost) net.setMap(e.target.checked ? 'classic' : 'world'); });
 $('bWatch').addEventListener('click', () => { if (watchId == null) cycle(1); else stopWatching(); });
 $('wPrev').addEventListener('click', () => { setTour(false); cycle(-1); });
 $('wNext').addEventListener('click', () => { setTour(false); cycle(1); });
