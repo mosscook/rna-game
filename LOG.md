@@ -105,3 +105,46 @@ Open PRs: #1 (cheaper Repairer). No review comments from Moss yet, so this run l
 - Fragment decay plus PR #1 might combine well: decay helps the segment part, #1 helps the one-use part, and they touch different code.
 - The home spread on the world is now the noisiest part: 0.06 at baseline against 0.24 for a change that doesn't touch homes, at 120 rounds. Cutting its weight or using more rounds would make world comparisons fairer. That's a scoring change, so it's Moss's call, not the loop's.
 - Aggression still ranks last on both maps (6.3–6.4 average rank). It makes the most cuts, but the fragments go to Joiner holders. IDEAS #5 (make cutting pay the cutter) is still untried.
+
+## 2026-11-28 — run 4 (scheduled)
+
+**Baseline (main @ 97acf46, world 0.7, seeds 1000–1079).** Main changed gameplay since run 3: Cleavers rest 10 s after a cut, freshly cut pieces can be taken back by anyone's tail for 3.5 s and then break up, neighbouring Membranes stack, active volcanoes, and only the higher ice mends. New baseline, world only (the classic map is retired).
+
+| | world 0.7, 80 rounds |
+|---|---|
+| Balance index | 67.4 (traits 0.32, homes 0.04, segments 0.25, one-use 0.92) |
+| Winner / median score | 20.2 / 11.3 |
+| Core shares (Joiner, Cleaver, Membrane, Detector) | 61, 46, 51, 47% |
+| Repairer / Self-cutter used by | 1.8% / 0.7% |
+| Ties for first | 11% |
+
+What stood out:
+
+- **Caution is now the losing trait**: 2% wins, average rank 6.0, against curiosity's 5.0. Aggression (5.7) is no longer last. Cautious bots fold the fewest structures (4.6 against 5.3–6.0) and hold the fewest letters (42 against 45–50). They flee 6.6% of the time (others 1–3%), yet take as many hits as anyone (1.7 per bot), so fleeing buys them nothing.
+- 43% of Joiner holders never joined a fragment. 24% of strands end with two or more Joiners.
+- The home part was unusually low at baseline (0.04). All three changes this run, none of which touch homes, came in at 0.17–0.22. That alone costs a candidate about 2 index points. Expect it to regress in later baselines.
+- **PR #1 on today's main is no clear change**: with main merged into it, −0.2 (−3.2 to 5.6). Repairer use went 1.8% → 4.9% as before, but the homes part swung 0.04 → 0.22. It cleared the rule on the older main (+3.9). Moss may want to re-check it before merging.
+
+Open PRs: #1 (cheaper Repairer), 10 commits behind main. No review comments from Moss.
+
+**Ideas tried**
+
+1. **Self-cutter sheds damage, stacked on #1** (run 2's branch, cherry-picked onto #1 with main merged in). Result: **no clear change**. Not opened. Branch `evolve/2026-11-28-self-cutter-on-repairer` was pushed.
+   - Against main: +2.7 (−0.6 to 8.4). Against #1 + main alone: +2.9 (−0.1 to 5.0).
+   - One-use part 0.92 → 0.75. Repairer 1.8% → 4.5%, Self-cutter 0.7% → 3.1%.
+   - Scores were unchanged: winner 19.9, median 11.0. Caution improved slightly (rank 6.0 → 5.8).
+   - Homes 0.04 → 0.17 ate most of the gain.
+2. **Bots value a Joiner's fragment more honestly** (`segments.js`, Joiner `plan`: the +1.2 gain bonus for a free fragment in sight → +0.3). Result: **no clear change**. Not opened. Branch `evolve/2026-11-28-joiner-honest-worth` was pushed.
+   - +2.1 (−2.1 to 8.8).
+   - Joiner share 61% → 56%, segment part 0.25 → 0.19, worth about +2.4 by itself.
+   - Median score fell 11.3 → 10.5 (−7%), winner 20.2 → 19.5. That's within the limits.
+   - Greed now ranks first (4.9) and curiosity fell back to 5.6. Homes 0.04 → 0.17 again.
+
+**New ideas for later runs**
+
+- **Combine the two branches above.** They touch different code (the Joiner's plan, and the Repairer and Self-cutter), and they move different parts: segments (about +2.4) and one-use (about +3.4). Together they might clear the rule. Branch from `evolve/2026-11-28-self-cutter-on-repairer` and cherry-pick 7a60863.
+- **Caution needs a payoff, or less wasted time.** Cautious bots flee more but get hit just as often. Two things to try:
+  - Bots read a resting Cleaver (a stub for 10 s after a cut) as harmless. Today it still counts in `_tips` for fear, flee, give-way and avoidance (`bots.js`, the tips loop). The effect is probably small, since cleavers rest about 5% of the time.
+  - Soften caution's give-way and threat-letter costs in `bestLetter`.
+- Bots ignore freshly cut pieces, which anyone's tail can take back for 3.5 s. A cutter swimming on, or a victim turning back, could grab them. That might be IDEAS #5's "make cutting pay" without new rules.
+- The home part is noisy enough to hide 2–3 point gains at 80 rounds. That's a scoring question for Moss, not the loop.
