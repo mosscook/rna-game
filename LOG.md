@@ -148,3 +148,33 @@ Open PRs: #1 (cheaper Repairer), 10 commits behind main. No review comments from
   - Soften caution's give-way and threat-letter costs in `bestLetter`.
 - Bots ignore freshly cut pieces, which anyone's tail can take back for 3.5 s. A cutter swimming on, or a victim turning back, could grab them. That might be IDEAS #5's "make cutting pay" without new rules.
 - The home part is noisy enough to hide 2–3 point gains at 80 rounds. That's a scoring question for Moss, not the loop.
+
+## 2026-11-28 — run 5 (scheduled)
+
+**Baseline (main @ 97acf46, world 0.7, seeds 1000–1079).** Main hasn't changed since run 4, and the baseline replayed it exactly: index 67.4 (traits 0.32, homes 0.04, segments 0.25, one-use 0.92). Winner / median 20.2 / 11.3. Caution still wins 2% (rank 6.0). Joiner on 61% of strands, Repairer 1.8%, Self-cutter 0.7%.
+
+Open PRs at start: #1 (cheaper Repairer). No review comments from Moss.
+
+**Ideas tried**
+
+1. **Joiner valued honestly + Self-cutter sheds damage, stacked on #1** (run 4's suggestion: cherry-pick 7a60863 onto `evolve/2026-11-28-self-cutter-on-repairer`). Result: **better**. PR: https://github.com/mosscook/rna-game/pull/2 (base `main`, so its diff includes #1 until #1 merges).
+   - Against main: +3.8 (0.4 to 10.5). Against the parent branch: +1.1 (−3.8 to 6.9). The parent against main, rerun: +2.7 (−0.6 to 8.4), as in run 4.
+   - Segments 0.25 → 0.21, one-use 0.92 → 0.67 (Repairer 5.4%, Self-cutter 4.6%). Joiner only 61 → 59%: with the one-use changes in, the Joiner tweak moves it less than alone (56%).
+   - Winner / median 19.4 / 10.9. Traits worsened 0.32 → 0.40 (aggression last at 6.0) and homes 0.04 → 0.18.
+2. **Bots ignore resting Cleavers, and cautious bots hang back less near threats** (`bots.js`: no spike tips while a Cleaver rests; letter cost near a threat `1 + 1.5 × caution` → `1 + 0.6 × caution`).
+   - On main alone: **no clear change**, +1.8 (−1.9 to 6.6). Caution rank 6.0 → 5.7, traits 0.32 → 0.20, median 11.3 → 10.7. Branch `evolve/2026-11-28-caution-reads-threats` was pushed.
+   - Stacked on #2: **better** against main, +5.6 (1.2 to 11.7). Against #2: +1.7 (−3.8 to 5.4). PR: https://github.com/mosscook/rna-game/pull/3 (base = #2's branch).
+   - Traits 0.40 → 0.21 against #2. Caution wins 5% → 10%. Homes 0.18 → 0.30 (ice-home bots 8.8). Ties for first 11% → 18%.
+
+**Notes**
+
+- Open evolve PRs are now a chain: #1 ← #2 ← #3. If Moss rejects #1, #2 and #3 need retesting without the Repairer.
+- Each 80-round run takes about 12 minutes alone and about 15 with two running side by side on this 2-CPU box. Running the parent and the candidate in parallel works.
+- No Workers Builds Preview URL so far (Preview URLs are disabled on the Cloudflare side).
+
+**New ideas for later runs**
+
+- **The homes part is now the biggest loser.** It was 0.04 at baseline, but every change since run 4 lands at 0.17–0.30. That's partly a lucky baseline, but in #3, ice-home and chimney bots average about 9, while island and lagoon average 10–10.4. Look at what ice-home bots do differently: the higher-ice-only mending moved their mending trips.
+- Aggression ranks last on #2 (6.0). It makes the most cuts (1.5), but scores the least. IDEAS #5 (make cutting pay the cutter) and grabbing freshly cut pieces (run 4) are still untried.
+- Ties for first rose to 18% on #3. Check whether the winners cap out by holding every kind.
+- Cautious bots still never cut (0.1 cuts). Their Membrane/Detector taste is the other lever if caution falls behind again.
