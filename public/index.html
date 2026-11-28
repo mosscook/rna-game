@@ -364,7 +364,7 @@ const zoneAt = (x, y) => MAP.zoneAt(x, y);
 /* the name of each place, shown at the top left (biomes.js) */
 const ZONE_TEXT = Object.fromEntries(Object.entries(window.SoupBiomes.ZONES).map(([k, z]) => [k, z.label]));
 const stage = RS.createStage($('sv'));
-stage.canvasOutline = true;   /* the goo's outline is drawn on the map canvas (drawOutlines), not as an SVG mask per strand */
+stage.canvasGoo = true;   /* the goo (fill and outline) is drawn on the map canvas (drawGoo), not in SVG */
 /* the microscope look: ?lens=vignette,bokeh,... picks effects (lens.js); ?lens=off for none */
 let lowOn = false;   /* low detail (see setLowDetail) */
 const LENS = window.SoupLens.create({pond:$('pond'), under:$('top'), MAP, low:() => lowOn});
@@ -947,29 +947,55 @@ function label(c, text, x, y, col, size){
   }
   c.drawImage(sp.c, x - sp.w / 2, y - sp.base, sp.w, sp.h);
 }
-/* ---------- the strands' goo outlines, on the map canvas ----------
-   Every visible strand's goo path (the same one the SVG body uses) is stroked wide in its colour on one shared layer,
-   then a slightly narrower stroke of the same path is erased, leaving the rim; the layer is pasted under the strands.
-   Two strokes per strand and one paste a frame, where an SVG mask per strand cost far more. Half resolution in low detail */
+/* ---------- the strands' goo, on the map canvas ----------
+   Fill: a wide translucent stroke along each covered run of the strand (with a Membrane's reach only, where a Membrane
+   reaches; drawn once more where two or three reach, so it is denser), straight onto the map canvas. Outline: every
+   visible strand's path stroked wide in its colour on one shared layer, then a slightly narrower stroke erased, leaving
+   the rim; the layer is pasted on top. Polylines through the nodes: cheaper than smooth curves, and the slight softness
+   hides the corners. Before this the goo was SVG, with a mask per strand for the outline */
 const olCan = document.createElement('canvas'), olCtx = olCan.getContext('2d');
 let OL_RES = 0.6;   /* the outline layer's resolution (a little soft, which reads well, and cheaper) */
 let defaultGoo = null;
-function drawOutlines(camX, camY, vw, vh){
+/* a polyline through nodes lo..hi (from the head when lo is 0), added to path q */
+function gooRun(q, s, lo, hi){
+  const n = s.nodes, h = s.head;
+  if (lo === 0){ q.moveTo(h.x, h.y); } else q.moveTo(n[lo].x, n[lo].y);
+  for (let i = lo; i <= hi; i++) q.lineTo(n[i].x, n[i].y);
+  if (hi <= lo) q.lineTo((lo === 0 ? h.x : n[lo].x) + 0.1, lo === 0 ? h.y : n[lo].y);
+}
+/* runs of letters where test(i) holds, as one path */
+function gooRuns(s, test){
+  const q = new Path2D(), n = s.nodes.length; let any = false;
+  for (let i = 0; i < n; i++){ if (!test(i)) continue; let j = i; while (j + 1 < n && test(j + 1)) j++; gooRun(q, s, i, j); any = true; i = j; }
+  return any ? q : null;
+}
+function wholePath(s){ const q = new Path2D(); if (s.nodes.length) gooRun(q, s, 0, s.nodes.length - 1); else { q.moveTo(s.head.x, s.head.y); q.lineTo(s.head.x + 0.1, s.head.y); } return q; }
+function drawGoo(camX, camY, vw, vh){
   const list = [];
-  for (const p of L.players) if (p.alive && p.s.visible && p.s.outline.on && p.s.outline.d) list.push(p.s);
-  for (const f of L.frags) if (f.s.visible && f.s.outline.on && f.s.outline.d) list.push(f.s);
+  for (const p of L.players) if (p.alive && p.s.visible) list.push(p.s);
+  for (const f of L.frags) if (f.s.visible) list.push(f.s);
   if (!list.length) return;
+  if (!defaultGoo) defaultGoo = getComputedStyle(document.documentElement).getPropertyValue('--goo').trim() || RS.S.cGoo || '#fff';
+  const whole = new Map(), pathOf = s => { let q = whole.get(s); if (!q){ q = wholePath(s); whole.set(s, q); } return q; };
+  /* the fill, straight onto the map canvas */
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const s of list){
+    const o = s.outline; if (!o.fill) continue;
+    ctx.strokeStyle = o.col || defaultGoo; ctx.lineWidth = o.inner; ctx.globalAlpha = Math.max(0, Math.min(1, o.op * o.alpha));
+    if (!o.mem){ ctx.stroke(pathOf(s)); continue; }
+    for (const q of [gooRuns(s, i => o.cov[i]), gooRuns(s, i => o.cnt[i] >= 2), gooRuns(s, i => o.cnt[i] >= 3)]) if (q) ctx.stroke(q);
+  }
+  ctx.restore();
+  /* the outline, on its own layer */
+  const out = list.filter(s => s.outline.on); if (!out.length) return;
   const r = isLow() ? 0.5 : OL_RES, w = Math.max(1, Math.round(cw * dpr * r)), h = Math.max(1, Math.round(ch * dpr * r));
   if (olCan.width !== w || olCan.height !== h){ olCan.width = w; olCan.height = h; }
-  if (!defaultGoo) defaultGoo = getComputedStyle(document.documentElement).getPropertyValue('--goo').trim() || RS.S.cGoo || '#fff';
   const k = w / vw, g = olCtx;
   g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.clearRect(0, 0, w, h);
   g.setTransform(k, 0, 0, k, -camX * k, -camY * k); g.lineCap = 'round'; g.lineJoin = 'round';
-  /* a polyline through the nodes: cheaper to stroke than the smooth curve, and the softness hides the corners */
-  const paths = list.map(s => { const q = new Path2D(), h = s.head, n = s.nodes; q.moveTo(h.x, h.y); for (let i = 0; i < n.length; i++) q.lineTo(n[i].x, n[i].y); if (!n.length) q.lineTo(h.x + 0.1, h.y); return q; });
-  list.forEach((s, i) => { const o = s.outline; g.globalAlpha = Math.max(0, Math.min(1, o.alpha)); g.strokeStyle = o.col || defaultGoo; g.lineWidth = o.w; g.stroke(paths[i]); });
+  for (const s of out){ const o = s.outline; g.globalAlpha = Math.max(0, Math.min(1, o.alpha)); g.strokeStyle = o.col || defaultGoo; g.lineWidth = o.w; g.stroke(pathOf(s)); }
   g.globalCompositeOperation = 'destination-out'; g.globalAlpha = 1;
-  list.forEach((s, i) => { g.lineWidth = s.outline.inner; g.stroke(paths[i]); });
+  for (const s of out){ g.lineWidth = s.outline.inner; g.stroke(pathOf(s)); }
   g.globalCompositeOperation = 'source-over';
   ctx.drawImage(olCan, camX, camY, vw, vh);
 }
@@ -989,7 +1015,7 @@ function draw(t){
   /* the ground: cached chunks in view only, then the tide, currents, smokers, geysers, craters and rafts */
   MAP.drawBase(ctx, camX, camY, vw, vh, t);
   MAP.drawOver(ctx, camX, camY, vw, vh, still ? 0 : t);
-  drawOutlines(camX, camY, vw, vh);
+  drawGoo(camX, camY, vw, vh);
   if (devBiomes) drawBiomes(ctx, vw, vh);
   LENS.drawBack(ctx, camX, camY, cw, ch, scale, t, dpr);
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);

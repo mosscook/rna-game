@@ -41,7 +41,7 @@ A room opens in a lobby: a mini version of the generated world (a small two-impa
 - When frames are slow the game takes fewer, bigger steps (up to 1/30 s, the server's rate, at most three a frame), instead of catching up with many small ones.
 - The ground is drawn a few rows at a time within about 6 ms a frame, and around your strand while the start screen shows, so a round starts without gaps and swimming into new ground does not freeze. The cache is capped at about 40 MB.
 - The current at a point comes from a 25 px grid filled in as it is asked for; names over the map are drawn once and reused, and only on screen; letter text in strands exists only when letters are shown.
-- Strands' goo outlines are drawn on the map canvas (one shared layer, slightly soft at 0.6 resolution), not as an SVG mask per strand. Low detail keeps the outline (at half resolution) and drops the goo's fill.
+- Strands' goo (the translucent fill and the outline) is drawn on the map canvas, not in SVG: the fill as wide translucent strokes along the covered runs, the outline on one shared layer (slightly soft, at 0.6 resolution). In a 10-strand crowd at full detail this roughly doubled the frame rate. Low detail keeps the outline (at half resolution) and drops the fill. The start-screen logo and lessons still draw goo in SVG (`stage.canvasGoo` is off there).
 
 ## The map
 

@@ -509,10 +509,12 @@ function makeStrand(stage, opts){
   const groups = () => [E.gooFL, E.gooL, E.main, E.helperGoo, E.helpers];
   let visible = true;
   function tint(spine, goo){ for (const g of groups()){ if (spine) g.style.setProperty('--spine', spine); if (goo) g.style.setProperty('--goo', goo); } if (goo) outline.col = goo; }
-  /* with stage.canvasOutline the goo's outline is not SVG (a mask per strand, redrawn every frame, was the biggest
-     drawing cost): the page draws it on its canvas from this. d is the same path the SVG outline uses; w the outline's
-     full width and inner the body's, so the rim is the difference; col its colour, alpha the strand's opacity */
-  const outline = {on:false, d:'', w:0, inner:0, col:null, alpha:1};
+  /* with stage.canvasGoo the goo is not SVG (a mask per strand for the outline, redrawn every frame, was the biggest
+     drawing cost): the page draws it on its canvas from this. Outline: on, w its full width and inner the body's, so the
+     rim is the difference. Fill: fill (on or off), op its opacity; mem true when it only covers the Membranes' reach, given
+     per letter by cov (covered) and cnt (how many Membranes reach it, for the denser overlaps). col the colour, alpha the
+     strand's opacity, d the SVG path (kept for reference) */
+  const outline = {on:false, d:'', w:0, inner:0, col:null, alpha:1, fill:false, op:0.2, mem:false, cov:[], cnt:[]};
   if (opts.tint) tint(opts.tint.spine, opts.tint.goo);
 
   let seq = null, N = [], fold = {mods:[], partner:[], loopOf:[], role:[]}, pairs = new Map(), sticky = new Map();
@@ -1251,7 +1253,7 @@ function makeStrand(stage, opts){
       }
     }
     /* neighbouring Membranes overlap: where two or three reach, the goo is drawn again on top, so it is denser */
-    memCnt = cnt; memCov = cov; memAny = S.goo === 'memFill' && cov.some(Boolean);
+    memCnt = cnt; memCov = cov; outline.cov = cov; outline.cnt = cnt; memAny = S.goo === 'memFill' && cov.some(Boolean);
     gooCov = S.gooCover === 'all' ? new Array(n).fill(true) : cov;
     gooAny = S.goo !== 'off' && gooCov.some(Boolean);
   }
@@ -1278,9 +1280,10 @@ function makeStrand(stage, opts){
     const fillOn = S.goo === 'fill' || S.goo === 'both' || (S.goo === 'memFill' && memAny), outOn = S.goo === 'outline' || S.goo === 'both' || S.goo === 'memFill';
     for (const k of ['gooBody', 'gooBody2', 'gooBody3']){ $(k).setAttribute('stroke-width', f1(gw)); $(k).setAttribute('opacity', S.gooOpacity); }
     $('gooIn').setAttribute('stroke-width', f1(gw)); $('gooOut').setAttribute('stroke-width', f1(gw + edge * 2));
-    $('gooFL').style.display = fillOn && gooAny ? '' : 'none';
-    $('gooL').style.display = outOn && gooAny && !stage.canvasOutline ? '' : 'none';
+    $('gooFL').style.display = fillOn && gooAny && !stage.canvasGoo ? '' : 'none';
+    $('gooL').style.display = outOn && gooAny && !stage.canvasGoo ? '' : 'none';
     outline.on = outOn && gooAny; outline.w = gw + edge * 2; outline.inner = gw;
+    outline.fill = fillOn && gooAny; outline.op = S.gooOpacity; outline.mem = S.goo === 'memFill';
     labelEls.forEach((t, k) => { const m = fold.tags[k]; t.textContent = !m || !m.fn ? '' : m.fused ? 'Joiner fused +1' : m.bonus ? m.fn + ' +' + m.bonus : m.fn; });
     $('labels').style.display = S.labels || (S.pairing === 'parts' && S.decor) ? '' : 'none';
     $('hull').style.display = S.pairing === 'parts' && S.decor ? '' : 'none';
@@ -1362,7 +1365,7 @@ function makeStrand(stage, opts){
     if ($('labels').getAttribute('font-size') !== fs) $('labels').setAttribute('font-size', fs);
     const core = $('core'); core.setAttribute('cx', f1(head.x)); core.setAttribute('cy', f1(head.y));
     if (!n){ ['bb','bbRibbon','rungs','bands','decoFill','decoLine','hull','bbNick'].forEach(id => $(id).setAttribute('d', ''));
-      const hd = `M${f1(head.x)} ${f1(head.y)}h0.1`; outline.d = hd; if (!stage.canvasOutline){ $('gooOut').setAttribute('d', hd); $('gooIn').setAttribute('d', hd); } $('gooBody').setAttribute('d', ''); $('gooBody2').setAttribute('d', ''); $('gooBody3').setAttribute('d', ''); renderHelpers(); return; }
+      const hd = `M${f1(head.x)} ${f1(head.y)}h0.1`; outline.d = hd; if (!stage.canvasGoo){ $('gooOut').setAttribute('d', hd); $('gooIn').setAttribute('d', hd); } $('gooBody').setAttribute('d', ''); $('gooBody2').setAttribute('d', ''); $('gooBody3').setAttribute('d', ''); renderHelpers(); return; }
     let rung = '';
     const info = new Array(n), spk = new Array(n).fill(null);
     if (S.cleaverSpikes) for (const m of fold.mods) if (isCleaver(m)) for (let i = m.start; i <= m.end; i++) spk[i] = m;
@@ -1395,10 +1398,12 @@ function makeStrand(stage, opts){
       /* runs of covered letters, each drawn as one smooth stroke (the whole strand from the head when it all has goo) */
       const runs = cov => { let d = ''; for (let i = 0; i < n; i++){ if (!cov[i]) continue; let j = i; while (j + 1 < n && cov[j + 1]) j++; d += smoothPath((i === 0 ? [head] : []).concat(N.slice(i, j + 1))) || `M${f1(N[i].x)} ${f1(N[i].y)}h0.1`; i = j; } return d; };
       const outD = S.gooCover === 'all' ? path || `M${f1(head.x)} ${f1(head.y)}h0.1` : runs(gooCov);
-      outline.d = outD; if (!stage.canvasOutline){ $('gooOut').setAttribute('d', outD); $('gooIn').setAttribute('d', outD); }
-      $('gooBody').setAttribute('d', S.goo === 'memFill' ? runs(memCov) : outD);
-      $('gooBody2').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 2)) : '');
-      $('gooBody3').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 3)) : '');
+      outline.d = outD; if (!stage.canvasGoo){ $('gooOut').setAttribute('d', outD); $('gooIn').setAttribute('d', outD); }
+      if (!stage.canvasGoo){
+        $('gooBody').setAttribute('d', S.goo === 'memFill' ? runs(memCov) : outD);
+        $('gooBody2').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 2)) : '');
+        $('gooBody3').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 3)) : '');
+      }
     }
     $('bb').setAttribute('d', path); $('bbRibbon').setAttribute('d', S.backbone === 'ribbon' ? path : '');
     let nick = '';
