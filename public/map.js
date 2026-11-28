@@ -66,6 +66,7 @@ function generateLobby(){
 /* opt.lobby: build the lobby instead of the world */
 function generate(s, opt){
   seed = s >>> 0 || 1; world = null; surf = null;
+  cmask.clear();
   if (opt && opt.lobby && !opt.classic){ chunks.clear(); return generateMiniLobby(s >>> 0 || 1); }
   if (opt && opt.world){ chunks.clear(); return generateWorld(s >>> 0 || 1, opt.world === true ? {} : opt.world); }
   W = BASE_W; H = BASE_H; GW = W / CELL; GH = H / CELL; lat = new Float32Array(64 * 64); for (let i = 0; i < lat.length; i++) lat[i] = rng();
@@ -125,7 +126,7 @@ let world = null, surf = null, worldHash = 0;
    wall     0..1   the least brightness walls keep, so they read as solid even with no fill
    deep     [r,g,b] the colour of the black depths, and of the ground where fill is 0
    colours  {place: [r,g,b]} each place's colour (missing ones use worldgen's) */
-const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, wallLine:1, hueShift:0, gap:0, layers:3, gapCurve:1, sides:3, sideDark:0.6, bright:1, sat:1, deep:[3, 5, 7], colours:{}, coloursLow:{}};
+const LOOK_BASE = {fill:1, depth:1, line:0, lineW:1, lineFade:0.5, wall:0, wallLine:1, hueShift:0, gap:0, layers:3, gapCurve:1, sides:3, sideDark:0.6, bright:1, sat:1, shadows:0.6, shadowOff:22, caustics:0.35, causticSize:1, causticSpeed:1, deep:[3, 5, 7], colours:{}, coloursLow:{}};
 /* hue shifting: each place's layers run from its top colour (the highest layer) to a bottom colour (the deepest). The
    bottom is the place's coloursLow entry if it has one, or else the top colour turned hueShift degrees round the wheel */
 function hueTurn([r, g, b], deg){
@@ -589,6 +590,96 @@ function chunk(kx, ky){
   return c;
 }
 /* draw the ground under everything: only the chunks in view, at most a few new ones per frame */
+/* parallax depth of the ground at an elevation: how much smaller a camera above the water sees it (1 = at the surface) */
+function groundZ(e){
+  const L = world ? parallaxLayers(look) : 0; if (!L) return 1;
+  const hOf = i => Math.pow(i + 1, look.gapCurve || 1), top = hOf(L - 1), k = window.WorldGen.bandOf(e);
+  const d = k < L ? top - hOf(L - 1 - k) : top; return 1 / (1 + d * look.gap);
+}
+/* ---------- strand shadows: light from the upper left falls through the water, so each strand casts a soft shadow on
+   the ground below it, further off and fainter the deeper the ground (and, with parallax, where that ground is drawn) ---------- */
+function drawShadows(g, strands, camX, camY, vw, vh){
+  const k = look.shadows || 0; if (!world || k <= 0 || !surf) return;
+  const T = window.WorldGen.T, span = T[0] - T[6], off = look.shadowOff == null ? 22 : look.shadowOff, cx = camX + vw / 2, cy = camY + vh / 2, lx = 0.6, ly = 0.8;
+  g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const s of strands){
+    const N = s.nodes; if (!N || N.length < 2) continue;
+    const h = N[0]; if (h.x < camX - 200 || h.x > camX + vw + 200 || h.y < camY - 200 || h.y > camY + vh + 200) continue;
+    const pts = []; let dsum = 0;
+    for (let i = 0; i < N.length; i += 2){
+      const n = N[i], e = surf.elev(n.x, n.y), dep = Math.max(0, Math.min(1.2, (T[0] - e) / span)), z = groundZ(e), o = off * (0.35 + dep);
+      pts.push(cx + (n.x + lx * o - cx) * z, cy + (n.y + ly * o - cy) * z); dsum += dep;
+    }
+    const dep = dsum / (pts.length / 2), a = k * (0.8 - 0.35 * Math.min(1, dep));
+    g.beginPath(); g.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
+    g.strokeStyle = `rgba(0,0,0,${(a * 0.45).toFixed(3)})`; g.lineWidth = 30 + 12 * dep; g.stroke();
+    g.strokeStyle = `rgba(0,0,0,${(a * 0.7).toFixed(3)})`; g.lineWidth = 16 + 6 * dep; g.stroke();
+  }
+  g.restore();
+}
+/* ---------- caustics: the rippled light that a wavy surface throws on shallow ground. Two tiling textures of bright
+   wavy lines drift past each other; a soft mask per chunk keeps them to the shallow layers (fading out with depth, none
+   on the walls). Drawn each frame into a half-resolution canvas the size of the view, then added onto the ground ---------- */
+const cmask = new Map();
+let causticTex = null, causticCan = null;
+function makeCausticTex(){
+  /* the bright web of caustics looks like the borders of cells: a tiling Worley pattern (distance to the second-nearest
+     point minus the nearest), lightly warped, bright where the two are nearly equal */
+  const N = 256, mk = (seed, count) => {
+    const c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d'), img = g.createImageData(N, N);
+    const pts = []; for (let i = 0; i < count; i++) pts.push([hash(seed, i * 2) * N, hash(seed, i * 2 + 1) * N]);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++){
+      const wx = x + 6 * Math.sin(TAU * y / N * 2 + seed), wy = y + 6 * Math.sin(TAU * x / N * 3 + seed * 2);
+      let f1 = 1e9, f2 = 1e9;
+      for (const [px, py] of pts){ let dx = Math.abs(wx - px) % N, dy = Math.abs(wy - py) % N; if (dx > N / 2) dx = N - dx; if (dy > N / 2) dy = N - dy; const d = Math.sqrt(dx * dx + dy * dy); if (d < f1){ f2 = f1; f1 = d; } else if (d < f2) f2 = d; }
+      const l = Math.pow(Math.max(0, 1 - (f2 - f1) / 7), 2.2), o = (y * N + x) * 4;
+      img.data[o] = 205 * l; img.data[o + 1] = 238 * l; img.data[o + 2] = 255 * l; img.data[o + 3] = 255;
+    }
+    g.putImageData(img, 0, 0); return c;
+  };
+  return [mk(7, 22), mk(19, 30)];
+}
+function causticMask(kx, ky){
+  const key = kx + ',' + ky; let m = cmask.get(key); if (m !== undefined) return m;
+  const T = window.WorldGen.T, S = CH * CELL, n = 40, st = S / n, c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), img = g.createImageData(n, n); let any = false;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++){
+    const x = kx * S + (i + 0.5) * st, y = ky * S + (j + 0.5) * st, e = x < W && y < H ? surf.elev(x, y) : 0;
+    const a = e >= T[0] ? 0 : Math.max(0, Math.min(1, (e - T[3]) / (T[1] - T[3]))); if (a > 0) any = true;
+    img.data[(j * n + i) * 4 + 3] = 255 * a;
+  }
+  g.putImageData(img, 0, 0); m = any ? c : null; cmask.set(key, m);
+  if (cmask.size > 96) cmask.delete(cmask.keys().next().value);
+  return m;
+}
+function drawCaustics(g, camX, camY, vw, vh, t){
+  const k = look.caustics || 0; if (!world || k <= 0 || !surf) return;
+  if (!causticTex) causticTex = makeCausticTex();
+  const cr = 0.5, ow = Math.ceil(vw * cr), oh = Math.ceil(vh * cr);
+  if (!causticCan) causticCan = document.createElement('canvas');
+  if (causticCan.width !== ow || causticCan.height !== oh){ causticCan.width = ow; causticCan.height = oh; }
+  const c = causticCan.getContext('2d'), sz = look.causticSize || 1, sp = (look.causticSpeed == null ? 1 : look.causticSpeed) * t;
+  c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, ow, oh);
+  c.setTransform(cr, 0, 0, cr, -camX * cr, -camY * cr);
+  /* the two textures, at their own scales and drifting different ways */
+  const fillTex = (tex, s2, dx, dy) => { const p = c.createPattern(tex, 'repeat'); p.setTransform(new DOMMatrix().translate(dx, dy).scale(s2)); c.fillStyle = p; c.fillRect(camX, camY, vw, vh); };
+  c.globalAlpha = 0.75; fillTex(causticTex[0], 0.9 * sz, sp * 14, sp * 9);
+  c.globalCompositeOperation = 'lighter'; fillTex(causticTex[1], 1.15 * sz, -sp * 11, sp * 13); c.globalAlpha = 1;
+  /* keep only the shallows (drawn where the shallow layers are, with parallax) */
+  c.globalCompositeOperation = 'destination-in';
+  const S = CH * CELL, z = groundZ(window.WorldGen.T[2]), cx = camX + vw / 2, cy = camY + vh / 2, hw = vw / 2 / z, hh = vh / 2 / z;
+  /* the masks go on a transparent sheet first, so everything outside them is cleared too */
+  const mc = maskCanvas(ow, oh); const mg = mc.getContext('2d'); mg.setTransform(1, 0, 0, 1, 0, 0); mg.clearRect(0, 0, ow, oh);
+  mg.setTransform(cr, 0, 0, cr, -camX * cr, -camY * cr); if (z !== 1){ mg.translate(cx, cy); mg.scale(z, z); mg.translate(-cx, -cy); }
+  mg.imageSmoothingEnabled = true;
+  for (let ky = Math.max(0, Math.floor((cy - hh) / S)); ky <= Math.min(Math.ceil(H / S) - 1, Math.floor((cy + hh) / S)); ky++)
+    for (let kx = Math.max(0, Math.floor((cx - hw) / S)); kx <= Math.min(Math.ceil(W / S) - 1, Math.floor((cx + hw) / S)); kx++){ const m = causticMask(kx, ky); if (m) mg.drawImage(m, kx * S, ky * S, S, S); }
+  c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(mc, 0, 0);
+  c.globalCompositeOperation = 'source-over';
+  g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = k; g.drawImage(causticCan, camX, camY, vw, vh); g.restore();
+}
+let maskCan = null;
+const maskCanvas = (w, h) => { if (!maskCan) maskCan = document.createElement('canvas'); if (maskCan.width !== w || maskCan.height !== h){ maskCan.width = w; maskCan.height = h; } return maskCan; };
 function drawBase(g, camX, camY, vw, vh, t){
   renderBudget = 3;
   /* parallax, as a camera above the water sees it: the strands swim at the surface, and the ground lies below it, each
@@ -900,7 +991,7 @@ function randomOf(types){
 return {get W(){ return W; }, get H(){ return H; }, get world(){ return world; }, get surface(){ return surf; }, get worldHash(){ return world ? worldHash : 0; }, get worldLook(){ return JSON.parse(JSON.stringify(look)); }, setWorldLook, LOOK_BASE, CELL, K, CELLS, generate, update, typeAt, cellAt, solidAt, speedAt, flowAt, zoneAt, shelterAt, saltAt, smokerAt, lowTide, poolAt,
   spawnSpot, miniView, findPath, lineClear, nearestOf, randomOf, netState, applyNet, coast, typeCount:t => byType[t].length, drawBase, drawOver, drawWarnings, drawMinimap,
   setLabelDrawer:f => { label = f; },
-  get lavas(){ return lavas; }, lavaAt, lavaNear, lowsOf,
+  get lavas(){ return lavas; }, lavaAt, lavaNear, lowsOf, drawShadows, drawCaustics,
   get lobby(){ return lobby; }, get tide(){ return tide; }, get springs(){ return springs; }, get smokers(){ return smokers; }, get rafts(){ return rafts; }, get pools(){ return pools; },
   get meteors(){ return meteors; }, get uvFlashes(){ return uvFlashes; }, get craters(){ return craters; }, get geysers(){ return geysers; }, get chunkCount(){ return chunks.size; }, setSoft, renderChunk};
 };

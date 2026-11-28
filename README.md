@@ -68,6 +68,8 @@ The world has two looks, **Filled** and **Lines**, switched with the ◯ button 
 | Raised layers | How many of the top layers are lifted (1-4; the walls are always the top one) |
 | Height curve | Above 1 the top layers are spaced further apart than the deeper ones; below 1, closer together |
 | Cliff side slices, darkness | The lifted layers' sides, drawn as darkened copies stacked between one layer and the next like cliff faces. More slices look smoother and cost a little more each frame. Strands bump into the foot of a cliff, where the map really is |
+| Strand shadows, Shadow distance | Light from the upper left falls through the water, so each strand casts a soft shadow on the ground below it, further off the deeper the ground (and drawn where that ground is, with parallax). Shows most over bright, shallow ground |
+| Caustics, size, speed | The rippled web of light a wavy surface throws on shallow ground: two drifting cell patterns, kept to the shallow layers (fading with depth, none on walls) by a soft mask per chunk |
 | Brightness, Saturation | Applied to every layer's colour. 1 = as set |
 | Colours | The deep colour and each place's colour |
 

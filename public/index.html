@@ -946,6 +946,9 @@ function draw(t){
   const seen = (x, y, pad) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
   /* the ground: cached chunks in view only, then the tide, currents, smokers, geysers, craters and rafts */
   MAP.drawBase(ctx, camX, camY, vw, vh, t);
+  /* light through the water: caustics on the shallows, then the strands' shadows on the ground below them */
+  MAP.drawCaustics(ctx, camX, camY, vw, vh, still ? 0 : t);
+  MAP.drawShadows(ctx, L.players.filter(p => p.alive && p.shown !== false).map(p => p.s).concat(L.frags.map(f => f.s)), camX, camY, vw, vh);
   MAP.drawOver(ctx, camX, camY, vw, vh, still ? 0 : t);
   if (devBiomes) drawBiomes(ctx, vw, vh);
   LENS.drawBack(ctx, camX, camY, cw, ch, scale, t, dpr);
@@ -1253,7 +1256,7 @@ function applyLook(){
 }
 const toggleLook = () => { if (!MAP.world) return; looks.slot = looks.slot === 'filled' ? 'lines' : 'filled'; applyLook(); syncLookPanel(); };
 $('bLook').addEventListener('click', toggleLook);
-const LOOK_SLIDERS = [['fill', 'Fill', 0, 1, 0.05], ['depth', 'Depth steps', 0, 1.5, 0.05], ['line', 'Outline', 0, 1, 0.05], ['lineW', 'Line width', 0.5, 3, 0.25], ['lineFade', 'Line fade', 0, 1, 0.05], ['wall', 'Wall tint', 0, 0.6, 0.02], ['wallLine', 'Wall outline', 0, 2, 0.1], ['hueShift', 'Hue shift, top to bottom', -180, 180, 5], ['gap', 'Layer gap (parallax)', 0, 0.12, 0.005], ['layers', 'Raised layers', 1, 4, 1], ['gapCurve', 'Height curve (top layers taller)', 0.5, 2.5, 0.1], ['sides', 'Cliff side slices (0 = none)', 0, 6, 1], ['sideDark', 'Cliff side darkness', 0, 1, 0.05], ['bright', 'Brightness', 0.3, 2, 0.05], ['sat', 'Saturation', 0, 2, 0.05]];
+const LOOK_SLIDERS = [['fill', 'Fill', 0, 1, 0.05], ['depth', 'Depth steps', 0, 1.5, 0.05], ['line', 'Outline', 0, 1, 0.05], ['lineW', 'Line width', 0.5, 3, 0.25], ['lineFade', 'Line fade', 0, 1, 0.05], ['wall', 'Wall tint', 0, 0.6, 0.02], ['wallLine', 'Wall outline', 0, 2, 0.1], ['hueShift', 'Hue shift, top to bottom', -180, 180, 5], ['gap', 'Layer gap (parallax)', 0, 0.12, 0.005], ['layers', 'Raised layers', 1, 4, 1], ['gapCurve', 'Height curve (top layers taller)', 0.5, 2.5, 0.1], ['sides', 'Cliff side slices (0 = none)', 0, 6, 1], ['sideDark', 'Cliff side darkness', 0, 1, 0.05], ['shadows', 'Strand shadows', 0, 1, 0.05], ['shadowOff', 'Shadow distance', 0, 60, 1], ['caustics', 'Caustics (light on the shallows)', 0, 1, 0.05], ['causticSize', 'Caustic size', 0.4, 3, 0.1], ['causticSpeed', 'Caustic speed', 0, 3, 0.1], ['bright', 'Brightness', 0.3, 2, 0.05], ['sat', 'Saturation', 0, 2, 0.05]];
 function lookPanel(){
   return `<p class="note" id="lkNote" hidden>Only the generated world uses these; this is the classic map.</p>`
     + `<div class="row">${Object.entries(LOOK_SLOTS).map(([k, t]) => `<button class="btn" type="button" data-slot="${k}">${t}</button>`).join('')}<span class="note">editing this look · ◯ / O switches</span></div>`
