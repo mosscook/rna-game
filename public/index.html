@@ -969,6 +969,7 @@ function gooRuns(s, test){
   for (let i = 0; i < n; i++){ if (!test(i)) continue; let j = i; while (j + 1 < n && test(j + 1)) j++; gooRun(q, s, i, j); any = true; i = j; }
   return any ? q : null;
 }
+function outlinePath(s){ const o = s.outline; return o.all ? wholePath(s) : gooRuns(s, i => o.gcov[i]); }
 function wholePath(s){ const q = new Path2D(); if (s.nodes.length) gooRun(q, s, 0, s.nodes.length - 1); else { q.moveTo(s.head.x, s.head.y); q.lineTo(s.head.x + 0.1, s.head.y); } return q; }
 function drawGoo(camX, camY, vw, vh){
   const list = [];
@@ -993,11 +994,45 @@ function drawGoo(camX, camY, vw, vh){
   const k = w / vw, g = olCtx;
   g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.clearRect(0, 0, w, h);
   g.setTransform(k, 0, 0, k, -camX * k, -camY * k); g.lineCap = 'round'; g.lineJoin = 'round';
-  for (const s of out){ const o = s.outline; g.globalAlpha = Math.max(0, Math.min(1, o.alpha)); g.strokeStyle = o.col || defaultGoo; g.lineWidth = o.w; g.stroke(pathOf(s)); }
+  const op = new Map(out.map(s => [s, s.outline.all ? pathOf(s) : outlinePath(s)]));
+  for (const s of out){ const o = s.outline, q = op.get(s); if (!q) continue; g.globalAlpha = Math.max(0, Math.min(1, o.alpha)); g.strokeStyle = o.col || defaultGoo; g.lineWidth = o.w; g.stroke(q); }
   g.globalCompositeOperation = 'destination-out'; g.globalAlpha = 1;
-  for (const s of out){ g.lineWidth = s.outline.inner; g.stroke(pathOf(s)); }
+  for (const s of out){ const q = op.get(s); if (q){ g.lineWidth = s.outline.inner; g.stroke(q); } }
   g.globalCompositeOperation = 'source-over';
   ctx.drawImage(olCan, camX, camY, vw, vh);
+}
+/* ---------- the strands' backbones, on the map canvas (over the goo, under the SVG bases) ----------
+   The same smooth curve the SVG backbone drew (a quadratic through each node to the next midpoint), in each strand's
+   spine colour; damaged stretches get dashed gaps in the water colour, the nicks */
+let defaultSpine = null, voidCol = null;
+function smoothInto(q, pts, lo, hi){
+  q.moveTo(pts(lo).x, pts(lo).y);
+  for (let i = lo + 1; i < hi; i++){ const a = pts(i), b = pts(i + 1); q.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2); }
+  q.lineTo(pts(hi).x, pts(hi).y);
+}
+function drawSpines(){
+  if (!defaultSpine){ const cs = getComputedStyle(document.documentElement); defaultSpine = cs.getPropertyValue('--spine').trim() || RS.S.cSpine || '#fff'; voidCol = cs.getPropertyValue('--void').trim() || RS.S.cBg || '#04050a'; }
+  const list = [];
+  for (const p of L.players) if (p.alive && p.s.visible) list.push(p.s);
+  for (const f of L.frags) if (f.s.visible) list.push(f.s);
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const s of list){
+    const o = s.outline, N = s.nodes; if (!o.bb || !N.length) continue;
+    const pts = i => i === 0 ? s.head : N[i - 1], q = new Path2D(); smoothInto(q, pts, 0, N.length);
+    ctx.globalAlpha = Math.max(0, Math.min(1, o.alpha)); ctx.strokeStyle = o.spine || defaultSpine;
+    if (o.ribbon){ ctx.globalAlpha *= 0.3; ctx.lineWidth = o.lw / 0.6 * 4; ctx.stroke(q); ctx.globalAlpha = Math.max(0, Math.min(1, o.alpha)); }
+    ctx.lineWidth = o.lw; ctx.stroke(q);
+    /* nicks over damaged letters */
+    const dm = s.damaged; let nick = null;
+    for (let i = 0; i < N.length; i++){
+      if (!dm[i]) continue; let j = i; while (j + 1 < N.length && dm[j + 1]) j++;
+      const lo = Math.max(0, i - 1), hi = Math.min(N.length - 1, j + 1);
+      if (hi > lo){ nick = nick || new Path2D(); smoothInto(nick, k => N[k], lo, hi); }
+      i = j;
+    }
+    if (nick){ ctx.save(); ctx.lineCap = 'butt'; ctx.strokeStyle = voidCol; ctx.lineWidth = o.nickW; ctx.setLineDash(o.dash); ctx.stroke(nick); ctx.restore(); }
+  }
+  ctx.restore();
 }
 function draw(t){
   scale = clamp(Math.min(cw, ch) / 620, 0.75, 1.15);
@@ -1016,6 +1051,7 @@ function draw(t){
   MAP.drawBase(ctx, camX, camY, vw, vh, t);
   MAP.drawOver(ctx, camX, camY, vw, vh, still ? 0 : t);
   drawGoo(camX, camY, vw, vh);
+  drawSpines();
   if (devBiomes) drawBiomes(ctx, vw, vh);
   LENS.drawBack(ctx, camX, camY, cw, ch, scale, t, dpr);
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -camX * scale * dpr, -camY * scale * dpr);

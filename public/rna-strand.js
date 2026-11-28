@@ -508,13 +508,15 @@ function makeStrand(stage, opts){
   const $ = id => E[id];
   const groups = () => [E.gooFL, E.gooL, E.main, E.helperGoo, E.helpers];
   let visible = true;
-  function tint(spine, goo){ for (const g of groups()){ if (spine) g.style.setProperty('--spine', spine); if (goo) g.style.setProperty('--goo', goo); } if (goo) outline.col = goo; }
+  function tint(spine, goo){ for (const g of groups()){ if (spine) g.style.setProperty('--spine', spine); if (goo) g.style.setProperty('--goo', goo); } if (goo) outline.col = goo; if (spine) outline.spine = spine; }
   /* with stage.canvasGoo the goo is not SVG (a mask per strand for the outline, redrawn every frame, was the biggest
      drawing cost): the page draws it on its canvas from this. Outline: on, w its full width and inner the body's, so the
      rim is the difference. Fill: fill (on or off), op its opacity; mem true when it only covers the Membranes' reach, given
      per letter by cov (covered) and cnt (how many Membranes reach it, for the denser overlaps). col the colour, alpha the
      strand's opacity, d the SVG path (kept for reference) */
-  const outline = {on:false, d:'', w:0, inner:0, col:null, alpha:1, fill:false, op:0.2, mem:false, cov:[], cnt:[]};
+  /* and the backbone (also on the page's canvas with stage.canvasGoo): bb on or off, lw its width, ribbon a wide faint
+     band under it, spine its colour (null: the page's --spine), nickW and dash for the gaps over damaged letters */
+  const outline = {on:false, d:'', w:0, inner:0, col:null, alpha:1, fill:false, op:0.2, mem:false, cov:[], cnt:[], bb:true, lw:0.5, ribbon:false, spine:null, nickW:2, dash:[5, 12]};
   if (opts.tint) tint(opts.tint.spine, opts.tint.goo);
 
   let seq = null, N = [], fold = {mods:[], partner:[], loopOf:[], role:[]}, pairs = new Map(), sticky = new Map();
@@ -1255,7 +1257,7 @@ function makeStrand(stage, opts){
     /* neighbouring Membranes overlap: where two or three reach, the goo is drawn again on top, so it is denser */
     memCnt = cnt; memCov = cov; outline.cov = cov; outline.cnt = cnt; memAny = S.goo === 'memFill' && cov.some(Boolean);
     gooCov = S.gooCover === 'all' ? new Array(n).fill(true) : cov;
-    gooAny = S.goo !== 'off' && gooCov.some(Boolean);
+    gooAny = S.goo !== 'off' && gooCov.some(Boolean); outline.all = S.gooCover === 'all'; outline.gcov = gooCov;
   }
   function applyStyle(){
     styleDirty = false;
@@ -1266,8 +1268,11 @@ function makeStrand(stage, opts){
     letterEls.forEach((t, i) => { t.textContent = seq[i]; t.style.display = showLetters ? '' : 'none';
       t.setAttribute('fill', S.glyph === 'letter' ? colorOf(i) : 'var(--ink, #e8ecf4)'); t.setAttribute('font-size', f1(R * (S.glyph === 'letter' ? 1.35 : 1.05))); });
     $('bb').setAttribute('stroke-width', S.backbone === 'ribbon' ? S.lineW * 0.6 : S.lineW);
-    $('bb').style.display = S.backbone === 'none' ? 'none' : '';
-    $('bbRibbon').style.display = S.backbone === 'ribbon' ? '' : 'none';
+    $('bb').style.display = S.backbone === 'none' || stage.canvasGoo ? 'none' : '';
+    $('bbRibbon').style.display = S.backbone === 'ribbon' && !stage.canvasGoo ? '' : 'none';
+    $('bbNick').style.display = stage.canvasGoo ? 'none' : '';
+    outline.bb = S.backbone !== 'none'; outline.lw = S.backbone === 'ribbon' ? S.lineW * 0.6 : S.lineW; outline.ribbon = S.backbone === 'ribbon';
+    outline.nickW = Math.max(S.lineW, S.backbone === 'ribbon' ? S.lineW * 4 : S.lineW) + 1.6; outline.dash = [LB * 0.35, LB * 0.9];
     $('bbRibbon').setAttribute('stroke-width', S.lineW * 4);
     $('rungs').setAttribute('stroke-width', S.lineW * 0.7); $('rungs').style.display = S.rungs ? '' : 'none';
     $('decoLine').setAttribute('stroke-width', S.lineW); $('decoLine').style.display = $('decoFill').style.display = S.decor ? '' : 'none';
@@ -1393,8 +1398,9 @@ function makeStrand(stage, opts){
       }
     }
     $('rungs').setAttribute('d', rung);
-    const path = smoothPath([head].concat(N));
-    if (gooAny){
+    /* with the goo and backbone on the page's canvas, none of these path strings are needed */
+    const path = stage.canvasGoo ? '' : smoothPath([head].concat(N));
+    if (gooAny && !stage.canvasGoo){
       /* runs of covered letters, each drawn as one smooth stroke (the whole strand from the head when it all has goo) */
       const runs = cov => { let d = ''; for (let i = 0; i < n; i++){ if (!cov[i]) continue; let j = i; while (j + 1 < n && cov[j + 1]) j++; d += smoothPath((i === 0 ? [head] : []).concat(N.slice(i, j + 1))) || `M${f1(N[i].x)} ${f1(N[i].y)}h0.1`; i = j; } return d; };
       const outD = S.gooCover === 'all' ? path || `M${f1(head.x)} ${f1(head.y)}h0.1` : runs(gooCov);
@@ -1405,8 +1411,9 @@ function makeStrand(stage, opts){
         $('gooBody3').setAttribute('d', S.goo === 'memFill' ? runs(memCnt.map(c => c >= 3)) : '');
       }
     }
-    $('bb').setAttribute('d', path); $('bbRibbon').setAttribute('d', S.backbone === 'ribbon' ? path : '');
+    if (!stage.canvasGoo){ $('bb').setAttribute('d', path); $('bbRibbon').setAttribute('d', S.backbone === 'ribbon' ? path : ''); }
     let nick = '';
+    if (!stage.canvasGoo){
     for (let i = 0; i < n; i++){
       if (!dmg[i]) continue;
       let j = i; while (j + 1 < n && dmg[j + 1]) j++;
@@ -1416,6 +1423,7 @@ function makeStrand(stage, opts){
     $('bbNick').setAttribute('d', nick);
     $('bbNick').setAttribute('stroke-width', f1(Math.max(S.lineW, S.backbone === 'ribbon' ? S.lineW * 4 : S.lineW) + 1.6));
     $('bbNick').setAttribute('stroke-dasharray', `${f1(LB * 0.35)} ${f1(LB * 0.9)}`);
+    }
     renderHelpers();
     let bands = '';
     if (S.helixBand) for (const m of fold.mods){
@@ -1542,7 +1550,7 @@ function makeStrand(stage, opts){
     },
     tint,
     setOpacity(o){ for (const g of groups()) g.setAttribute('opacity', o); outline.alpha = +o; },
-    get outline(){ return outline; },
+    get outline(){ return outline; }, get damaged(){ return dmg; },
     move(dx, dy){ head.x += dx; head.y += dy; },
     /* put the head somewhere without dragging the body (walls push it back); the body follows its path as usual */
     setHead(x, y, h){ head.x = x; head.y = y; if (h != null) heading = h; const t0 = trail[0]; if (t0){ t0.x = x; t0.y = y; } },
