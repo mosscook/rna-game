@@ -83,6 +83,6 @@ Keep the game itself in mind as well. Students should still be able to build seg
 
 - Rounds are 3 minutes with 10 bots. At 80 rounds, changes of about ±4 index points show up. The trait and home parts are the noisiest: they swing by about ±0.15 between 40-round halves.
 - Every round uses a seed, and `score.mjs` pairs rounds by seed. Runs with the same seeds compare fairly even if they were played at different times.
-- Every `evolve/` branch gets a red **Workers Builds** check. That's Cloudflare's branch preview, which fails for this Worker. It isn't a test of your change. `npm test` is the check that matters. Don't comment asking Moss for the build log.
+- Every pushed `evolve/` branch gets a **Workers Builds** check: Cloudflare builds a Preview of it with its own empty rooms, apart from the live game. If Cloudflare's comment on the pull request shows a Preview URL, put it in the pull request's "How to try it" section. A failed Preview build is worth a line in the log, but `npm test` is the check that matters. Don't comment asking Moss for the build log.
 - `test/balance.mjs` reports personalities, skill, segments, growth, deaths, places, movement and depth bands. Read them for why an idea worked or didn't.
 - Bots are part of the game. A change that only helps because bots play badly, such as tuning around a bot bug, isn't a balance change. Report the bug in the log instead.
